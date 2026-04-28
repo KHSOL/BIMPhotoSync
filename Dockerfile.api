@@ -1,0 +1,36 @@
+FROM node:20-bookworm-slim AS build
+
+WORKDIR /app
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends openssl ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY package.json package-lock.json ./
+COPY apps/api/package.json apps/api/package.json
+COPY apps/ai-worker/package.json apps/ai-worker/package.json
+COPY apps/web/package.json apps/web/package.json
+COPY packages/shared/package.json packages/shared/package.json
+
+RUN npm ci
+
+COPY apps/api apps/api
+COPY packages/shared packages/shared
+
+RUN npm --workspace @bim-photo-sync/api run prisma:generate
+RUN npm --workspace @bim-photo-sync/api run build
+
+FROM node:20-bookworm-slim AS runner
+
+WORKDIR /app
+ENV NODE_ENV=production
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends openssl ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=build /app/package.json /app/package-lock.json ./
+COPY --from=build /app/node_modules node_modules
+COPY --from=build /app/apps/api apps/api
+
+CMD ["npm", "--workspace", "@bim-photo-sync/api", "run", "start"]

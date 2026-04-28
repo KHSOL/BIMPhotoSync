@@ -1,4 +1,6 @@
 node_modules
+.local
+supabase/.temp
 dist
 .next
 .expo

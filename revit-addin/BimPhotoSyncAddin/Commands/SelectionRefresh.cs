@@ -1,5 +1,6 @@
 using Autodesk.Revit.DB;
 using Autodesk.Revit.UI;
+using Autodesk.Revit.UI.Events;
 using BimPhotoSyncAddin.Services;
 
 namespace BimPhotoSyncAddin.Commands;
@@ -12,33 +13,38 @@ public static class SelectionRefresh
     {
         try
         {
-            UIDocument uidoc = args.GetDocument();
-            Document doc = uidoc.Document;
-            ElementId? selectedId = uidoc.Selection.GetElementIds().FirstOrDefault();
+            Document doc = args.GetDocument();
+            ElementId? selectedId = args.GetSelectedElements().FirstOrDefault();
             if (selectedId == null) return;
+            ValidationLog.Write($"SelectionChanged selected element: {selectedId.Value}");
+
             Element? element = doc.GetElement(selectedId);
-            if (element?.Category?.Id.IntegerValue != (int)BuiltInCategory.OST_Rooms) return;
+            if (element?.Category?.Id.Value != (long)BuiltInCategory.OST_Rooms) return;
 
             string? bimPhotoRoomId = element.LookupParameter(SharedParameterName)?.AsString();
             if (string.IsNullOrWhiteSpace(bimPhotoRoomId))
             {
-                BimPhotoSyncApp.Pane?.ShowMessage("선택한 Room에 BIM_PHOTO_ROOM_ID가 없습니다. Room Sync를 먼저 실행하세요.");
+                ValidationLog.Write("Selected Room has no BIM_PHOTO_ROOM_ID.");
+                BimPhotoSyncApp.Pane?.ShowMessage("Selected Room has no BIM_PHOTO_ROOM_ID. Run Room Sync first.");
                 return;
             }
 
+            ValidationLog.Write($"Fetching photos for selected Room BIM_PHOTO_ROOM_ID={bimPhotoRoomId}.");
             var response = await new ApiClient().GetRoomPhotosAsync(bimPhotoRoomId);
             if (response == null)
             {
-                BimPhotoSyncApp.Pane?.ShowMessage("사진 조회 결과가 없습니다.");
+                ValidationLog.Write("Photo lookup returned null.");
+                BimPhotoSyncApp.Pane?.ShowMessage("No photo lookup result.");
                 return;
             }
 
+            ValidationLog.Write($"Rendering {response.Photos.Count} photos for Room {response.Room.Bim_Photo_Room_Id}.");
             BimPhotoSyncApp.Pane?.Render(response);
         }
         catch (Exception ex)
         {
+            ValidationLog.Write($"Selection refresh failed: {ex}");
             BimPhotoSyncApp.Pane?.ShowMessage(ex.Message);
         }
     }
 }
-

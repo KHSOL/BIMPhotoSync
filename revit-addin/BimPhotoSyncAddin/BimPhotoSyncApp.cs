@@ -1,4 +1,5 @@
 using Autodesk.Revit.UI;
+using Autodesk.Revit.UI.Events;
 using BimPhotoSyncAddin.Commands;
 using BimPhotoSyncAddin.Panels;
 using BimPhotoSyncAddin.Services;
@@ -11,6 +12,7 @@ public class BimPhotoSyncApp : IExternalApplication
     public static PhotoDockPane? Pane { get; private set; }
     public static ExternalEvent? SyncRoomsEvent { get; private set; }
     public static SyncRoomsExternalHandler? SyncRoomsHandler { get; private set; }
+    private static bool _autoSyncRaised;
 
     public Result OnStartup(UIControlledApplication app)
     {
@@ -45,11 +47,25 @@ public class BimPhotoSyncApp : IExternalApplication
         SyncRoomsEvent = ExternalEvent.Create(SyncRoomsHandler);
 
         app.SelectionChanged += (_, args) => SelectionRefresh.Handle(args);
+        app.Idling += OnIdling;
         return Result.Succeeded;
     }
 
     public Result OnShutdown(UIControlledApplication app)
     {
         return Result.Succeeded;
+    }
+
+    private static void OnIdling(object? sender, IdlingEventArgs args)
+    {
+        if (_autoSyncRaised) return;
+        if (Environment.GetEnvironmentVariable("BIM_PHOTO_SYNC_AUTORUN_SYNC") != "1") return;
+        if (sender is not UIApplication uiapp || uiapp.ActiveUIDocument == null) return;
+        if (SyncRoomsHandler == null || SyncRoomsEvent == null) return;
+
+        _autoSyncRaised = true;
+        ValidationLog.Write("Auto-run sync raising ExternalEvent from Idling.");
+        SyncRoomsHandler.UiApplication = uiapp;
+        SyncRoomsEvent.Raise();
     }
 }

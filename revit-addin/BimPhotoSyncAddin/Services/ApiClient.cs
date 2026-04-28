@@ -1,5 +1,7 @@
+using System.Net.Http;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
+using System.Text.Json.Serialization;
 using BimPhotoSyncAddin.Models;
 
 namespace BimPhotoSyncAddin.Services;
@@ -17,16 +19,40 @@ public sealed class ApiClient
     {
         PrepareHeaders();
         var response = await _http.GetFromJsonAsync<ApiEnvelope<RevitRoomPhotoResponse>>(
-            $"{AddinSettings.ApiBaseUrl}/revit/rooms/{Uri.EscapeDataString(bimPhotoRoomId)}/photos");
+            $"{AddinSettings.ApiBaseUrl}/revit/rooms/{Uri.EscapeDataString(bimPhotoRoomId)}/photos")
+            .ConfigureAwait(false);
         return response?.Data;
+    }
+
+    public async Task<ConnectProjectResponse?> ConnectProjectAsync(ConnectProjectRequest request)
+    {
+        PrepareHeaders();
+        var response = await _http.PostAsJsonAsync($"{AddinSettings.ApiBaseUrl}/revit/connect", request)
+            .ConfigureAwait(false);
+        response.EnsureSuccessStatusCode();
+        return await response.Content.ReadFromJsonAsync<ConnectProjectResponse>().ConfigureAwait(false);
+    }
+
+    public async Task<byte[]?> GetPhotoBytesAsync(string photoUrl)
+    {
+        PrepareHeaders();
+        try
+        {
+            return await _http.GetByteArrayAsync(photoUrl).ConfigureAwait(false);
+        }
+        catch
+        {
+            return null;
+        }
     }
 
     public async Task<SyncRoomsResponse?> SyncRoomsAsync(SyncRoomsRequest request)
     {
         PrepareHeaders();
-        var response = await _http.PostAsJsonAsync($"{AddinSettings.ApiBaseUrl}/revit/sync-rooms", request);
+        var response = await _http.PostAsJsonAsync($"{AddinSettings.ApiBaseUrl}/revit/sync-rooms", request)
+            .ConfigureAwait(false);
         response.EnsureSuccessStatusCode();
-        return await response.Content.ReadFromJsonAsync<SyncRoomsResponse>();
+        return await response.Content.ReadFromJsonAsync<SyncRoomsResponse>().ConfigureAwait(false);
     }
 
     private void PrepareHeaders()
@@ -38,6 +64,6 @@ public sealed class ApiClient
         }
     }
 
-    private sealed record ApiEnvelope<T>(T Data);
+    private sealed record ApiEnvelope<T>([property: JsonPropertyName("data")] T Data);
 }
 
