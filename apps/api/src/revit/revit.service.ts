@@ -1,4 +1,4 @@
-import { ForbiddenException, Injectable, NotFoundException } from "@nestjs/common";
+import { Injectable, NotFoundException } from "@nestjs/common";
 import { randomUUID } from "crypto";
 import { ConfigService } from "@nestjs/config";
 import { PrismaService } from "../prisma/prisma.service";
@@ -15,8 +15,7 @@ export class RevitService {
   ) {}
 
   async connect(user: { sub: string; companyId: string; role: string }, dto: RevitConnectDto) {
-    if (!["BIM_MANAGER", "PROJECT_ADMIN", "COMPANY_ADMIN"].includes(user.role)) throw new ForbiddenException();
-    await this.projects.assertProjectAccess(user.sub, user.companyId, dto.project_id);
+    await this.projects.assertProjectRole(user, dto.project_id, ["BIM_MANAGER", "PROJECT_ADMIN", "COMPANY_ADMIN"]);
     const model = await this.prisma.revitModel.create({
       data: { projectId: dto.project_id, modelName: dto.model_name, documentGuid: dto.document_guid }
     });
@@ -24,8 +23,7 @@ export class RevitService {
   }
 
   async syncRooms(user: { sub: string; companyId: string; role: string }, dto: SyncRoomsDto) {
-    if (!["BIM_MANAGER", "PROJECT_ADMIN", "COMPANY_ADMIN"].includes(user.role)) throw new ForbiddenException();
-    await this.projects.assertProjectAccess(user.sub, user.companyId, dto.project_id);
+    await this.projects.assertProjectRole(user, dto.project_id, ["BIM_MANAGER", "PROJECT_ADMIN", "COMPANY_ADMIN"]);
     const mappings: Array<{
       room_id: string;
       bim_photo_room_id: string;

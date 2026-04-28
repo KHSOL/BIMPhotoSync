@@ -10,3 +10,13 @@ export class CreateProjectDto {
   code?: string;
 }
 
+export class JoinProjectDto {
+  @IsString()
+  @IsNotEmpty()
+  project_code!: string;
+
+  @IsString()
+  @IsNotEmpty()
+  access_key!: string;
+}
+

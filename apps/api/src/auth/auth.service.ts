@@ -18,14 +18,17 @@ export class AuthService {
 
     const passwordHash = await bcrypt.hash(dto.password, 12);
     const user = await this.prisma.$transaction(async (tx) => {
-      const company = await tx.company.create({ data: { name: dto.company_name } });
+      const existingCompany = await tx.company.findFirst({
+        where: { name: { equals: dto.company_name, mode: "insensitive" } }
+      });
+      const company = existingCompany ?? (await tx.company.create({ data: { name: dto.company_name } }));
       return tx.user.create({
         data: {
           companyId: company.id,
           email: dto.email.toLowerCase(),
           passwordHash,
           name: dto.name,
-          role: UserRole.COMPANY_ADMIN
+          role: existingCompany ? UserRole.WORKER : UserRole.COMPANY_ADMIN
         },
         include: { company: true }
       });

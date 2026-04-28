@@ -1,4 +1,4 @@
-import { ForbiddenException, Injectable, NotFoundException } from "@nestjs/common";
+import { Injectable, NotFoundException } from "@nestjs/common";
 import { randomUUID } from "crypto";
 import { PrismaService } from "../prisma/prisma.service";
 import { ProjectsService } from "../projects/projects.service";
@@ -33,8 +33,7 @@ export class RoomsService {
   }
 
   async create(user: { sub: string; companyId: string; role: string }, projectId: string, dto: CreateRoomDto) {
-    if (!["MANAGER", "PROJECT_ADMIN", "BIM_MANAGER", "COMPANY_ADMIN"].includes(user.role)) throw new ForbiddenException();
-    await this.projects.assertProjectAccess(user.sub, user.companyId, projectId);
+    await this.projects.assertProjectRole(user, projectId, ["MANAGER", "PROJECT_ADMIN", "BIM_MANAGER", "COMPANY_ADMIN"]);
     const room = await this.prisma.room.create({
       data: {
         projectId,
@@ -49,9 +48,9 @@ export class RoomsService {
   }
 
   async update(user: { sub: string; companyId: string; role: string }, roomId: string, dto: UpdateRoomDto) {
-    if (!["MANAGER", "PROJECT_ADMIN", "BIM_MANAGER", "COMPANY_ADMIN"].includes(user.role)) throw new ForbiddenException();
     const room = await this.prisma.room.findUnique({ where: { id: roomId }, include: { project: true } });
     if (!room || room.project.companyId !== user.companyId) throw new NotFoundException("Room not found.");
+    await this.projects.assertProjectRole(user, room.projectId, ["MANAGER", "PROJECT_ADMIN", "BIM_MANAGER", "COMPANY_ADMIN"]);
     const updated = await this.prisma.room.update({
       where: { id: roomId },
       data: {

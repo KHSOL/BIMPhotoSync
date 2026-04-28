@@ -1,7 +1,7 @@
 import { Body, Controller, Get, Param, Post, UseGuards } from "@nestjs/common";
 import { CurrentUser, JwtUser } from "../common/current-user";
 import { JwtAuthGuard } from "../common/jwt-auth.guard";
-import { CreateProjectDto } from "./dto";
+import { CreateProjectDto, JoinProjectDto } from "./dto";
 import { ProjectsService } from "./projects.service";
 
 @Controller("projects")
@@ -17,6 +17,11 @@ export class ProjectsController {
   @Post()
   create(@CurrentUser() user: JwtUser, @Body() dto: CreateProjectDto) {
     return this.projects.create(user, dto);
+  }
+
+  @Post("join")
+  join(@CurrentUser() user: JwtUser, @Body() dto: JoinProjectDto) {
+    return this.projects.join(user, dto);
   }
 
   @Post(":projectId/access-key")

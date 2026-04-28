@@ -1,4 +1,5 @@
-import { Body, Controller, Get, Param, Patch, Post, Query, Redirect, UseGuards } from "@nestjs/common";
+import { Body, Controller, Get, Param, Patch, Post, Query, Res, UseGuards } from "@nestjs/common";
+import { Response } from "express";
 import { CurrentUser, JwtUser } from "../common/current-user";
 import { JwtAuthGuard } from "../common/jwt-auth.guard";
 import { CommitPhotoDto, PhotoQueryDto, ReviewAnalysisDto } from "./dto";
@@ -20,19 +21,21 @@ export class PhotosController {
   }
 
   @Get("photos/:photoId")
-  get(@Param("photoId") photoId: string) {
-    return this.photos.get(photoId);
+  get(@CurrentUser() user: JwtUser, @Param("photoId") photoId: string) {
+    return this.photos.get(user, photoId);
   }
 
   @Get("photos/:photoId/object")
-  @Redirect()
-  async object(@Param("photoId") photoId: string) {
-    return { url: await this.photos.objectUrl(photoId), statusCode: 302 };
+  async object(@CurrentUser() user: JwtUser, @Param("photoId") photoId: string, @Res() res: Response) {
+    const file = await this.photos.objectFile(user, photoId);
+    res.setHeader("Content-Type", file.contentType);
+    res.setHeader("Cache-Control", "private, max-age=300");
+    res.send(file.buffer);
   }
 
   @Get("photos/:photoId/analysis")
-  analysis(@Param("photoId") photoId: string) {
-    return this.photos.getAnalysis(photoId);
+  analysis(@CurrentUser() user: JwtUser, @Param("photoId") photoId: string) {
+    return this.photos.getAnalysis(user, photoId);
   }
 
   @Patch("photos/:photoId/analysis/review")

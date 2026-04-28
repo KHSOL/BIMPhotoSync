@@ -1,6 +1,6 @@
 import "./globals.css";
 import type { Metadata } from "next";
-import { Bell, Box, Building2, Camera, ChevronDown, Home, ImageIcon, Settings } from "lucide-react";
+import { Bell, Box, Building2, Camera, ChevronDown, Home, ImageIcon, KeyRound, Settings } from "lucide-react";
 
 export const metadata: Metadata = {
   title: "BIM Photo Sync",
@@ -13,30 +13,32 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <body>
         <div className="shell">
           <header className="topbar">
-            <div className="brand">
+            <a className="brand" href="/photos">
               <div className="brand-mark">
                 <Box size={20} />
               </div>
               BIM Photo Sync
-            </div>
+            </a>
             <nav className="nav">
-              <a>Company</a>
-              <a className="active">Project</a>
-              <a>Photos</a>
-              <a>AI Queue</a>
-              <a>Audit</a>
+              <a href="/projects">Company</a>
+              <a href="/projects" className="active">
+                Project
+              </a>
+              <a href="/rooms">Rooms</a>
+              <a href="/photos">Photos</a>
+              <a href="/login">Login</a>
             </nav>
             <div className="user-menu">
               <Bell size={18} />
-              <div className="avatar">JS</div>
-              <span>User</span>
+              <div className="avatar">BP</div>
+              <span>Workspace</span>
               <ChevronDown size={16} />
             </div>
           </header>
           <div className="layout">
             <aside className="sidebar">
-              <a className="side-link" href="/photos">
-                <Home size={18} /> Dashboard
+              <a className="side-link" href="/projects">
+                <Home size={18} /> Projects
               </a>
               <a className="side-link" href="/rooms">
                 <Building2 size={18} /> Rooms
@@ -44,12 +46,15 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               <a className="side-link active" href="/photos">
                 <ImageIcon size={18} /> Photos
               </a>
-              <a className="side-link disabled">
+              <a className="side-link" href="/login">
+                <KeyRound size={18} /> Login
+              </a>
+              <span className="side-link disabled">
                 <Camera size={18} /> Revit Sync
-              </a>
-              <a className="side-link disabled">
+              </span>
+              <span className="side-link disabled">
                 <Settings size={18} /> Settings
-              </a>
+              </span>
             </aside>
             <main className="content">{children}</main>
           </div>

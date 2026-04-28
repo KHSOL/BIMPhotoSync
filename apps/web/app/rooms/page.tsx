@@ -1,46 +1,81 @@
 "use client";
 
-import { Building2, ChevronRight, KeyRound, Search } from "lucide-react";
-import { useState } from "react";
+import { Building2, ChevronRight, KeyRound, RefreshCw } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { apiJson, authHeaders, Project, readProjectId, readSession, Room, saveProjectId } from "../client";
 
-const API_BASE =
-  process.env.NEXT_PUBLIC_API_BASE_URL ?? "https://bimphotosync-api-production.up.railway.app/api/v1";
-
-type Room = {
-  id: string;
-  bim_photo_room_id: string;
-  room_number?: string;
-  room_name: string;
-  level_name?: string;
-  revit_unique_id?: string;
-};
+type ProjectList = { data: Project[] };
+type RoomList = { data: Room[] };
 
 export default function RoomsPage() {
-  const [email, setEmail] = useState("dev@bim.local");
-  const [password, setPassword] = useState("password123");
   const [token, setToken] = useState("");
-  const [projectId, setProjectId] = useState("b4e070af-eaf2-4820-b111-acc2592df50b");
+  const [projects, setProjects] = useState<Project[]>([]);
+  const [projectId, setProjectId] = useState("");
   const [rooms, setRooms] = useState<Room[]>([]);
-  const [status, setStatus] = useState("Room 목록은 Revit 동기화 후 표시됩니다.");
+  const [query, setQuery] = useState("");
+  const [status, setStatus] = useState("Revit Add-in에서 Sync Rooms를 실행하면 Room 매핑이 표시됩니다.");
 
-  async function login() {
-    const res = await fetch(`${API_BASE}/auth/login`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email, password })
-    });
-    const json = await res.json();
-    if (!res.ok) throw new Error(json.error?.message ?? "로그인 실패");
-    setToken(json.data.access_token);
-    setStatus(`${json.data.user.email} 계정으로 연결되었습니다.`);
+  useEffect(() => {
+    const session = readSession();
+    if (!session) return;
+    setToken(session.token);
+    const storedProjectId = readProjectId();
+    setProjectId(storedProjectId);
+    void loadProjects(session.token, storedProjectId);
+  }, []);
+
+  async function loadProjects(nextToken = token, preferredProjectId = projectId) {
+    if (!nextToken) return;
+    const json = await apiJson<ProjectList>("/projects", { headers: authHeaders(nextToken) });
+    setProjects(json.data);
+    const nextProjectId = json.data.some((project) => project.id === preferredProjectId)
+      ? preferredProjectId
+      : json.data[0]?.id ?? "";
+    setProjectId(nextProjectId);
+    if (nextProjectId) {
+      saveProjectId(nextProjectId);
+      await loadRooms(nextToken, nextProjectId);
+    }
   }
 
-  async function loadRooms() {
-    const res = await fetch(`${API_BASE}/projects/${projectId}/rooms`, { headers: { Authorization: `Bearer ${token}` } });
-    const json = await res.json();
-    if (!res.ok) throw new Error(json.error?.message ?? "Room 조회 실패");
+  async function loadRooms(nextToken = token, nextProjectId = projectId) {
+    if (!nextProjectId) {
+      setStatus("프로젝트를 먼저 선택하세요.");
+      return;
+    }
+    const params = query ? `?q=${encodeURIComponent(query)}` : "";
+    const json = await apiJson<RoomList>(`/projects/${nextProjectId}/rooms${params}`, {
+      headers: authHeaders(nextToken)
+    });
     setRooms(json.data);
-    setStatus(`${json.data.length}개 Room을 조회했습니다.`);
+    setStatus(`${json.data.length}개 Room을 불러왔습니다.`);
+  }
+
+  function changeProject(nextProjectId: string) {
+    setProjectId(nextProjectId);
+    saveProjectId(nextProjectId);
+    void loadRooms(token, nextProjectId).catch((err) => setStatus(err.message));
+  }
+
+  const groupedRooms = useMemo(() => {
+    return rooms.reduce<Record<string, Room[]>>((acc, room) => {
+      const level = room.level_name ?? "Level 미지정";
+      acc[level] = [...(acc[level] ?? []), room];
+      return acc;
+    }, {});
+  }, [rooms]);
+
+  if (!token) {
+    return (
+      <section className="panel empty-state">
+        <KeyRound size={28} />
+        <h1 className="panel-title">로그인이 필요합니다</h1>
+        <p className="muted">Room 매핑은 회사/프로젝트 권한 안에서만 조회됩니다.</p>
+        <a className="button" href="/login">
+          로그인으로 이동
+        </a>
+      </section>
+    );
   }
 
   return (
@@ -52,36 +87,34 @@ export default function RoomsPage() {
       </div>
 
       <section className="panel">
-        <div className="toolbar" style={{ gridTemplateColumns: "1fr 1fr 1.5fr auto" }}>
-          <Field label="Email">
-            <input className="input" value={email} onChange={(event) => setEmail(event.target.value)} />
+        <div className="toolbar room-toolbar">
+          <Field label="Project">
+            <select className="input" value={projectId} onChange={(event) => changeProject(event.target.value)}>
+              {projects.map((project) => (
+                <option key={project.id} value={project.id}>
+                  {project.name} / {project.code}
+                </option>
+              ))}
+            </select>
           </Field>
-          <Field label="Password">
+          <Field label="Room Search">
             <input
               className="input"
-              type="password"
-              value={password}
-              onChange={(event) => setPassword(event.target.value)}
+              placeholder="101, 욕실, 3F"
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
             />
           </Field>
-          <Field label="Project ID">
-            <input className="input" value={projectId} onChange={(event) => setProjectId(event.target.value)} />
-          </Field>
-          <div style={{ display: "flex", gap: 8 }}>
-            <button className="button secondary" onClick={() => login().catch((err) => setStatus(err.message))}>
-              <KeyRound size={16} /> 연결
-            </button>
-            <button className="button" onClick={() => loadRooms().catch((err) => setStatus(err.message))}>
-              <Search size={16} /> 조회
-            </button>
-          </div>
+          <button className="button" onClick={() => loadRooms().catch((err) => setStatus(err.message))} type="button">
+            <RefreshCw size={16} /> 조회
+          </button>
         </div>
       </section>
 
       <section className="panel">
         <div className="panel-header">
           <div>
-            <h1 className="panel-title">Room Mapping</h1>
+            <h1 className="page-title">Revit Room Mapping</h1>
             <div className="muted">{status}</div>
           </div>
           <span className="badge blue">
@@ -93,36 +126,41 @@ export default function RoomsPage() {
           <div className="empty">
             <div>
               <Building2 size={28} />
-              <p>아직 표시할 Room이 없습니다.</p>
-              <p className="muted">Revit Add-in에서 Sync Rooms를 실행하면 이 표에 매핑이 표시됩니다.</p>
+              <p>표시할 Room이 없습니다.</p>
+              <p className="muted">Revit Add-in의 Connect Project와 Sync Rooms 실행 후 다시 조회하세요.</p>
             </div>
           </div>
         ) : (
-          <table className="room-table">
-            <thead>
-              <tr>
-                <th>Level</th>
-                <th>Room</th>
-                <th>BIM_PHOTO_ROOM_ID</th>
-                <th>Revit Unique ID</th>
-              </tr>
-            </thead>
-            <tbody>
-              {rooms.map((room) => (
-                <tr key={room.id}>
-                  <td>{room.level_name ?? "-"}</td>
-                  <td>
-                    <strong>
-                      {room.room_number ?? ""} {room.room_name}
-                    </strong>
-                  </td>
-                  <td>{room.bim_photo_room_id}</td>
-                  <td>{room.revit_unique_id ?? "-"}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <div className="room-map">
+            {Object.entries(groupedRooms).map(([level, levelRooms]) => (
+              <div className="level-band" key={level}>
+                <div className="level-title">{level}</div>
+                <div className="room-card-grid">
+                  {levelRooms.map((room) => (
+                    <article className="room-card" key={room.id}>
+                      <strong>
+                        {room.room_number ?? ""} {room.room_name}
+                      </strong>
+                      <span>{room.location_text ?? "Revit Room"}</span>
+                      <code>{room.bim_photo_room_id}</code>
+                    </article>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
         )}
+      </section>
+
+      <section className="panel">
+        <div className="panel-header">
+          <h2 className="panel-title">도면 연동 상태</h2>
+          <span className="badge green">Room 기준</span>
+        </div>
+        <p className="muted">
+          1차 범위에서는 APS Viewer를 확장하지 않고, Revit에서 동기화된 Room 목록과 BIM_PHOTO_ROOM_ID를 웹/앱의 도면
+          탐색 기준으로 사용합니다. 실제 Revit 선택 조회는 Add-in Dockable Panel이 같은 ID로 API를 호출합니다.
+        </p>
       </section>
     </>
   );

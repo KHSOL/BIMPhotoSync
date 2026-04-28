@@ -1,11 +1,11 @@
 import { GetObjectCommand, S3Client } from "@aws-sdk/client-s3";
-import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { InjectQueue } from "@nestjs/bullmq";
 import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { Photo, Prisma } from "@prisma/client";
 import { Queue } from "bullmq";
 import { PrismaService } from "../prisma/prisma.service";
+import { ProjectsService } from "../projects/projects.service";
 import { RoomsService } from "../rooms/rooms.service";
 import { CommitPhotoDto, PhotoQueryDto, ReviewAnalysisDto } from "./dto";
 
@@ -17,6 +17,7 @@ export class PhotosService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly rooms: RoomsService,
+    private readonly projects: ProjectsService,
     private readonly config: ConfigService,
     @InjectQueue("photo-ai") private readonly aiQueue: Queue
   ) {
@@ -33,6 +34,7 @@ export class PhotosService {
   }
 
   async commit(user: { sub: string; companyId: string }, dto: CommitPhotoDto) {
+    await this.projects.assertProjectAccess(user.sub, user.companyId, dto.project_id);
     await this.rooms.assertRoomInProject(dto.room_id, dto.project_id);
     const upload = await this.prisma.photoUpload.findFirst({
       where: { id: dto.upload_id, projectId: dto.project_id, committedAt: null }
@@ -110,30 +112,45 @@ export class PhotosService {
     };
   }
 
-  async get(photoId: string) {
+  async get(user: { sub: string; companyId: string }, photoId: string) {
     const photo = await this.prisma.photo.findUnique({
       where: { id: photoId },
       include: { room: true, analyses: { orderBy: { createdAt: "desc" }, take: 1 } }
     });
     if (!photo) throw new NotFoundException("Photo not found.");
+    await this.projects.assertProjectAccess(user.sub, user.companyId, photo.projectId);
     return { data: toPhotoResponse(photo, this.config) };
   }
 
-  async getAnalysis(photoId: string) {
+  async getAnalysis(user: { sub: string; companyId: string }, photoId: string) {
+    const photo = await this.prisma.photo.findUnique({ where: { id: photoId } });
+    if (!photo) throw new NotFoundException("Photo not found.");
+    await this.projects.assertProjectAccess(user.sub, user.companyId, photo.projectId);
     const analysis = await this.prisma.photoAiAnalysis.findFirst({ where: { photoId }, orderBy: { createdAt: "desc" } });
     if (!analysis) throw new NotFoundException("Analysis not found.");
     return { data: analysis };
   }
 
-  async objectUrl(photoId: string) {
+  async objectFile(user: { sub: string; companyId: string }, photoId: string) {
     const photo = await this.prisma.photo.findUnique({ where: { id: photoId } });
     if (!photo) throw new NotFoundException("Photo not found.");
+    await this.projects.assertProjectAccess(user.sub, user.companyId, photo.projectId);
     const command = new GetObjectCommand({ Bucket: this.bucket, Key: photo.objectKey });
-    return getSignedUrl(this.s3, command, { expiresIn: 300 });
+    const object = await this.s3.send(command);
+    const chunks: Buffer[] = [];
+    for await (const chunk of object.Body as AsyncIterable<Uint8Array>) {
+      chunks.push(Buffer.from(chunk));
+    }
+    return {
+      buffer: Buffer.concat(chunks),
+      contentType: object.ContentType ?? photo.mimeType
+    };
   }
 
-  async reviewAnalysis(user: { sub: string; role: string }, photoId: string, dto: ReviewAnalysisDto) {
-    if (!["MANAGER", "PROJECT_ADMIN", "BIM_MANAGER", "COMPANY_ADMIN"].includes(user.role)) throw new ForbiddenException();
+  async reviewAnalysis(user: { sub: string; companyId: string; role: string }, photoId: string, dto: ReviewAnalysisDto) {
+    const photo = await this.prisma.photo.findUnique({ where: { id: photoId } });
+    if (!photo) throw new NotFoundException("Photo not found.");
+    await this.projects.assertProjectRole(user, photo.projectId, ["MANAGER", "PROJECT_ADMIN", "BIM_MANAGER", "COMPANY_ADMIN"]);
     const analysis = await this.prisma.photoAiAnalysis.findFirst({ where: { photoId }, orderBy: { createdAt: "desc" } });
     if (!analysis) throw new NotFoundException("Analysis not found.");
     const updated = await this.prisma.photoAiAnalysis.update({

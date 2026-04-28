@@ -1,4 +1,4 @@
-import { IsEmail, IsNotEmpty, IsOptional, IsString, MinLength } from "class-validator";
+import { IsEmail, IsNotEmpty, IsString, MinLength } from "class-validator";
 
 export class RegisterDto {
   @IsEmail()
@@ -23,19 +23,5 @@ export class LoginDto {
 
   @IsString()
   password!: string;
-}
-
-export class JoinProjectDto {
-  @IsString()
-  @IsNotEmpty()
-  project_code!: string;
-
-  @IsString()
-  @IsNotEmpty()
-  access_key!: string;
-
-  @IsOptional()
-  @IsString()
-  company_id?: string;
 }
 
