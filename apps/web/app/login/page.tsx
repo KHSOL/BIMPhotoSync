@@ -36,7 +36,6 @@ export default function LoginPage() {
   const [status, setStatus] = useState("");
   const [loading, setLoading] = useState(false);
 
-  const visual = mode === "login" ? "/auth/login-visual.png" : "/auth/signup-visual.png";
   const isRegister = mode === "register";
   const passwordReady = useMemo(() => password.length >= 8, [password]);
 
@@ -95,7 +94,7 @@ export default function LoginPage() {
     <main className="auth-page">
       <section className="auth-card-v2">
         <div className="auth-visual">
-          <img src={visual} alt="" />
+          <img src="/auth/loginpageimg.png" alt="" />
         </div>
 
         <div className="auth-form-side">
