@@ -1,0 +1,20 @@
+{
+  "name": "bim-photo-sync",
+  "version": "0.1.0",
+  "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev:api": "npm --workspace apps/api run start:dev",
+    "dev:worker": "npm --workspace apps/ai-worker run start:dev",
+    "dev:web": "npm --workspace apps/web run dev",
+    "typecheck": "npm --workspaces --if-present run typecheck",
+    "build": "npm --workspaces --if-present run build"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
+

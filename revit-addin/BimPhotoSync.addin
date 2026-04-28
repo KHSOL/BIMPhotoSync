@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<RevitAddIns>
+  <AddIn Type="Application">
+    <Name>BIM Photo Sync</Name>
+    <Assembly>%AppData%\Autodesk\Revit\Addins\2025\BimPhotoSyncAddin.dll</Assembly>
+    <AddInId>8D4F4E1C-DF45-4824-8F30-483DBD76587B</AddInId>
+    <FullClassName>BimPhotoSyncAddin.BimPhotoSyncApp</FullClassName>
+    <VendorId>HHSOLL</VendorId>
+    <VendorDescription>BIM Photo Sync Room-centered photo integration</VendorDescription>
+  </AddIn>
+</RevitAddIns>
+

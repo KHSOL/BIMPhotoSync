@@ -1,0 +1,248 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  WORKER
+  MANAGER
+  PROJECT_ADMIN
+  BIM_MANAGER
+  COMPANY_ADMIN
+  VIEWER
+}
+
+enum ProjectMemberRole {
+  WORKER
+  MANAGER
+  PROJECT_ADMIN
+  BIM_MANAGER
+  VIEWER
+}
+
+enum WorkSurface {
+  FLOOR
+  WALL
+  CEILING
+  WINDOW
+  DOOR
+  PIPE
+  ELECTRIC
+  OTHER
+}
+
+enum Trade {
+  WATERPROOF
+  TILE
+  PAINT
+  ELECTRIC
+  MEP
+  WINDOW
+  CONCRETE
+  OTHER
+}
+
+enum ProgressStatus {
+  NOT_STARTED
+  IN_PROGRESS
+  COMPLETED
+  BLOCKED
+  PENDING_REVIEW
+}
+
+enum RowStatus {
+  ACTIVE
+  ARCHIVED
+  DELETED
+}
+
+enum AiProvider {
+  OPENAI
+  HEURISTIC
+}
+
+model Company {
+  id        String    @id @default(uuid()) @db.Uuid
+  name      String
+  users     User[]
+  projects  Project[]
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
+
+  @@map("companies")
+}
+
+model User {
+  id           String          @id @default(uuid()) @db.Uuid
+  companyId    String          @map("company_id") @db.Uuid
+  company      Company         @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  email        String          @unique
+  passwordHash String          @map("password_hash")
+  name         String
+  role         UserRole        @default(WORKER)
+  memberships  ProjectMember[]
+  photos       Photo[]
+  reviews      PhotoAiAnalysis[] @relation("AnalysisReviewer")
+  createdAt    DateTime        @default(now()) @map("created_at")
+  updatedAt    DateTime        @updatedAt @map("updated_at")
+
+  @@map("users")
+}
+
+model Project {
+  id            String          @id @default(uuid()) @db.Uuid
+  companyId     String          @map("company_id") @db.Uuid
+  company       Company         @relation(fields: [companyId], references: [id], onDelete: Restrict)
+  name          String
+  code          String
+  accessKeyHash String?         @map("access_key_hash")
+  members       ProjectMember[]
+  revitModels   RevitModel[]
+  levels        Level[]
+  rooms         Room[]
+  uploads       PhotoUpload[]
+  photos        Photo[]
+  createdAt     DateTime        @default(now()) @map("created_at")
+  updatedAt     DateTime        @updatedAt @map("updated_at")
+
+  @@unique([companyId, code])
+  @@map("projects")
+}
+
+model ProjectMember {
+  id        String            @id @default(uuid()) @db.Uuid
+  projectId String            @map("project_id") @db.Uuid
+  userId    String            @map("user_id") @db.Uuid
+  role      ProjectMemberRole
+  project   Project           @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  user      User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt DateTime          @default(now()) @map("created_at")
+
+  @@unique([projectId, userId])
+  @@map("project_members")
+}
+
+model RevitModel {
+  id          String   @id @default(uuid()) @db.Uuid
+  projectId   String   @map("project_id") @db.Uuid
+  project     Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  modelName   String   @map("model_name")
+  documentGuid String? @map("document_guid")
+  rooms       Room[]
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  @@map("revit_models")
+}
+
+model Level {
+  id        String   @id @default(uuid()) @db.Uuid
+  projectId String   @map("project_id") @db.Uuid
+  project   Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  name      String
+  elevation Float?
+  rooms     Room[]
+
+  @@unique([projectId, name])
+  @@map("levels")
+}
+
+model Room {
+  id              String     @id @default(uuid()) @db.Uuid
+  projectId       String     @map("project_id") @db.Uuid
+  revitModelId    String?    @map("revit_model_id") @db.Uuid
+  levelId         String?    @map("level_id") @db.Uuid
+  bimPhotoRoomId  String     @unique @map("bim_photo_room_id")
+  revitUniqueId   String?    @unique @map("revit_unique_id")
+  revitElementId  String?    @map("revit_element_id")
+  roomNumber      String?    @map("room_number")
+  roomName        String     @map("room_name")
+  levelName       String?    @map("level_name")
+  areaM2          Decimal?   @map("area_m2") @db.Decimal(12, 2)
+  locationText    String?    @map("location_text")
+  status          RowStatus  @default(ACTIVE)
+  project         Project    @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  revitModel      RevitModel? @relation(fields: [revitModelId], references: [id], onDelete: SetNull)
+  level           Level?     @relation(fields: [levelId], references: [id], onDelete: SetNull)
+  photos          Photo[]
+  createdAt       DateTime   @default(now()) @map("created_at")
+  updatedAt       DateTime   @updatedAt @map("updated_at")
+  deletedAt       DateTime?  @map("deleted_at")
+
+  @@index([projectId, levelName, roomName], map: "idx_rooms_project_level_name")
+  @@map("rooms")
+}
+
+model PhotoUpload {
+  id             String    @id @default(uuid()) @db.Uuid
+  projectId      String    @map("project_id") @db.Uuid
+  project        Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  objectKey      String    @map("object_key")
+  mimeType       String    @map("mime_type")
+  fileSize       BigInt    @map("file_size")
+  checksumSha256 String?   @map("checksum_sha256")
+  expiresAt      DateTime  @map("expires_at")
+  committedAt    DateTime? @map("committed_at")
+  createdAt      DateTime  @default(now()) @map("created_at")
+
+  @@map("photo_uploads")
+}
+
+model Photo {
+  id              String            @id @default(uuid()) @db.Uuid
+  projectId       String            @map("project_id") @db.Uuid
+  roomId          String            @map("room_id") @db.Uuid
+  uploadedById    String            @map("uploaded_by") @db.Uuid
+  workSurface     WorkSurface       @map("work_surface")
+  trade           Trade
+  workDate        DateTime          @map("work_date") @db.Date
+  workerName      String?           @map("worker_name")
+  description     String?
+  aiDescription   String?           @map("ai_description")
+  progressStatus  ProgressStatus    @default(PENDING_REVIEW) @map("progress_status")
+  storageProvider String            @default("S3") @map("storage_provider")
+  objectKey       String            @map("object_key")
+  thumbnailKey    String?           @map("thumbnail_key")
+  mimeType        String            @map("mime_type")
+  fileSize        BigInt            @map("file_size")
+  checksumSha256  String?           @map("checksum_sha256")
+  takenAt         DateTime?         @map("taken_at")
+  uploadedAt      DateTime          @default(now()) @map("uploaded_at")
+  status          RowStatus         @default(ACTIVE)
+  project         Project           @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  room            Room              @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  uploadedBy      User              @relation(fields: [uploadedById], references: [id], onDelete: Restrict)
+  analyses        PhotoAiAnalysis[]
+
+  @@index([projectId, roomId, workDate(sort: Desc), uploadedAt(sort: Desc)], map: "idx_photos_project_room_workdate_desc")
+  @@index([projectId, trade, workSurface, workDate(sort: Desc)], map: "idx_photos_project_trade_surface_date")
+  @@index([uploadedById, uploadedAt(sort: Desc)], map: "idx_photos_uploaded_by_date")
+  @@map("photos")
+}
+
+model PhotoAiAnalysis {
+  id                  String         @id @default(uuid()) @db.Uuid
+  photoId             String         @map("photo_id") @db.Uuid
+  photo               Photo          @relation(fields: [photoId], references: [id], onDelete: Cascade)
+  modelProvider       AiProvider     @map("model_provider")
+  modelName           String         @map("model_name")
+  promptVersion       String         @map("prompt_version")
+  resultJson          Json           @map("result_json")
+  summary             String
+  detectedTrade       Trade?         @map("detected_trade")
+  detectedSurface     WorkSurface?   @map("detected_surface")
+  progressStatus      ProgressStatus @map("progress_status")
+  confidence          Decimal        @db.Decimal(5, 4)
+  requiresHumanReview Boolean        @default(true) @map("requires_human_review")
+  reviewedById        String?        @map("reviewed_by") @db.Uuid
+  reviewedBy          User?          @relation("AnalysisReviewer", fields: [reviewedById], references: [id], onDelete: SetNull)
+  reviewedAt          DateTime?      @map("reviewed_at")
+  createdAt           DateTime       @default(now()) @map("created_at")
+
+  @@index([createdAt(sort: Desc)], map: "idx_photo_ai_review_queue")
+  @@map("photo_ai_analyses")
+}
+

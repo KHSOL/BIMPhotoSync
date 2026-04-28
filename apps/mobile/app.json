@@ -1,0 +1,19 @@
+{
+  "expo": {
+    "name": "BIM Photo Sync",
+    "slug": "bim-photo-sync",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "scheme": "bimphotosync",
+    "userInterfaceStyle": "light",
+    "ios": {
+      "supportsTablet": true
+    },
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#2563EB"
+      }
+    }
+  }
+}
+

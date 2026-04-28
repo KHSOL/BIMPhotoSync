@@ -1,0 +1,15 @@
+node_modules
+dist
+.next
+.expo
+.DS_Store
+.omx
+.env
+.env.*
+!.env.example
+coverage
+tmp
+*.log
+*.tsbuildinfo
+bin
+obj
