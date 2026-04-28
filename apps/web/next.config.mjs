@@ -1,7 +1,3 @@
-import path from "node:path";
-
-const nextConfig = {
-  outputFileTracingRoot: path.join(process.cwd(), "../..")
-};
+const nextConfig = {};
 
 export default nextConfig;
