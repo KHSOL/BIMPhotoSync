@@ -8,6 +8,7 @@ import {
   Loader2,
   LockKeyhole,
   Mail,
+  ShieldCheck,
   User
 } from "lucide-react";
 import { useRouter } from "next/navigation";
@@ -16,6 +17,7 @@ import type { FormEvent, ReactNode } from "react";
 import { apiJson, saveSession, type User as SessionUser } from "../client";
 
 type AuthMode = "login" | "register";
+type RegisterRole = "WORKER" | "COMPANY_ADMIN";
 
 type AuthResult = {
   data: {
@@ -32,6 +34,7 @@ export default function LoginPage() {
   const [passwordConfirm, setPasswordConfirm] = useState("");
   const [name, setName] = useState("");
   const [companyName, setCompanyName] = useState("");
+  const [registerRole, setRegisterRole] = useState<RegisterRole>("WORKER");
   const [showPassword, setShowPassword] = useState(false);
   const [status, setStatus] = useState("");
   const [loading, setLoading] = useState(false);
@@ -72,7 +75,8 @@ export default function LoginPage() {
             email: email.trim(),
             password,
             name: name.trim(),
-            company_name: companyName.trim()
+            company_name: companyName.trim(),
+            role: registerRole
           }
         : { email: email.trim(), password };
       const json = await apiJson<AuthResult>(isRegister ? "/auth/register" : "/auth/login", {
@@ -82,7 +86,7 @@ export default function LoginPage() {
       });
 
       saveSession(json.data.access_token, json.data.user);
-      router.push("/projects");
+      router.push("/dashboard");
     } catch (error) {
       setStatus(error instanceof Error ? error.message : "로그인 처리 중 오류가 발생했습니다.");
     } finally {
@@ -136,6 +140,34 @@ export default function LoginPage() {
                       required
                     />
                   </AuthField>
+
+                  <div className="auth-field-v2">
+                    <span className="auth-field-label">가입 유형</span>
+                    <div className="auth-role-grid">
+                      <button
+                        className={registerRole === "WORKER" ? "auth-role-card active" : "auth-role-card"}
+                        type="button"
+                        onClick={() => setRegisterRole("WORKER")}
+                      >
+                        <User size={18} />
+                        <span>
+                          <strong>일반</strong>
+                          <small>사진 업로드와 조회</small>
+                        </span>
+                      </button>
+                      <button
+                        className={registerRole === "COMPANY_ADMIN" ? "auth-role-card active" : "auth-role-card"}
+                        type="button"
+                        onClick={() => setRegisterRole("COMPANY_ADMIN")}
+                      >
+                        <ShieldCheck size={18} />
+                        <span>
+                          <strong>상위 관리자</strong>
+                          <small>Revit 연동과 보고서 생성</small>
+                        </span>
+                      </button>
+                    </div>
+                  </div>
                 </>
               ) : null}
 

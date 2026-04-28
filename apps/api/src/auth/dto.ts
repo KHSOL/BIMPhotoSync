@@ -1,4 +1,4 @@
-import { IsEmail, IsNotEmpty, IsString, MinLength } from "class-validator";
+import { IsEmail, IsIn, IsNotEmpty, IsOptional, IsString, MinLength } from "class-validator";
 
 export class RegisterDto {
   @IsEmail()
@@ -15,6 +15,10 @@ export class RegisterDto {
   @IsString()
   @IsNotEmpty()
   company_name!: string;
+
+  @IsOptional()
+  @IsIn(["WORKER", "COMPANY_ADMIN"])
+  role?: "WORKER" | "COMPANY_ADMIN";
 }
 
 export class LoginDto {

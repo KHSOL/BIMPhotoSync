@@ -1,14 +1,17 @@
 "use client";
 
-import { FolderKanban, Images, LogIn, LogOut, MapPinned } from "lucide-react";
+import { Box, FileText, Home, Images, LogIn, LogOut, MapPinned, ShieldCheck } from "lucide-react";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { clearSession, readSession, type User } from "./client";
 
 const navItems = [
-  { href: "/projects", label: "Projects", icon: FolderKanban },
+  { href: "/dashboard", label: "Dashboard", icon: Home },
   { href: "/rooms", label: "Rooms", icon: MapPinned },
-  { href: "/photos", label: "Photos", icon: Images }
+  { href: "/photos", label: "Photos", icon: Images },
+  { href: "/reports", label: "Reports", icon: FileText },
+  { href: "/viewer", label: "Viewer", icon: Box },
+  { href: "/audit", label: "Audit", icon: ShieldCheck }
 ];
 
 export default function Shell({ children }: { children: React.ReactNode }) {
@@ -34,7 +37,7 @@ export default function Shell({ children }: { children: React.ReactNode }) {
   return (
     <div className="shell">
       <aside className="sidebar">
-        <a className="sidebar-brand" href="/projects" aria-label="BIM Photo Sync Home">
+        <a className="sidebar-brand" href="/dashboard" aria-label="BIM Photo Sync Home">
           <img src="/auth/app-logo-mark.png" alt="" />
           <span>BIM Photo Sync</span>
         </a>
@@ -57,7 +60,7 @@ export default function Shell({ children }: { children: React.ReactNode }) {
             <>
               <div className="sidebar-user">
                 <strong>{user.name}</strong>
-                <span>{user.email}</span>
+                <span>{user.role === "COMPANY_ADMIN" ? "상위 관리자" : "일반 사용자"}</span>
               </div>
               <button className="sidebar-auth-button" type="button" onClick={logout}>
                 <LogOut size={19} />

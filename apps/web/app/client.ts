@@ -9,6 +9,12 @@ export type User = {
   role: string;
 };
 
+export const upperManagerRoles = ["COMPANY_ADMIN", "PROJECT_ADMIN", "BIM_MANAGER"] as const;
+
+export function isUpperManager(user: User | null | undefined) {
+  return !!user && upperManagerRoles.includes(user.role as (typeof upperManagerRoles)[number]);
+}
+
 export type Project = {
   id: string;
   company_id: string;

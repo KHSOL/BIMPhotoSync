@@ -22,13 +22,14 @@ export class AuthService {
         where: { name: { equals: dto.company_name, mode: "insensitive" } }
       });
       const company = existingCompany ?? (await tx.company.create({ data: { name: dto.company_name } }));
+      const requestedRole = dto.role ?? (existingCompany ? UserRole.WORKER : UserRole.COMPANY_ADMIN);
       return tx.user.create({
         data: {
           companyId: company.id,
           email: dto.email.toLowerCase(),
           passwordHash,
           name: dto.name,
-          role: existingCompany ? UserRole.WORKER : UserRole.COMPANY_ADMIN
+          role: requestedRole
         },
         include: { company: true }
       });
