@@ -103,19 +103,20 @@ export default function ProjectsPage() {
   }
 
   return (
-    <>
+    <section className="project-page">
       <div className="breadcrumb">
         <span>{user?.company_name ?? "Company"}</span>
         <span>/</span>
         <strong>Projects</strong>
       </div>
 
-      <section className="project-grid">
-        <div className="panel">
-          <div className="panel-header">
+      <div className="project-layout">
+        <div className="project-primary panel">
+          <div className="panel-header project-header">
             <div>
+              <p className="eyebrow-text">현재 작업 프로젝트</p>
               <h1 className="page-title">프로젝트 선택</h1>
-              <p className="muted">사진, Room, Revit Add-in은 선택된 프로젝트 범위에서 동작합니다.</p>
+              <p className="muted">사진, Room, Revit Add-in은 선택한 프로젝트 범위에서 동작합니다.</p>
             </div>
             <button className="icon-button" onClick={() => loadProjects().catch((err) => setStatus(err.message))} type="button" aria-label="프로젝트 새로고침">
               <RefreshCw size={17} />
@@ -139,86 +140,91 @@ export default function ProjectsPage() {
               </button>
             ))}
           </div>
-          <p className="muted">{status}</p>
+
+          <div className="project-status-row">
+            <p className="muted">{status}</p>
+            <div className="actions project-actions">
+              <a className="button" href="/rooms">
+                Room 매핑 보기
+              </a>
+              <a className="button secondary" href="/photos">
+                사진 업로드
+              </a>
+            </div>
+          </div>
         </div>
 
         {canManageProjects ? (
-          <>
-            <div className="panel">
-              <div className="panel-header">
-                <h2 className="panel-title">Revit에서 프로젝트 가져오기</h2>
+          <div className="project-workspace">
+            <div className="project-hero panel">
+              <div className="project-hero-copy">
                 <span className="badge blue">상위 관리자</span>
+                <h2>Revit에서 프로젝트 가져오기</h2>
+                <p>
+                  웹 브라우저는 로컬 Revit 파일을 직접 읽을 수 없습니다. Revit Add-in이 열린 모델, Room, 도면 정보를 서버에 동기화하면 Rooms와 Viewer에 바로 반영됩니다.
+                </p>
               </div>
-              <p className="muted">
-                웹은 로컬 Revit 파일을 직접 읽을 수 없습니다. Revit Add-in이 열린 모델, Room, 도면 정보를 서버에 동기화하면 이 페이지와 Rooms/Viewer에 반영됩니다.
-              </p>
+
               <div className="revit-import-steps">
                 <span>1. Revit 2025에서 모델을 엽니다.</span>
                 <span>2. BIM Photo Sync 탭에서 Connect Project를 실행합니다.</span>
-                <span>3. 로그인 후 프로젝트 선택 또는 새 프로젝트 생성을 진행합니다.</span>
+                <span>3. 프로젝트 선택 또는 새 프로젝트 생성을 진행합니다.</span>
                 <span>4. Sync Rooms와 Sync Floor Plan을 실행합니다.</span>
               </div>
-              <button className="button" type="button" onClick={showRevitImportGuide}>
+
+              <button className="button project-hero-button" type="button" onClick={showRevitImportGuide}>
                 <RotateCw size={16} /> Revit 가져오기 안내
               </button>
             </div>
 
-            <div className="panel">
-              <div className="panel-header">
-                <h2 className="panel-title">프로젝트 접근키</h2>
-                <span className="badge orange">상위 관리자</span>
+            <div className="project-side-row">
+              <div className="project-compact-card panel">
+                <div className="panel-header">
+                  <h2 className="panel-title">프로젝트 접근키</h2>
+                  <span className="badge orange">관리자</span>
+                </div>
+                <p className="muted">{selectedProject ? `${selectedProject.name} (${selectedProject.code})` : "선택된 프로젝트가 없습니다."}</p>
+                <button className="button" onClick={() => createAccessKey().catch((err) => setStatus(err.message))} type="button">
+                  <KeyRound size={16} /> 접근키 생성
+                </button>
+                {generatedKey ? <code className="key-box">{generatedKey}</code> : null}
               </div>
-              <p className="muted">
-                {selectedProject ? `${selectedProject.name} (${selectedProject.code})` : "선택된 프로젝트가 없습니다."}
-              </p>
-              <button className="button" onClick={() => createAccessKey().catch((err) => setStatus(err.message))} type="button">
-                <KeyRound size={16} /> 접근키 생성
-              </button>
-              {generatedKey ? <code className="key-box">{generatedKey}</code> : null}
+
+              <div className="project-compact-card panel">
+                <div className="panel-header">
+                  <h2 className="panel-title">관리자 작업 범위</h2>
+                  <ShieldCheck size={19} />
+                </div>
+                <p className="muted">
+                  상위 관리자는 프로젝트 접근키를 발급하고 Revit Add-in에서 프로젝트와 도면을 동기화합니다. 일반 사용자의 접근키 참여 UI는 표시하지 않습니다.
+                </p>
+              </div>
             </div>
-          </>
+          </div>
         ) : (
-          <div className="panel">
-            <div className="panel-header">
-              <h2 className="panel-title">접근키 참여</h2>
-              <span className="badge green">일반 사용자</span>
+          <div className="project-workspace">
+            <div className="project-hero panel">
+              <div className="project-hero-copy">
+                <span className="badge green">일반 사용자</span>
+                <h2>접근키로 프로젝트 참여</h2>
+                <p>관리자가 발급한 프로젝트 코드와 접근키를 입력하면 해당 프로젝트의 사진 업로드와 조회 범위에 참여할 수 있습니다.</p>
+              </div>
+              <div className="project-join-grid">
+                <Field label="Project Code">
+                  <input className="input" value={joinCode} onChange={(event) => setJoinCode(event.target.value)} />
+                </Field>
+                <Field label="Access Key">
+                  <input className="input" value={joinKey} onChange={(event) => setJoinKey(event.target.value)} />
+                </Field>
+              </div>
+              <button className="button project-hero-button" onClick={() => joinProject().catch((err) => setStatus(err.message))} type="button">
+                <KeyRound size={16} /> 프로젝트 참여
+              </button>
             </div>
-            <div className="form-grid">
-              <Field label="Project Code">
-                <input className="input" value={joinCode} onChange={(event) => setJoinCode(event.target.value)} />
-              </Field>
-              <Field label="Access Key">
-                <input className="input" value={joinKey} onChange={(event) => setJoinKey(event.target.value)} />
-              </Field>
-            </div>
-            <button className="button secondary" onClick={() => joinProject().catch((err) => setStatus(err.message))} type="button">
-              <KeyRound size={16} /> 프로젝트 참여
-            </button>
           </div>
         )}
-
-        {canManageProjects ? (
-          <div className="panel">
-            <div className="panel-header">
-              <h2 className="panel-title">관리자 작업 범위</h2>
-              <ShieldCheck size={19} />
-            </div>
-            <p className="muted">
-              상위 관리자는 프로젝트 접근키를 발급하고 Revit Add-in에서 프로젝트와 도면을 동기화합니다. 일반 사용자의 접근키 참여 UI는 표시하지 않습니다.
-            </p>
-          </div>
-        ) : null}
-      </section>
-
-      <div className="actions">
-        <a className="button" href="/rooms">
-          Room 매핑 보기
-        </a>
-        <a className="button secondary" href="/photos">
-          사진 업로드로 이동
-        </a>
       </div>
-    </>
+    </section>
   );
 }
 
