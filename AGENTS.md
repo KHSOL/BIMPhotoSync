@@ -46,6 +46,14 @@ These instructions apply to every agent working in this repository. Follow them 
 - Avoid adding separate architecture or operation docs unless the user explicitly asks for them.
 - If temporary notes are necessary during work, fold the final useful content back into `README.md` before completion.
 
+## TypeScript Safety Rules
+
+- Do not introduce `any`. Treat API responses, database-shaped external data, and user input as `unknown` until validated or narrowed.
+- Prefer explicit type guards and type predicates over implicit narrowing. Do not use `filter(Boolean)` when a typed predicate can express the intended value shape.
+- Handle `null` and `undefined` at function boundaries. Assign nullable inputs to local constants, return early when absent, and keep the main logic non-null.
+- Define clear types at data boundaries: API responses, database results, and user input DTOs. Do not pass unvalidated boundary data deep into business logic.
+- Before committing, run the same static checks used by CI, at minimum `npm run typecheck` and the relevant build command.
+
 ## BIM Photo Sync Architecture Rules
 
 - `Room` is the canonical domain object. Photos, AI analyses, and Revit lookups are anchored to Rooms.

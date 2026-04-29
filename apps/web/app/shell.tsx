@@ -1,6 +1,6 @@
 "use client";
 
-import { Box, Building2, FileText, Home, Images, LogIn, LogOut, MapPinned, ShieldCheck } from "lucide-react";
+import { Box, Building2, FileText, Home, Images, LogIn, LogOut, MapPinned, Settings, ShieldCheck } from "lucide-react";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { clearSession, isSuperAdmin, readSession, type User } from "./client";
@@ -13,6 +13,7 @@ const navItems = [
   { href: "/reports", label: "Reports", icon: FileText },
   { href: "/viewer", label: "Viewer", icon: Box },
   { href: "/audit", label: "Audit", icon: ShieldCheck },
+  { href: "/mypage", label: "My Page", icon: Settings },
   { href: "/admin", label: "Admin", icon: ShieldCheck, superOnly: true }
 ];
 
@@ -45,16 +46,18 @@ export default function Shell({ children }: { children: React.ReactNode }) {
         </a>
 
         <nav className="sidebar-nav" aria-label="Main navigation">
-          {navItems.filter((item) => !item.superOnly || isSuperAdmin(user)).map((item) => {
-            const Icon = item.icon;
-            const active = pathname === item.href || pathname.startsWith(`${item.href}/`);
-            return (
-              <a key={item.href} className={active ? "active" : ""} href={item.href}>
-                <Icon size={20} />
-                <span>{item.label}</span>
-              </a>
-            );
-          })}
+          {navItems
+            .filter((item) => !item.superOnly || isSuperAdmin(user))
+            .map((item) => {
+              const Icon = item.icon;
+              const active = pathname === item.href || pathname.startsWith(`${item.href}/`);
+              return (
+                <a key={item.href} className={active ? "active" : ""} href={item.href}>
+                  <Icon size={20} />
+                  <span>{item.label}</span>
+                </a>
+              );
+            })}
         </nav>
 
         <div className="sidebar-footer">
@@ -62,7 +65,8 @@ export default function Shell({ children }: { children: React.ReactNode }) {
             <>
               <div className="sidebar-user">
                 <strong>{user.name}</strong>
-                <span>{user.role === "SUPER_ADMIN" ? "최고관리자" : user.role === "COMPANY_ADMIN" ? "상위 관리자" : "일반 사용자"}</span>
+                <span>{roleLabel(user.role)}</span>
+                <span>{user.company_name ?? "Company not loaded"}</span>
               </div>
               <button className="sidebar-auth-button" type="button" onClick={logout}>
                 <LogOut size={19} />
@@ -81,4 +85,11 @@ export default function Shell({ children }: { children: React.ReactNode }) {
       <main className="content">{children}</main>
     </div>
   );
+}
+
+function roleLabel(role: string) {
+  if (role === "SUPER_ADMIN") return "최고관리자";
+  if (role === "COMPANY_ADMIN" || role === "PROJECT_ADMIN" || role === "BIM_MANAGER") return "상위 관리자";
+  if (role === "MANAGER") return "관리자";
+  return "일반 사용자";
 }
