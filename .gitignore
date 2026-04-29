@@ -16,3 +16,5 @@ tmp
 bin
 obj
 .vercel-local
+
+.codex/external/
