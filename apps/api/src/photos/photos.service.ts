@@ -1,6 +1,6 @@
 import { GetObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { InjectQueue } from "@nestjs/bullmq";
-import { BadRequestException, ForbiddenException, Injectable, NotFoundException } from "@nestjs/common";
+import { BadRequestException, Injectable, NotFoundException } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { Photo, Prisma } from "@prisma/client";
 import { Queue } from "bullmq";
@@ -71,10 +71,7 @@ export class PhotosService {
   async list(user: { sub: string; companyId: string }, query: PhotoQueryDto) {
     const room = query.room_id ? await this.prisma.room.findFirst({ where: { id: query.room_id, projectId: query.project_id } }) : null;
     if (query.room_id && !room) throw new NotFoundException("Room not found in project.");
-    const project = await this.prisma.project.findFirst({
-      where: { id: query.project_id, companyId: user.companyId, members: { some: { userId: user.sub } } }
-    });
-    if (!project) throw new ForbiddenException();
+    await this.projects.assertProjectAccess(user.sub, user.companyId, query.project_id);
 
     const where: Prisma.PhotoWhereInput = {
       projectId: query.project_id,

@@ -1,12 +1,13 @@
 "use client";
 
-import { Box, FileText, Home, Images, LogIn, LogOut, MapPinned, ShieldCheck } from "lucide-react";
+import { Box, Building2, FileText, Home, Images, LogIn, LogOut, MapPinned, ShieldCheck } from "lucide-react";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { clearSession, readSession, type User } from "./client";
 
 const navItems = [
   { href: "/dashboard", label: "Dashboard", icon: Home },
+  { href: "/projects", label: "Projects", icon: Building2 },
   { href: "/rooms", label: "Rooms", icon: MapPinned },
   { href: "/photos", label: "Photos", icon: Images },
   { href: "/reports", label: "Reports", icon: FileText },

@@ -53,12 +53,15 @@ export default function PhotosPage() {
     setToken(session.token);
     setUser(session.user);
     setUploadMeta((current) => ({ ...current, worker_name: session.user.name }));
-    const storedProjectId = readProjectId();
+    const params = new URLSearchParams(window.location.search);
+    const storedProjectId = params.get("project_id") ?? readProjectId();
+    const storedRoomId = params.get("room_id") ?? "";
     setProjectId(storedProjectId);
-    void loadProjects(session.token, storedProjectId);
+    setRoomId(storedRoomId);
+    void loadProjects(session.token, storedProjectId, storedRoomId);
   }, []);
 
-  async function loadProjects(nextToken = token, preferredProjectId = projectId) {
+  async function loadProjects(nextToken = token, preferredProjectId = projectId, preferredRoomId = roomId) {
     const json = await apiJson<ProjectList>("/projects", { headers: authHeaders(nextToken) });
     setProjects(json.data);
     const nextProjectId = json.data.some((project) => project.id === preferredProjectId)
@@ -67,29 +70,41 @@ export default function PhotosPage() {
     setProjectId(nextProjectId);
     if (nextProjectId) {
       saveProjectId(nextProjectId);
-      await loadRooms(nextToken, nextProjectId);
-      await loadPhotos(nextToken, nextProjectId, "");
+      const nextRoomId = await loadRooms(nextToken, nextProjectId, preferredRoomId);
+      await loadPhotos(nextToken, nextProjectId, nextRoomId);
     }
   }
 
-  async function loadRooms(nextToken = token, nextProjectId = projectId) {
-    if (!nextProjectId) return;
+  async function loadRooms(nextToken = token, nextProjectId = projectId, preferredRoomId = roomId) {
+    if (!nextProjectId) return "";
     const json = await apiJson<RoomList>(`/projects/${nextProjectId}/rooms`, { headers: authHeaders(nextToken) });
     setRooms(json.data);
-    if (!roomId && json.data[0]) setRoomId(json.data[0].id);
+    const nextRoomId = json.data.some((room) => room.id === preferredRoomId) ? preferredRoomId : preferredRoomId ? "" : json.data[0]?.id ?? "";
+    setRoomId(nextRoomId);
+    return nextRoomId;
   }
 
-  async function loadPhotos(nextToken = token, nextProjectId = projectId, nextRoomId = roomId) {
+  async function loadPhotos(
+    nextToken = token,
+    nextProjectId = projectId,
+    nextRoomId = roomId,
+    nextFilters = {
+      trade: filterTrade,
+      surface: filterSurface,
+      from: dateFrom,
+      to: dateTo
+    }
+  ) {
     if (!nextProjectId) {
       setStatus("프로젝트를 먼저 선택하세요.");
       return;
     }
     const params = new URLSearchParams({ project_id: nextProjectId });
     if (nextRoomId) params.set("room_id", nextRoomId);
-    if (filterTrade) params.set("trade", filterTrade);
-    if (filterSurface) params.set("work_surface", filterSurface);
-    if (dateFrom) params.set("date_from", dateFrom);
-    if (dateTo) params.set("date_to", dateTo);
+    if (nextFilters.trade) params.set("trade", nextFilters.trade);
+    if (nextFilters.surface) params.set("work_surface", nextFilters.surface);
+    if (nextFilters.from) params.set("date_from", nextFilters.from);
+    if (nextFilters.to) params.set("date_to", nextFilters.to);
     const json = await apiJson<PhotoList>(`/photos?${params}`, { headers: authHeaders(nextToken) });
     const hydrated = await hydratePreviews(nextToken, json.data);
     setPhotos(hydrated);
@@ -131,7 +146,7 @@ export default function PhotosPage() {
     setFilterSurface("");
     setDateFrom("");
     setDateTo("");
-    void loadPhotos(token, projectId, "").catch((err) => setStatus(err.message));
+    void loadPhotos(token, projectId, "", { trade: "", surface: "", from: "", to: "" }).catch((err) => setStatus(err.message));
   }
 
   async function uploadPhoto() {
