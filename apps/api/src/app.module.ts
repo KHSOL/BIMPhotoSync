@@ -6,6 +6,7 @@ import { AuthModule } from "./auth/auth.module";
 import { PhotosModule } from "./photos/photos.module";
 import { PrismaModule } from "./prisma/prisma.module";
 import { ProjectsModule } from "./projects/projects.module";
+import { ReportsModule } from "./reports/reports.module";
 import { RevitModule } from "./revit/revit.module";
 import { RoomsModule } from "./rooms/rooms.module";
 import { UploadsModule } from "./uploads/uploads.module";
@@ -25,6 +26,7 @@ import { UploadsModule } from "./uploads/uploads.module";
     RoomsModule,
     UploadsModule,
     PhotosModule,
+    ReportsModule,
     AiModule,
     RevitModule
   ]

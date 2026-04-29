@@ -61,6 +61,18 @@ enum RowStatus {
   DELETED
 }
 
+enum ReportStatus {
+  GENERATED
+  FAILED
+}
+
+enum ReportFormat {
+  JSON
+  PDF
+  DOCX
+  HWP
+}
+
 enum AiProvider {
   OPENAI
   HEURISTIC
@@ -88,6 +100,7 @@ model User {
   memberships  ProjectMember[]
   photos       Photo[]
   reviews      PhotoAiAnalysis[] @relation("AnalysisReviewer")
+  reports      GeneratedReport[] @relation("ReportCreator")
   createdAt    DateTime        @default(now()) @map("created_at")
   updatedAt    DateTime        @updatedAt @map("updated_at")
 
@@ -108,6 +121,7 @@ model Project {
   rooms         Room[]
   uploads       PhotoUpload[]
   photos        Photo[]
+  reports       GeneratedReport[]
   createdAt     DateTime        @default(now()) @map("created_at")
   updatedAt     DateTime        @updatedAt @map("updated_at")
 
@@ -264,5 +278,29 @@ model PhotoAiAnalysis {
 
   @@index([createdAt(sort: Desc)], map: "idx_photo_ai_review_queue")
   @@map("photo_ai_analyses")
+}
+
+model GeneratedReport {
+  id           String       @id @default(uuid()) @db.Uuid
+  projectId    String       @map("project_id") @db.Uuid
+  createdById  String       @map("created_by") @db.Uuid
+  title        String
+  format       ReportFormat @default(JSON)
+  status       ReportStatus @default(GENERATED)
+  filters      Json
+  content      Json
+  summary      String?
+  photoIds     String[]     @default([]) @map("photo_ids")
+  modelProvider String      @default("HEURISTIC") @map("model_provider")
+  modelName    String       @default("bim-photo-sync-report-v1") @map("model_name")
+  errorMessage String?      @map("error_message")
+  createdAt    DateTime     @default(now()) @map("created_at")
+  updatedAt    DateTime     @updatedAt @map("updated_at")
+  project      Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  createdBy    User         @relation("ReportCreator", fields: [createdById], references: [id], onDelete: Restrict)
+
+  @@index([projectId, createdAt(sort: Desc)], map: "idx_generated_reports_project_created")
+  @@index([createdById, createdAt(sort: Desc)], map: "idx_generated_reports_creator_created")
+  @@map("generated_reports")
 }
 

@@ -13,7 +13,7 @@ import {
   UploadCloud
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
-import { apiJson, authHeaders, Photo, Project, readProjectId, readSession, Room, saveProjectId } from "../client";
+import { apiJson, authHeaders, Photo, Project, readProjectId, readSession, Room, saveProjectId, User } from "../client";
 
 const trades = ["WATERPROOF", "TILE", "PAINT", "ELECTRIC", "MEP", "WINDOW", "CONCRETE", "OTHER"];
 const surfaces = ["FLOOR", "WALL", "CEILING", "WINDOW", "DOOR", "PIPE", "ELECTRIC", "OTHER"];
@@ -26,6 +26,7 @@ type CommitResult = { data: Photo };
 
 export default function PhotosPage() {
   const [token, setToken] = useState("");
+  const [user, setUser] = useState<User | null>(null);
   const [projects, setProjects] = useState<Project[]>([]);
   const [projectId, setProjectId] = useState("");
   const [rooms, setRooms] = useState<Room[]>([]);
@@ -50,6 +51,8 @@ export default function PhotosPage() {
     const session = readSession();
     if (!session) return;
     setToken(session.token);
+    setUser(session.user);
+    setUploadMeta((current) => ({ ...current, worker_name: session.user.name }));
     const storedProjectId = readProjectId();
     setProjectId(storedProjectId);
     void loadProjects(session.token, storedProjectId);
@@ -117,6 +120,20 @@ export default function PhotosPage() {
     void loadPhotos(token, nextProjectId, "").catch((err) => setStatus(err.message));
   }
 
+  function changeRoom(nextRoomId: string) {
+    setRoomId(nextRoomId);
+    void loadPhotos(token, projectId, nextRoomId).catch((err) => setStatus(err.message));
+  }
+
+  function resetFilters() {
+    setRoomId("");
+    setFilterTrade("");
+    setFilterSurface("");
+    setDateFrom("");
+    setDateTo("");
+    void loadPhotos(token, projectId, "").catch((err) => setStatus(err.message));
+  }
+
   async function uploadPhoto() {
     if (!file || !projectId || !roomId) {
       setStatus("사진, 프로젝트, Room을 모두 선택하세요.");
@@ -141,7 +158,8 @@ export default function PhotosPage() {
         project_id: projectId,
         room_id: roomId,
         upload_id: presign.data.upload_id,
-        ...uploadMeta
+        ...uploadMeta,
+        worker_name: uploadMeta.worker_name || user?.name || undefined
       })
     });
     setFile(null);
@@ -192,7 +210,7 @@ export default function PhotosPage() {
             </select>
           </Field>
           <Field label="Room">
-            <select className="input" value={roomId} onChange={(event) => setRoomId(event.target.value)}>
+            <select className="input" value={roomId} onChange={(event) => changeRoom(event.target.value)}>
               <option value="">전체 Room</option>
               {rooms.map((room) => (
                 <option key={room.id} value={room.id}>
@@ -225,6 +243,9 @@ export default function PhotosPage() {
           </Field>
           <button className="button" onClick={() => loadPhotos().catch((err) => setStatus(err.message))} type="button">
             <Search size={16} /> 조회
+          </button>
+          <button className="filter-button" onClick={resetFilters} type="button">
+            전체보기
           </button>
         </div>
       </section>

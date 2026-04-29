@@ -97,6 +97,44 @@ export type Photo = {
   } | null;
 };
 
+export type GeneratedReport = {
+  id: string;
+  project_id: string;
+  project?: Project;
+  title: string;
+  format: string;
+  status: string;
+  filters: Record<string, string | null>;
+  content: {
+    title: string;
+    generated_at: string;
+    generated_by: string;
+    filters: Record<string, string | null>;
+    situation: Record<string, string | null>;
+    comparison_photos: Array<{
+      photo_id: string;
+      work_date: string;
+      room: string;
+      work_surface: string;
+      trade: string;
+      worker_name?: string | null;
+      description?: string | null;
+      ai_description?: string | null;
+    }>;
+    progress_timeline: string[];
+    analysis_result: string;
+    memo?: string | null;
+  };
+  summary?: string | null;
+  photo_ids: string[];
+  model_provider: string;
+  model_name: string;
+  error_message?: string | null;
+  created_by: Pick<User, "id" | "name" | "email" | "role">;
+  created_at: string;
+  updated_at: string;
+};
+
 export function authHeaders(token: string) {
   return { Authorization: `Bearer ${token}` };
 }
