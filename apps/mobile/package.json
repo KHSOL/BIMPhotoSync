@@ -5,6 +5,7 @@
   "main": "expo/AppEntry.js",
   "scripts": {
     "start": "expo start",
+    "start:tunnel": "expo start --tunnel",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
@@ -19,4 +20,3 @@
     "typescript": "^5.6.3"
   }
 }
-
