@@ -52,7 +52,7 @@ export default function Shell({ children }: { children: React.ReactNode }) {
               const Icon = item.icon;
               const active = pathname === item.href || pathname.startsWith(`${item.href}/`);
               return (
-                <a key={item.href} className={active ? "active" : ""} href={item.href}>
+                <a key={item.href} className={active ? "active" : ""} href={item.href} title={item.label}>
                   <Icon size={20} />
                   <span>{item.label}</span>
                 </a>
@@ -63,18 +63,18 @@ export default function Shell({ children }: { children: React.ReactNode }) {
         <div className="sidebar-footer">
           {user ? (
             <>
-              <div className="sidebar-user">
+              <div className="sidebar-user" title={`${user.name} / ${roleLabel(user.role)} / ${user.company_name ?? ""}`}>
                 <strong>{user.name}</strong>
                 <span>{roleLabel(user.role)}</span>
                 <span>{user.company_name ?? "Company not loaded"}</span>
               </div>
-              <button className="sidebar-auth-button" type="button" onClick={logout}>
+              <button className="sidebar-auth-button" type="button" onClick={logout} aria-label="로그아웃" title="Logout">
                 <LogOut size={19} />
                 <span>Logout</span>
               </button>
             </>
           ) : (
-            <a className="sidebar-auth-button" href="/login">
+            <a className="sidebar-auth-button" href="/login" aria-label="로그인" title="Login">
               <LogIn size={19} />
               <span>Login</span>
             </a>
