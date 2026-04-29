@@ -23,7 +23,14 @@ These instructions apply to every agent working in this repository. Follow them 
 
 - For Revit, BIM, construction-photo workflows, AI analysis, storage, deployment, or any project-adjacent technical decision, check current primary sources before making architectural claims.
 - Prefer Autodesk/Revit official documentation, Dynamo official documentation, framework/vendor docs, peer-reviewed papers, and mature open-source repositories.
+- For Codex-style tasks, check the official Codex use cases at `https://developers.openai.com/codex/use-cases`. If a current task resembles an official use case, apply that workflow as a reference before inventing a new process.
 - Use research only when it is relevant to the current change. Document useful findings in `README.md` or the implementation notes for that change.
+
+## GitHub Connection Stability
+
+- Keep the Git remote in canonical HTTPS form: `https://github.com/KHSOL/BIMPhotoSync.git`.
+- Use Git Credential Manager with GitHub path scoping enabled for this repository so credentials are less likely to be mixed with other accounts or repositories.
+- If GitHub App/connector permissions fail, fall back to authenticated local Git for commit and push, then report the exact connector limitation for PR/merge operations.
 
 ## Branch, Commit, PR, And Main Hygiene
 

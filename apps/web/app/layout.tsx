@@ -11,7 +11,7 @@ export const metadata: Metadata = {
     description: "Room-centered construction photo operations",
     images: [
       {
-        url: "/OGimg.png",
+        url: "/OGimg.png?v=2",
         width: 1200,
         height: 630,
         alt: "BIM Photo Sync"
@@ -22,7 +22,7 @@ export const metadata: Metadata = {
     card: "summary_large_image",
     title: "BIM Photo Sync",
     description: "Room-centered construction photo operations",
-    images: ["/OGimg.png"]
+    images: ["/OGimg.png?v=2"]
   }
 };
 

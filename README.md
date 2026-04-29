@@ -341,8 +341,13 @@ UI는 `designsystem.png`의 운영형 대시보드 방향을 따릅니다.
 - OMX는 `.codex/external/oh-my-codex`에 로컬 checkout으로 유지하고, 작업에 유용한 workflow/prompt/skill을 우선 검토합니다.
 - `awesome-codex-subagents`의 136개 TOML subagent는 `.codex/agents`에 설치되어 있으며, 작업 성격에 맞는 최소 팀을 구성합니다.
 - Revit/BIM/스토리지/배포/AI 관련 의사결정은 공식 문서, 논문, 성숙한 오픈소스를 먼저 확인합니다.
+- Codex 작업 방식과 유사한 요청은 OpenAI 공식 Codex use cases를 확인하고, 해당되는 use case workflow를 참고합니다.
 - 새 기능은 `codex/` prefix 브랜치에서 작업하고, 완료 후 README 갱신, 검증, 커밋, push, PR, merge, feature branch 삭제 흐름을 따릅니다.
 - `README.md`가 canonical 문서입니다. 별도 문서는 사용자가 요청하지 않는 한 만들지 않습니다.
+
+## OG 이미지
+
+웹 OG 이미지는 `apps/web/public/OGimg.png`를 사용합니다. 파일은 링크 미리보기 표준 비율인 `1200x630`으로 맞추고, 원본 그래픽을 contain 방식으로 배치해 카카오톡, Slack, GitHub, X/Twitter 등에서 중앙 크롭되어도 핵심 텍스트와 제품 화면이 잘리지 않도록 관리합니다. 루트의 `OGimg.png`는 README 미리보기와 원본 관리용 동일 이미지입니다.
 
 ## 참고 자료
 
@@ -351,6 +356,8 @@ UI는 `designsystem.png`의 운영형 대시보드 방향을 따릅니다.
 - [Autodesk SharedParameterElement](https://help.autodesk.com/view/RVT/2026/ENU/?guid=d8a0f2ae-7e10-39bd-e362-3756cbae661b)
 - [Autodesk Dynamo Graphs for Revit](https://help.autodesk.com/view/RVT/2025/ENU/?guid=RevitDynamo_About_Creating_Dynamo_Graphs_for_Revit_html)
 - [Next.js Metadata and OG Images](https://nextjs.org/docs/app/getting-started/metadata-and-og-images)
+- [OpenAI Codex Use Cases](https://developers.openai.com/codex/use-cases)
+- [OpenAI Codex GitHub Integration](https://developers.openai.com/codex/integrations/github)
 - [Supabase Documentation](https://supabase.com/docs/)
 - [Cloudflare R2 S3 API Compatibility](https://developers.cloudflare.com/r2/api/s3/api/)
 - [Railway Services Documentation](https://docs.railway.com/services)
