@@ -15,6 +15,13 @@ public sealed class ConnectProjectCommand : IExternalCommand
         {
             Document? doc = commandData.Application.ActiveUIDocument?.Document;
             string modelName = doc?.Title ?? "Untitled Revit Model";
+            var dialog = new ConnectProjectDialog(modelName);
+            bool? configured = dialog.ShowDialog();
+            if (configured != true || !dialog.IsConfigured)
+            {
+                return Result.Cancelled;
+            }
+
             ValidationLog.Write($"ConnectProjectCommand calling API for model '{modelName}'.");
 
             ConnectProjectResponse? response = new ApiClient()
@@ -30,6 +37,7 @@ public sealed class ConnectProjectCommand : IExternalCommand
             }
 
             AddinSettings.RevitModelId = response.Data.Revit_Model_Id;
+            AddinSettings.Save();
             ValidationLog.Write(
                 $"Connected project {response.Data.Project_Id} with revit_model_id={response.Data.Revit_Model_Id}.");
             TaskDialog.Show("BIM Photo Sync", $"Connected project.\nModel: {response.Data.Model_Name}");

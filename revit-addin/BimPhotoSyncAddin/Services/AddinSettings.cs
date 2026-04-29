@@ -5,7 +5,7 @@ using System.Text.Json;
 
 public static class AddinSettings
 {
-    public static string ApiBaseUrl { get; set; } = "http://localhost:4000/api/v1";
+    public static string ApiBaseUrl { get; set; } = "https://bimphotosync-api-production.up.railway.app/api/v1";
     public static string JwtToken { get; set; } = "";
     public static string ProjectId { get; set; } = "";
     public static string? RevitModelId { get; set; }
@@ -33,6 +33,19 @@ public static class AddinSettings
         JwtToken = string.IsNullOrWhiteSpace(config.JwtToken) ? JwtToken : config.JwtToken;
         ProjectId = string.IsNullOrWhiteSpace(config.ProjectId) ? ProjectId : config.ProjectId;
         RevitModelId = string.IsNullOrWhiteSpace(config.RevitModelId) ? RevitModelId : config.RevitModelId;
+    }
+
+    public static void Save()
+    {
+        string? directory = Path.GetDirectoryName(ConfigPath);
+        if (!string.IsNullOrWhiteSpace(directory))
+        {
+            Directory.CreateDirectory(directory);
+        }
+
+        var config = new ConfigFile(ApiBaseUrl, JwtToken, ProjectId, RevitModelId);
+        string json = JsonSerializer.Serialize(config, new JsonSerializerOptions { WriteIndented = true });
+        File.WriteAllText(ConfigPath, json);
     }
 
     private sealed record ConfigFile(string? ApiBaseUrl, string? JwtToken, string? ProjectId, string? RevitModelId);

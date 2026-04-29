@@ -12,13 +12,15 @@ export class ProjectsService {
 
   async list(user: ProjectActor) {
     const projects = await this.prisma.project.findMany({
-      where: {
-        companyId: user.companyId,
-        OR: [
-          { members: { some: { userId: user.sub } } },
-          ...(user.role === "COMPANY_ADMIN" ? [{}] : [])
-        ]
-      },
+      where: user.role === "SUPER_ADMIN"
+        ? {}
+        : {
+            companyId: user.companyId,
+            OR: [
+              { members: { some: { userId: user.sub } } },
+              ...(user.role === "COMPANY_ADMIN" ? [{}] : [])
+            ]
+          },
       include: { members: { where: { userId: user.sub }, select: { role: true } } },
       orderBy: { createdAt: "desc" }
     });
@@ -26,7 +28,7 @@ export class ProjectsService {
   }
 
   async create(user: ProjectActor, dto: CreateProjectDto) {
-    if (!["COMPANY_ADMIN", "PROJECT_ADMIN"].includes(user.role)) throw new ForbiddenException();
+    if (!["SUPER_ADMIN", "COMPANY_ADMIN", "PROJECT_ADMIN"].includes(user.role)) throw new ForbiddenException();
     const code = dto.code ?? dto.name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "");
     const project = await this.prisma.project.create({
       data: {
@@ -59,7 +61,7 @@ export class ProjectsService {
   }
 
   async createAccessKey(user: ProjectActor, projectId: string) {
-    const project = await this.assertProjectRole(user, projectId, ["PROJECT_ADMIN", "BIM_MANAGER", "COMPANY_ADMIN"]);
+    const project = await this.assertProjectRole(user, projectId, ["PROJECT_ADMIN", "BIM_MANAGER", "COMPANY_ADMIN", "SUPER_ADMIN"]);
     const accessKey = `bps_${randomBytes(18).toString("base64url")}`;
     const accessKeyHash = await bcrypt.hash(accessKey, 12);
     await this.prisma.project.update({ where: { id: projectId }, data: { accessKeyHash } });
@@ -67,6 +69,13 @@ export class ProjectsService {
   }
 
   async assertProjectAccess(userId: string, companyId: string, projectId: string) {
+    const actor = await this.prisma.user.findUnique({ where: { id: userId }, select: { role: true } });
+    if (actor?.role === "SUPER_ADMIN") {
+      const project = await this.prisma.project.findUnique({ where: { id: projectId } });
+      if (!project) throw new ForbiddenException("No project access.");
+      return project;
+    }
+
     const project = await this.prisma.project.findFirst({
       where: {
         id: projectId,
@@ -79,6 +88,12 @@ export class ProjectsService {
   }
 
   async assertProjectRole(user: ProjectActor, projectId: string, allowedRoles: string[]) {
+    if (user.role === "SUPER_ADMIN") {
+      const project = await this.prisma.project.findUnique({ where: { id: projectId } });
+      if (!project) throw new NotFoundException("Project not found.");
+      return project;
+    }
+
     const project = await this.prisma.project.findFirst({
       where: { id: projectId, companyId: user.companyId },
       include: { members: { where: { userId: user.sub }, select: { role: true } } }

@@ -7,12 +7,17 @@
     "scheme": "bimphotosync",
     "userInterfaceStyle": "light",
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "com.bimphotosync.mobile"
     },
     "android": {
+      "package": "com.bimphotosync.mobile",
       "adaptiveIcon": {
         "backgroundColor": "#2563EB"
       }
+    },
+    "extra": {
+      "apiBaseUrl": "https://bimphotosync-api-production.up.railway.app/api/v1"
     }
   }
 }

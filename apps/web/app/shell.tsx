@@ -3,7 +3,7 @@
 import { Box, Building2, FileText, Home, Images, LogIn, LogOut, MapPinned, ShieldCheck } from "lucide-react";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
-import { clearSession, readSession, type User } from "./client";
+import { clearSession, isSuperAdmin, readSession, type User } from "./client";
 
 const navItems = [
   { href: "/dashboard", label: "Dashboard", icon: Home },
@@ -12,7 +12,8 @@ const navItems = [
   { href: "/photos", label: "Photos", icon: Images },
   { href: "/reports", label: "Reports", icon: FileText },
   { href: "/viewer", label: "Viewer", icon: Box },
-  { href: "/audit", label: "Audit", icon: ShieldCheck }
+  { href: "/audit", label: "Audit", icon: ShieldCheck },
+  { href: "/admin", label: "Admin", icon: ShieldCheck, superOnly: true }
 ];
 
 export default function Shell({ children }: { children: React.ReactNode }) {
@@ -44,7 +45,7 @@ export default function Shell({ children }: { children: React.ReactNode }) {
         </a>
 
         <nav className="sidebar-nav" aria-label="Main navigation">
-          {navItems.map((item) => {
+          {navItems.filter((item) => !item.superOnly || isSuperAdmin(user)).map((item) => {
             const Icon = item.icon;
             const active = pathname === item.href || pathname.startsWith(`${item.href}/`);
             return (
@@ -61,7 +62,7 @@ export default function Shell({ children }: { children: React.ReactNode }) {
             <>
               <div className="sidebar-user">
                 <strong>{user.name}</strong>
-                <span>{user.role === "COMPANY_ADMIN" ? "상위 관리자" : "일반 사용자"}</span>
+                <span>{user.role === "SUPER_ADMIN" ? "최고관리자" : user.role === "COMPANY_ADMIN" ? "상위 관리자" : "일반 사용자"}</span>
               </div>
               <button className="sidebar-auth-button" type="button" onClick={logout}>
                 <LogOut size={19} />

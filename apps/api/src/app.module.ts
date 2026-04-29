@@ -1,6 +1,8 @@
 import { BullModule } from "@nestjs/bullmq";
 import { Module } from "@nestjs/common";
 import { ConfigModule, ConfigService } from "@nestjs/config";
+import { AdminModule } from "./admin/admin.module";
+import { AppController } from "./app.controller";
 import { AiModule } from "./ai/ai.module";
 import { AuthModule } from "./auth/auth.module";
 import { PhotosModule } from "./photos/photos.module";
@@ -21,6 +23,7 @@ import { UploadsModule } from "./uploads/uploads.module";
       })
     }),
     PrismaModule,
+    AdminModule,
     AuthModule,
     ProjectsModule,
     RoomsModule,
@@ -29,7 +32,8 @@ import { UploadsModule } from "./uploads/uploads.module";
     ReportsModule,
     AiModule,
     RevitModule
-  ]
+  ],
+  controllers: [AppController]
 })
 export class AppModule {}
 

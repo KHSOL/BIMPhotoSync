@@ -2,6 +2,36 @@ namespace BimPhotoSyncAddin.Models;
 
 using System.Text.Json.Serialization;
 
+public sealed record LoginRequest(
+    [property: JsonPropertyName("email")] string Email,
+    [property: JsonPropertyName("password")] string Password);
+
+public sealed record AuthResponse([property: JsonPropertyName("data")] AuthData Data);
+
+public sealed record AuthData(
+    [property: JsonPropertyName("access_token")] string Access_Token,
+    [property: JsonPropertyName("user")] AuthUser User);
+
+public sealed record AuthUser(
+    [property: JsonPropertyName("id")] string Id,
+    [property: JsonPropertyName("email")] string Email,
+    [property: JsonPropertyName("name")] string Name,
+    [property: JsonPropertyName("role")] string Role);
+
+public sealed record ProjectListResponse([property: JsonPropertyName("data")] IReadOnlyList<ProjectListItem> Data);
+
+public sealed record ProjectResponse([property: JsonPropertyName("data")] ProjectListItem Data);
+
+public sealed record ProjectListItem(
+    [property: JsonPropertyName("id")] string Id,
+    [property: JsonPropertyName("name")] string Name,
+    [property: JsonPropertyName("code")] string Code,
+    [property: JsonPropertyName("member_role")] string? Member_Role);
+
+public sealed record CreateProjectRequest(
+    [property: JsonPropertyName("name")] string Name,
+    [property: JsonPropertyName("code")] string? Code);
+
 public sealed record RevitRoomPhotoResponse(
     [property: JsonPropertyName("room")] RoomDto Room,
     [property: JsonPropertyName("photos")] IReadOnlyList<PhotoDto> Photos);

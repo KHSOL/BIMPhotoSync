@@ -9,6 +9,7 @@ datasource db {
 }
 
 enum UserRole {
+  SUPER_ADMIN
   WORKER
   MANAGER
   PROJECT_ADMIN
