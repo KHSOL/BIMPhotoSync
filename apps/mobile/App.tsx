@@ -16,8 +16,27 @@ import { StatusBar } from "expo-status-bar";
 const API_BASE =
   process.env.EXPO_PUBLIC_API_BASE_URL ?? "https://bimphotosync-api-production.up.railway.app/api/v1";
 
-const trades = ["WATERPROOF", "TILE", "PAINT", "ELECTRIC", "MEP", "WINDOW", "CONCRETE", "OTHER"];
-const surfaces = ["FLOOR", "WALL", "CEILING", "WINDOW", "DOOR", "PIPE", "ELECTRIC", "OTHER"];
+const trades = [
+  ["WATERPROOF", "방수"],
+  ["TILE", "타일"],
+  ["PAINT", "도장"],
+  ["ELECTRIC", "전기"],
+  ["MEP", "설비"],
+  ["WINDOW", "창호"],
+  ["CONCRETE", "콘크리트"],
+  ["OTHER", "기타"]
+] as const;
+
+const surfaces = [
+  ["FLOOR", "바닥"],
+  ["WALL", "벽"],
+  ["CEILING", "천장"],
+  ["WINDOW", "창"],
+  ["DOOR", "문"],
+  ["PIPE", "배관"],
+  ["ELECTRIC", "전기"],
+  ["OTHER", "기타"]
+] as const;
 
 type Project = {
   id: string;
@@ -40,8 +59,16 @@ type User = {
   role: string;
 };
 
+type AuthResponse = {
+  data: {
+    access_token: string;
+    user: User;
+  };
+};
+
 export default function App() {
   const [authMode, setAuthMode] = useState<"login" | "register">("login");
+  const [registerRole, setRegisterRole] = useState<"WORKER" | "COMPANY_ADMIN">("WORKER");
   const [email, setEmail] = useState("dev@bim.local");
   const [password, setPassword] = useState("password123");
   const [name, setName] = useState("현장 작업자");
@@ -56,6 +83,7 @@ export default function App() {
   const [roomId, setRoomId] = useState("");
   const [images, setImages] = useState<ImagePicker.ImagePickerAsset[]>([]);
   const [status, setStatus] = useState("로그인 후 현장 사진을 Room에 연결하세요.");
+  const [uploading, setUploading] = useState(false);
   const [meta, setMeta] = useState({
     work_surface: "FLOOR",
     trade: "WATERPROOF",
@@ -71,8 +99,8 @@ export default function App() {
     const body =
       authMode === "login"
         ? { email, password }
-        : { email, password, name, company_name: companyName };
-    const json = await apiJson<{ data: { access_token: string; user: User } }>(path, {
+        : { email, password, name, company_name: companyName, role: registerRole };
+    const json = await apiJson<AuthResponse>(path, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body)
@@ -130,6 +158,11 @@ export default function App() {
   }
 
   async function pickImages() {
+    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!permission.granted) {
+      Alert.alert("앨범 권한 필요", "사진 선택을 위해 앨범 권한을 허용해주세요.");
+      return;
+    }
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ImagePicker.MediaTypeOptions.Images,
       allowsMultipleSelection: true,
@@ -144,38 +177,43 @@ export default function App() {
       return;
     }
 
-    for (const image of images) {
-      const mime = image.mimeType ?? "image/jpeg";
-      const fileResponse = await fetch(image.uri);
-      const blob = await fileResponse.blob();
-      const presign = await apiJson<{ data: { upload_id: string; presigned_url: string } }>("/uploads/photos/presign", {
-        method: "POST",
-        headers: { ...authHeaders(token), "Content-Type": "application/json" },
-        body: JSON.stringify({ project_id: projectId, mime_type: mime, file_size: blob.size })
-      });
+    setUploading(true);
+    try {
+      for (const image of images) {
+        const mime = image.mimeType ?? "image/jpeg";
+        const fileResponse = await fetch(image.uri);
+        const blob = await fileResponse.blob();
+        const presign = await apiJson<{ data: { upload_id: string; presigned_url: string } }>("/uploads/photos/presign", {
+          method: "POST",
+          headers: { ...authHeaders(token), "Content-Type": "application/json" },
+          body: JSON.stringify({ project_id: projectId, mime_type: mime, file_size: blob.size })
+        });
 
-      const putRes = await fetch(presign.data.presigned_url, {
-        method: "PUT",
-        headers: { "Content-Type": mime },
-        body: blob
-      });
-      if (!putRes.ok) throw new Error(`Object upload failed: ${putRes.status}`);
+        const putRes = await fetch(presign.data.presigned_url, {
+          method: "PUT",
+          headers: { "Content-Type": mime },
+          body: blob
+        });
+        if (!putRes.ok) throw new Error(`Object upload failed: ${putRes.status}`);
 
-      await apiJson("/photos", {
-        method: "POST",
-        headers: { ...authHeaders(token), "Content-Type": "application/json" },
-        body: JSON.stringify({
-          project_id: projectId,
-          room_id: roomId,
-          upload_id: presign.data.upload_id,
-          ...meta
-        })
-      });
+        await apiJson("/photos", {
+          method: "POST",
+          headers: { ...authHeaders(token), "Content-Type": "application/json" },
+          body: JSON.stringify({
+            project_id: projectId,
+            room_id: roomId,
+            upload_id: presign.data.upload_id,
+            ...meta
+          })
+        });
+      }
+
+      setImages([]);
+      setStatus("사진 업로드가 완료됐고 AI 분석 큐에 등록됐습니다.");
+      Alert.alert("업로드 완료", "사진이 Room에 연결됐습니다.");
+    } finally {
+      setUploading(false);
     }
-
-    setImages([]);
-    setStatus("사진 업로드가 완료됐고 AI 분석 큐에 등록됐습니다.");
-    Alert.alert("업로드 완료", "사진이 Room에 연결됐습니다.");
   }
 
   return (
@@ -183,29 +221,38 @@ export default function App() {
       <StatusBar style="dark" />
       <ScrollView contentContainerStyle={styles.container}>
         <View style={styles.header}>
-          <Text style={styles.logo}>BIM Photo Sync</Text>
-          <Text style={styles.clock}>09:41</Text>
+          <View>
+            <Text style={styles.logo}>BIM Photo Sync</Text>
+            <Text style={styles.subtitle}>Room 기준 현장 사진 업로드</Text>
+          </View>
+          <Text style={styles.userBadge}>{user ? user.role : "Guest"}</Text>
         </View>
 
-        <Section title="로그인">
+        <Section title="계정">
           <View style={styles.segmented}>
             <Pressable style={[styles.segment, authMode === "login" && styles.segmentActive]} onPress={() => setAuthMode("login")}>
               <Text style={[styles.segmentText, authMode === "login" && styles.segmentTextActive]}>로그인</Text>
             </Pressable>
             <Pressable style={[styles.segment, authMode === "register" && styles.segmentActive]} onPress={() => setAuthMode("register")}>
-              <Text style={[styles.segmentText, authMode === "register" && styles.segmentTextActive]}>가입</Text>
+              <Text style={[styles.segmentText, authMode === "register" && styles.segmentTextActive]}>회원가입</Text>
             </Pressable>
           </View>
-          <Input label="Email" value={email} onChangeText={setEmail} />
-          <Input label="Password" value={password} onChangeText={setPassword} secureTextEntry />
+          {authMode === "register" ? (
+            <View style={styles.roleRow}>
+              <RoleButton label="일반" active={registerRole === "WORKER"} onPress={() => setRegisterRole("WORKER")} />
+              <RoleButton label="상위 관리자" active={registerRole === "COMPANY_ADMIN"} onPress={() => setRegisterRole("COMPANY_ADMIN")} />
+            </View>
+          ) : null}
+          <Input label="이메일" value={email} onChangeText={setEmail} autoCapitalize="none" />
+          <Input label="비밀번호" value={password} onChangeText={setPassword} secureTextEntry />
           {authMode === "register" ? (
             <>
-              <Input label="Name" value={name} onChangeText={setName} />
-              <Input label="Company" value={companyName} onChangeText={setCompanyName} />
+              <Input label="이름" value={name} onChangeText={setName} />
+              <Input label="회사명" value={companyName} onChangeText={setCompanyName} />
             </>
           ) : null}
           <Pressable style={styles.primaryButton} onPress={() => authenticate().catch((err) => Alert.alert("오류", err.message))}>
-            <Text style={styles.primaryButtonText}>{user ? `${user.name} / ${user.role}` : "계정 연결"}</Text>
+            <Text style={styles.primaryButtonText}>{user ? `${user.name} 연결됨` : "계정 연결"}</Text>
           </Pressable>
         </Section>
 
@@ -225,8 +272,8 @@ export default function App() {
               </Pressable>
             ))}
           </View>
-          <Input label="Project Code" value={joinCode} onChangeText={setJoinCode} />
-          <Input label="Access Key" value={joinKey} onChangeText={setJoinKey} />
+          <Input label="프로젝트 코드" value={joinCode} onChangeText={setJoinCode} autoCapitalize="none" />
+          <Input label="접근키" value={joinKey} onChangeText={setJoinKey} autoCapitalize="none" />
           <Pressable style={styles.secondaryButton} onPress={() => joinProject().catch((err) => Alert.alert("오류", err.message))}>
             <Text style={styles.secondaryButtonText}>접근키로 참여</Text>
           </Pressable>
@@ -243,7 +290,7 @@ export default function App() {
           </View>
         </Section>
 
-        <Section title="메타데이터">
+        <Section title="사진 정보">
           <Text style={styles.label}>Room</Text>
           <View style={styles.chipGrid}>
             {rooms.map((room) => (
@@ -256,10 +303,10 @@ export default function App() {
             ))}
           </View>
           {selectedRoom ? <Text style={styles.caption}>선택 Room: {selectedRoom.room_name}</Text> : null}
-          <Selector label="Surface" value={meta.work_surface} values={surfaces} onChange={(work_surface) => setMeta({ ...meta, work_surface })} />
-          <Selector label="Trade" value={meta.trade} values={trades} onChange={(trade) => setMeta({ ...meta, trade })} />
-          <Input label="Work Date" value={meta.work_date} onChangeText={(work_date) => setMeta({ ...meta, work_date })} />
-          <Input label="Worker" value={meta.worker_name} onChangeText={(worker_name) => setMeta({ ...meta, worker_name })} />
+          <Selector label="공사면" value={meta.work_surface} values={surfaces} onChange={(work_surface) => setMeta({ ...meta, work_surface })} />
+          <Selector label="공종" value={meta.trade} values={trades} onChange={(trade) => setMeta({ ...meta, trade })} />
+          <Input label="작업일자" value={meta.work_date} onChangeText={(work_date) => setMeta({ ...meta, work_date })} />
+          <Input label="작성자" value={meta.worker_name} onChangeText={(worker_name) => setMeta({ ...meta, worker_name })} />
           <Input label="내용" value={meta.description} onChangeText={(description) => setMeta({ ...meta, description })} multiline />
         </Section>
 
@@ -269,7 +316,7 @@ export default function App() {
             <View key={`${image.uri}-${index}`} style={styles.previewRow}>
               <Image source={{ uri: image.uri }} style={styles.preview} />
               <Pressable style={styles.removeButton} onPress={() => setImages((current) => current.filter((_, i) => i !== index))}>
-                <Text style={styles.removeText}>X</Text>
+                <Text style={styles.removeText}>×</Text>
               </Pressable>
             </View>
           ))}
@@ -279,8 +326,8 @@ export default function App() {
           <Pressable style={styles.secondaryButton} onPress={() => setStatus("임시저장은 다음 단계에서 오프라인 큐로 확장합니다.")}>
             <Text style={styles.secondaryButtonText}>임시저장</Text>
           </Pressable>
-          <Pressable style={styles.primaryButton} onPress={() => upload().catch((err) => Alert.alert("오류", err.message))}>
-            <Text style={styles.primaryButtonText}>업로드</Text>
+          <Pressable style={[styles.primaryButton, uploading && styles.disabledButton]} disabled={uploading} onPress={() => upload().catch((err) => Alert.alert("오류", err.message))}>
+            <Text style={styles.primaryButtonText}>{uploading ? "업로드 중" : "업로드"}</Text>
           </Pressable>
         </View>
         <Text style={styles.status}>{status}</Text>
@@ -298,12 +345,21 @@ function Section({ title, children }: { title: string; children: React.ReactNode
   );
 }
 
+function RoleButton({ label, active, onPress }: { label: string; active: boolean; onPress: () => void }) {
+  return (
+    <Pressable style={[styles.roleButton, active && styles.chipActive]} onPress={onPress}>
+      <Text style={[styles.chipText, active && styles.chipTextActive]}>{label}</Text>
+    </Pressable>
+  );
+}
+
 function Input(props: {
   label: string;
   value: string;
   onChangeText: (value: string) => void;
   multiline?: boolean;
   secureTextEntry?: boolean;
+  autoCapitalize?: "none" | "sentences" | "words" | "characters";
 }) {
   return (
     <View style={styles.field}>
@@ -313,14 +369,19 @@ function Input(props: {
   );
 }
 
-function Selector(props: { label: string; value: string; values: string[]; onChange: (value: string) => void }) {
+function Selector(props: {
+  label: string;
+  value: string;
+  values: readonly (readonly [string, string])[];
+  onChange: (value: string) => void;
+}) {
   return (
     <View style={styles.field}>
       <Text style={styles.label}>{props.label}</Text>
       <View style={styles.chipGrid}>
-        {props.values.map((value) => (
+        {props.values.map(([value, label]) => (
           <Pressable key={value} style={[styles.smallChip, props.value === value && styles.chipActive]} onPress={() => props.onChange(value)}>
-            <Text style={[styles.chipText, props.value === value && styles.chipTextActive]}>{value}</Text>
+            <Text style={[styles.chipText, props.value === value && styles.chipTextActive]}>{label}</Text>
           </Pressable>
         ))}
       </View>
@@ -345,9 +406,10 @@ async function apiJson<T>(path: string, options: RequestInit = {}) {
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: "#F8FAFC" },
   container: { padding: 16, paddingBottom: 28 },
-  header: { minHeight: 48, flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
-  logo: { fontSize: 20, color: "#0F172A", fontWeight: "800" },
-  clock: { fontSize: 16, color: "#334155", fontWeight: "700" },
+  header: { minHeight: 56, flexDirection: "row", alignItems: "center", justifyContent: "space-between" },
+  logo: { fontSize: 21, color: "#0F172A", fontWeight: "800" },
+  subtitle: { fontSize: 12, color: "#64748B", marginTop: 3 },
+  userBadge: { color: "#2563EB", fontWeight: "800", fontSize: 12 },
   card: {
     backgroundColor: "#FFFFFF",
     borderColor: "#E2E8F0",
@@ -360,7 +422,7 @@ const styles = StyleSheet.create({
   field: { marginTop: 10 },
   label: { fontSize: 13, lineHeight: 18, color: "#334155", fontWeight: "700", marginBottom: 6 },
   input: {
-    minHeight: 46,
+    minHeight: 48,
     borderColor: "#CBD5E1",
     borderWidth: 1,
     borderRadius: 8,
@@ -383,9 +445,19 @@ const styles = StyleSheet.create({
   segmentActive: { borderColor: "#2563EB", backgroundColor: "#EFF6FF" },
   segmentText: { color: "#475569", fontWeight: "700" },
   segmentTextActive: { color: "#2563EB" },
+  roleRow: { flexDirection: "row", gap: 8, marginBottom: 8 },
+  roleButton: {
+    flex: 1,
+    minHeight: 42,
+    alignItems: "center",
+    justifyContent: "center",
+    borderColor: "#CBD5E1",
+    borderWidth: 1,
+    borderRadius: 8
+  },
   quickRow: { flexDirection: "row" },
   primaryButton: {
-    minHeight: 46,
+    minHeight: 48,
     alignItems: "center",
     justifyContent: "center",
     backgroundColor: "#2563EB",
@@ -396,7 +468,7 @@ const styles = StyleSheet.create({
   },
   primaryButtonText: { color: "#FFFFFF", fontWeight: "800", fontSize: 14 },
   secondaryButton: {
-    minHeight: 46,
+    minHeight: 48,
     alignItems: "center",
     justifyContent: "center",
     borderColor: "#2563EB",
@@ -406,6 +478,7 @@ const styles = StyleSheet.create({
     flex: 1
   },
   secondaryButtonText: { color: "#2563EB", fontWeight: "800" },
+  disabledButton: { opacity: 0.65 },
   chipGrid: { flexDirection: "row", flexWrap: "wrap", marginTop: 4 },
   chip: {
     borderColor: "#CBD5E1",
@@ -443,7 +516,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center"
   },
-  removeText: { color: "#334155", fontSize: 18, fontWeight: "800" },
+  removeText: { color: "#334155", fontSize: 24, fontWeight: "800" },
   footerActions: { flexDirection: "row", marginTop: 14 },
   status: { marginTop: 12, color: "#64748B", fontSize: 12, lineHeight: 18 }
 });

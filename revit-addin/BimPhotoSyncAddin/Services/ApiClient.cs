@@ -55,6 +55,15 @@ public sealed class ApiClient
         return await response.Content.ReadFromJsonAsync<SyncRoomsResponse>().ConfigureAwait(false);
     }
 
+    public async Task<SyncFloorPlanResponse?> SyncFloorPlanAsync(SyncFloorPlanRequest request)
+    {
+        PrepareHeaders();
+        var response = await _http.PostAsJsonAsync($"{AddinSettings.ApiBaseUrl}/revit/floor-plans", request)
+            .ConfigureAwait(false);
+        response.EnsureSuccessStatusCode();
+        return await response.Content.ReadFromJsonAsync<SyncFloorPlanResponse>().ConfigureAwait(false);
+    }
+
     private void PrepareHeaders()
     {
         _http.DefaultRequestHeaders.Authorization = null;

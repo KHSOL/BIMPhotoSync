@@ -36,6 +36,45 @@ export type Room = {
   status: string;
 };
 
+export type PlanPoint = {
+  x: number;
+  y: number;
+};
+
+export type PlanBounds = {
+  min_x: number;
+  min_y: number;
+  max_x: number;
+  max_y: number;
+  width: number;
+  height: number;
+};
+
+export type FloorPlanRoom = {
+  room_id?: string | null;
+  bim_photo_room_id: string;
+  revit_unique_id: string;
+  revit_element_id: string;
+  room_number?: string | null;
+  room_name: string;
+  level_name?: string | null;
+  area_m2?: number | null;
+  center: PlanPoint;
+  polygon: PlanPoint[];
+};
+
+export type RevitFloorPlan = {
+  id: string;
+  project_id: string;
+  revit_model_id?: string | null;
+  level_name: string;
+  view_name: string;
+  source_view_id?: string | null;
+  bounds: PlanBounds;
+  rooms: FloorPlanRoom[];
+  created_at: string;
+};
+
 export type Photo = {
   id: string;
   project_id: string;

@@ -81,3 +81,44 @@ public sealed record RoomMappingDto(
     [property: JsonPropertyName("revit_unique_id")] string Revit_Unique_Id,
     [property: JsonPropertyName("revit_element_id")] string Revit_Element_Id);
 
+public sealed record SyncFloorPlanRequest(
+    [property: JsonPropertyName("project_id")] string Project_Id,
+    [property: JsonPropertyName("revit_model_id")] string? Revit_Model_Id,
+    [property: JsonPropertyName("level_name")] string Level_Name,
+    [property: JsonPropertyName("view_name")] string View_Name,
+    [property: JsonPropertyName("source_view_id")] string? Source_View_Id,
+    [property: JsonPropertyName("bounds")] PlanBoundsDto Bounds,
+    [property: JsonPropertyName("rooms")] IReadOnlyList<FloorPlanRoomDto> Rooms);
+
+public sealed record PlanPointDto(
+    [property: JsonPropertyName("x")] double X,
+    [property: JsonPropertyName("y")] double Y);
+
+public sealed record PlanBoundsDto(
+    [property: JsonPropertyName("min_x")] double Min_X,
+    [property: JsonPropertyName("min_y")] double Min_Y,
+    [property: JsonPropertyName("max_x")] double Max_X,
+    [property: JsonPropertyName("max_y")] double Max_Y,
+    [property: JsonPropertyName("width")] double Width,
+    [property: JsonPropertyName("height")] double Height);
+
+public sealed record FloorPlanRoomDto(
+    [property: JsonPropertyName("room_id")] string? Room_Id,
+    [property: JsonPropertyName("bim_photo_room_id")] string Bim_Photo_Room_Id,
+    [property: JsonPropertyName("revit_unique_id")] string Revit_Unique_Id,
+    [property: JsonPropertyName("revit_element_id")] string Revit_Element_Id,
+    [property: JsonPropertyName("room_number")] string? Room_Number,
+    [property: JsonPropertyName("room_name")] string Room_Name,
+    [property: JsonPropertyName("level_name")] string? Level_Name,
+    [property: JsonPropertyName("area_m2")] double? Area_M2,
+    [property: JsonPropertyName("center")] PlanPointDto Center,
+    [property: JsonPropertyName("polygon")] IReadOnlyList<PlanPointDto> Polygon);
+
+public sealed record SyncFloorPlanResponse([property: JsonPropertyName("data")] SyncedFloorPlanDto Data);
+
+public sealed record SyncedFloorPlanDto(
+    [property: JsonPropertyName("id")] string Id,
+    [property: JsonPropertyName("project_id")] string Project_Id,
+    [property: JsonPropertyName("level_name")] string Level_Name,
+    [property: JsonPropertyName("view_name")] string View_Name);
+

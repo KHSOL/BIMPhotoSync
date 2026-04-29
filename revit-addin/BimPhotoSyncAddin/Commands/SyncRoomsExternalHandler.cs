@@ -70,6 +70,8 @@ public sealed class SyncRoomsExternalHandler : IExternalEventHandler
             tx.Commit();
             ValidationLog.Write("Committed BIM_PHOTO_ROOM_ID writes.");
 
+            SyncFloorPlan(doc, response.Data.Room_Mappings);
+
             if (Environment.GetEnvironmentVariable("BIM_PHOTO_SYNC_AUTORUN_SELECT_AFTER_SYNC") == "1")
             {
                 RoomMappingDto? selectedMapping = SelectValidationRoom(response.Data.Room_Mappings);
@@ -106,6 +108,166 @@ public sealed class SyncRoomsExternalHandler : IExternalEventHandler
         }
 
         return mappings.FirstOrDefault();
+    }
+
+    private static void SyncFloorPlan(Document doc, IReadOnlyList<RoomMappingDto> mappings)
+    {
+        if (mappings.Count == 0) return;
+
+        View activeView = doc.ActiveView;
+        string levelName = GetActiveLevelName(doc, activeView);
+        Dictionary<string, RoomMappingDto> mappingsByElementId = mappings
+            .Where(mapping => !string.IsNullOrWhiteSpace(mapping.Revit_Element_Id))
+            .ToDictionary(mapping => mapping.Revit_Element_Id, mapping => mapping);
+
+        List<FloorPlanRoomDto> planRooms = new();
+        foreach (SpatialElement room in new FilteredElementCollector(doc, activeView.Id)
+                     .OfCategory(BuiltInCategory.OST_Rooms)
+                     .WhereElementIsNotElementType()
+                     .Cast<SpatialElement>())
+        {
+            string elementId = room.Id.Value.ToString();
+            if (!mappingsByElementId.TryGetValue(elementId, out RoomMappingDto? mapping)) continue;
+
+            IReadOnlyList<PlanPointDto> polygon = GetRoomBoundary(room);
+            if (polygon.Count < 3) continue;
+
+            PlanPointDto center = GetRoomCenter(room, polygon);
+            planRooms.Add(new FloorPlanRoomDto(
+                Room_Id: mapping.Room_Id,
+                Bim_Photo_Room_Id: mapping.Bim_Photo_Room_Id,
+                Revit_Unique_Id: mapping.Revit_Unique_Id,
+                Revit_Element_Id: mapping.Revit_Element_Id,
+                Room_Number: room.get_Parameter(BuiltInParameter.ROOM_NUMBER)?.AsString(),
+                Room_Name: room.get_Parameter(BuiltInParameter.ROOM_NAME)?.AsString() ?? "Unnamed Room",
+                Level_Name: doc.GetElement(room.LevelId)?.Name ?? levelName,
+                Area_M2: GetRoomAreaM2(room),
+                Center: center,
+                Polygon: polygon));
+        }
+
+        if (planRooms.Count == 0)
+        {
+            ValidationLog.Write("Skipped floor plan sync: active view has no bounded Rooms.");
+            return;
+        }
+
+        PlanBoundsDto bounds = CalculateBounds(planRooms.SelectMany(room => room.Polygon));
+        SyncFloorPlanResponse? floorPlanResponse = new ApiClient()
+            .SyncFloorPlanAsync(new SyncFloorPlanRequest(
+                AddinSettings.ProjectId,
+                AddinSettings.RevitModelId,
+                levelName,
+                activeView.Name,
+                activeView.Id.Value.ToString(),
+                bounds,
+                planRooms))
+            .GetAwaiter()
+            .GetResult();
+
+        ValidationLog.Write(
+            floorPlanResponse == null
+                ? "Floor plan sync returned null."
+                : $"Synced floor plan {floorPlanResponse.Data.Id} for {levelName} with {planRooms.Count} rooms.");
+    }
+
+    private static string GetActiveLevelName(Document doc, View activeView)
+    {
+        if (activeView is ViewPlan viewPlan && viewPlan.GenLevel != null) return viewPlan.GenLevel.Name;
+        return doc.ActiveView.Name;
+    }
+
+    private static IReadOnlyList<PlanPointDto> GetRoomBoundary(SpatialElement room)
+    {
+        SpatialElementBoundaryOptions options = new()
+        {
+            SpatialElementBoundaryLocation = SpatialElementBoundaryLocation.Finish
+        };
+        IList<IList<BoundarySegment>>? loops = room.GetBoundarySegments(options);
+        if (loops == null || loops.Count == 0) return Array.Empty<PlanPointDto>();
+
+        IList<BoundarySegment> outerLoop = loops
+            .OrderByDescending(loop => Math.Abs(SignedArea(loop.SelectMany(segment => SegmentPoints(segment.GetCurve())))))
+            .First();
+
+        List<PlanPointDto> points = new();
+        foreach (BoundarySegment segment in outerLoop)
+        {
+            XYZ start = segment.GetCurve().GetEndPoint(0);
+            AddPoint(points, new PlanPointDto(Math.Round(start.X, 4), Math.Round(start.Y, 4)));
+        }
+        return points;
+    }
+
+    private static IEnumerable<XYZ> SegmentPoints(Curve curve)
+    {
+        yield return curve.GetEndPoint(0);
+        yield return curve.GetEndPoint(1);
+    }
+
+    private static void AddPoint(List<PlanPointDto> points, PlanPointDto point)
+    {
+        PlanPointDto? previous = points.LastOrDefault();
+        if (previous != null && Math.Abs(previous.X - point.X) < 0.001 && Math.Abs(previous.Y - point.Y) < 0.001) return;
+        points.Add(point);
+    }
+
+    private static double SignedArea(IEnumerable<XYZ> xyzPoints)
+    {
+        List<XYZ> points = xyzPoints.ToList();
+        if (points.Count < 3) return 0;
+        double area = 0;
+        for (int i = 0; i < points.Count; i++)
+        {
+            XYZ current = points[i];
+            XYZ next = points[(i + 1) % points.Count];
+            area += current.X * next.Y - next.X * current.Y;
+        }
+        return area / 2;
+    }
+
+    private static PlanPointDto GetRoomCenter(SpatialElement room, IReadOnlyList<PlanPointDto> polygon)
+    {
+        if (room.Location is LocationPoint locationPoint)
+        {
+            return new PlanPointDto(Math.Round(locationPoint.Point.X, 4), Math.Round(locationPoint.Point.Y, 4));
+        }
+
+        return new PlanPointDto(
+            Math.Round(polygon.Average(point => point.X), 4),
+            Math.Round(polygon.Average(point => point.Y), 4));
+    }
+
+    private static double? GetRoomAreaM2(SpatialElement room)
+    {
+        Parameter? area = room.get_Parameter(BuiltInParameter.ROOM_AREA);
+        if (area == null || !area.HasValue) return null;
+        return Math.Round(UnitUtils.ConvertFromInternalUnits(area.AsDouble(), UnitTypeId.SquareMeters), 2);
+    }
+
+    private static PlanBoundsDto CalculateBounds(IEnumerable<PlanPointDto> points)
+    {
+        List<PlanPointDto> list = points.ToList();
+        double minX = list.Min(point => point.X);
+        double minY = list.Min(point => point.Y);
+        double maxX = list.Max(point => point.X);
+        double maxY = list.Max(point => point.Y);
+        double width = Math.Max(1, maxX - minX);
+        double height = Math.Max(1, maxY - minY);
+        double padding = Math.Max(width, height) * 0.08;
+
+        minX -= padding;
+        minY -= padding;
+        maxX += padding;
+        maxY += padding;
+
+        return new PlanBoundsDto(
+            Math.Round(minX, 4),
+            Math.Round(minY, 4),
+            Math.Round(maxX, 4),
+            Math.Round(maxY, 4),
+            Math.Round(maxX - minX, 4),
+            Math.Round(maxY - minY, 4));
     }
 
     private static void EnsureSharedParameter(Document doc, UIApplication uiapp)

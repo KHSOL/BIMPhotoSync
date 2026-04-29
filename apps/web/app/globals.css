@@ -1770,6 +1770,76 @@ a {
   background-size: 72px 72px;
 }
 
+.real-floor-plan {
+  display: grid;
+  place-items: center;
+  padding: 28px;
+}
+
+.floor-plan-svg {
+  width: 100%;
+  height: 100%;
+  min-height: 560px;
+  display: block;
+}
+
+.plan-grid line {
+  stroke: #e2e8f0;
+  stroke-width: 0.035;
+}
+
+.revit-room-shape {
+  cursor: pointer;
+}
+
+.revit-room-shape polygon {
+  fill: rgba(248, 250, 252, 0.92);
+  stroke: #94a3b8;
+  stroke-width: 0.12;
+  vector-effect: non-scaling-stroke;
+  transition: fill 0.18s ease, stroke 0.18s ease;
+}
+
+.revit-room-shape circle {
+  fill: var(--blue-500);
+  stroke: #fff;
+  stroke-width: 0.12;
+  vector-effect: non-scaling-stroke;
+}
+
+.revit-room-shape text {
+  fill: #0f172a;
+  font-size: 1.25px;
+  font-weight: 800;
+  pointer-events: none;
+  user-select: none;
+}
+
+.revit-room-shape .room-name {
+  fill: #475569;
+  font-size: 0.9px;
+  font-weight: 700;
+}
+
+.revit-room-shape:hover polygon,
+.revit-room-shape.selected polygon {
+  fill: rgba(37, 99, 235, 0.18);
+  stroke: var(--blue-500);
+}
+
+.revit-room-shape.selected polygon {
+  stroke-width: 0.18;
+}
+
+.real-plan-empty {
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: 10px;
+  color: var(--gray-500);
+  text-align: center;
+}
+
 .floor-room {
   position: absolute;
   border: 2px solid #cbd5e1;
@@ -1905,6 +1975,14 @@ a {
 
 .strip-photo .photo-fallback {
   height: 96px;
+}
+
+.strip-photo img {
+  width: 100%;
+  height: 96px;
+  display: block;
+  object-fit: cover;
+  background: var(--gray-100);
 }
 
 .strip-photo strong,

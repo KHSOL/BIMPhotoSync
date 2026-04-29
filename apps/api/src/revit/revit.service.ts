@@ -1,10 +1,11 @@
 import { Injectable, NotFoundException } from "@nestjs/common";
 import { randomUUID } from "crypto";
 import { ConfigService } from "@nestjs/config";
+import { Prisma } from "@prisma/client";
 import { PrismaService } from "../prisma/prisma.service";
 import { ProjectsService } from "../projects/projects.service";
 import { toPhotoResponse } from "../photos/photos.service";
-import { RevitConnectDto, SyncRoomsDto } from "./dto";
+import { RevitConnectDto, SyncFloorPlanDto, SyncRoomsDto } from "./dto";
 
 @Injectable()
 export class RevitService {
@@ -62,6 +63,34 @@ export class RevitService {
     return { data: { project_id: dto.project_id, room_mappings: mappings } };
   }
 
+  async syncFloorPlan(user: { sub: string; companyId: string; role: string }, dto: SyncFloorPlanDto) {
+    await this.projects.assertProjectRole(user, dto.project_id, ["BIM_MANAGER", "PROJECT_ADMIN", "COMPANY_ADMIN"]);
+
+    const floorPlan = await this.prisma.revitFloorPlan.create({
+      data: {
+        projectId: dto.project_id,
+        revitModelId: dto.revit_model_id,
+        levelName: dto.level_name,
+        viewName: dto.view_name,
+        sourceViewId: dto.source_view_id,
+        bounds: dto.bounds as unknown as Prisma.InputJsonValue,
+        rooms: dto.rooms as unknown as Prisma.InputJsonValue
+      }
+    });
+
+    return { data: toFloorPlanResponse(floorPlan) };
+  }
+
+  async floorPlans(user: { sub: string; companyId: string }, projectId: string) {
+    await this.projects.assertProjectAccess(user.sub, user.companyId, projectId);
+    const plans = await this.prisma.revitFloorPlan.findMany({
+      where: { projectId },
+      orderBy: [{ createdAt: "desc" }],
+      take: 20
+    });
+    return { data: plans.map(toFloorPlanResponse) };
+  }
+
   async roomPhotos(user: { sub: string; companyId: string }, bimPhotoRoomId: string) {
     const room = await this.prisma.room.findUnique({ where: { bimPhotoRoomId }, include: { project: true } });
     if (!room) throw new NotFoundException("Room mapping not found.");
@@ -85,4 +114,28 @@ export class RevitService {
       }
     };
   }
+}
+
+function toFloorPlanResponse(plan: {
+  id: string;
+  projectId: string;
+  revitModelId: string | null;
+  levelName: string;
+  viewName: string;
+  sourceViewId: string | null;
+  bounds: Prisma.JsonValue;
+  rooms: Prisma.JsonValue;
+  createdAt: Date;
+}) {
+  return {
+    id: plan.id,
+    project_id: plan.projectId,
+    revit_model_id: plan.revitModelId,
+    level_name: plan.levelName,
+    view_name: plan.viewName,
+    source_view_id: plan.sourceViewId,
+    bounds: plan.bounds,
+    rooms: plan.rooms,
+    created_at: plan.createdAt
+  };
 }

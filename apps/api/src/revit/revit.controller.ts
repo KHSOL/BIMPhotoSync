@@ -1,7 +1,7 @@
 import { Body, Controller, Get, Param, Post, UseGuards } from "@nestjs/common";
 import { CurrentUser, JwtUser } from "../common/current-user";
 import { JwtAuthGuard } from "../common/jwt-auth.guard";
-import { RevitConnectDto, SyncRoomsDto } from "./dto";
+import { RevitConnectDto, SyncFloorPlanDto, SyncRoomsDto } from "./dto";
 import { RevitService } from "./revit.service";
 
 @Controller("revit")
@@ -17,6 +17,16 @@ export class RevitController {
   @Post("sync-rooms")
   syncRooms(@CurrentUser() user: JwtUser, @Body() dto: SyncRoomsDto) {
     return this.revit.syncRooms(user, dto);
+  }
+
+  @Post("floor-plans")
+  syncFloorPlan(@CurrentUser() user: JwtUser, @Body() dto: SyncFloorPlanDto) {
+    return this.revit.syncFloorPlan(user, dto);
+  }
+
+  @Get("projects/:projectId/floor-plans")
+  floorPlans(@CurrentUser() user: JwtUser, @Param("projectId") projectId: string) {
+    return this.revit.floorPlans(user, projectId);
   }
 
   @Get("rooms/:bimPhotoRoomId/photos")
