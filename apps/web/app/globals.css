@@ -1166,6 +1166,75 @@ a {
   line-height: 30px;
 }
 
+.metric-card > span:first-child {
+  width: 48px;
+  height: 48px;
+  border-radius: 999px;
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+}
+
+.metric-card.blue > span:first-child,
+.metric-card.sky > span:first-child { background: var(--blue-50); color: var(--blue-500); }
+.metric-card.green > span:first-child { background: #ecfdf5; color: #16a34a; }
+.metric-card.orange > span:first-child { background: #fff7ed; color: #f59e0b; }
+.metric-card.red > span:first-child { background: #fef2f2; color: #ef4444; }
+.metric-card.purple > span:first-child { background: #f5f3ff; color: #8b5cf6; }
+
+.dashboard-project-filter {
+  min-width: 260px;
+}
+
+.revit-import-steps {
+  display: grid;
+  gap: 8px;
+  margin: 14px 0;
+}
+
+.revit-import-steps span {
+  border: 1px solid var(--gray-200);
+  border-radius: 8px;
+  background: var(--gray-50);
+  color: var(--gray-700);
+  padding: 10px 12px;
+  font-size: 13px;
+  line-height: 18px;
+}
+
+.mypage-grid {
+  display: grid;
+  grid-template-columns: minmax(320px, 0.9fr) minmax(320px, 1fr) minmax(280px, 0.8fr);
+  gap: 18px;
+}
+
+.info-list {
+  display: grid;
+  gap: 12px;
+  margin: 0;
+}
+
+.info-list div {
+  border-bottom: 1px solid var(--gray-200);
+  display: grid;
+  gap: 5px;
+  padding-bottom: 12px;
+}
+
+.info-list dt {
+  color: var(--gray-500);
+  font-size: 12px;
+}
+
+.info-list dd {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 0;
+  color: var(--ink);
+  font-weight: 700;
+}
+
 .metric-icon {
   width: 48px;
   height: 48px;

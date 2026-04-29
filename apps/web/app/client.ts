@@ -4,6 +4,7 @@ export const API_BASE =
 export type User = {
   id: string;
   company_id: string;
+  company_name?: string | null;
   email: string;
   name: string;
   role: string;

@@ -58,7 +58,7 @@ export class AuthService {
     return { data: user };
   }
 
-  private authResponse(user: { id: string; companyId: string; email: string; name: string; role: UserRole; company?: unknown }) {
+  private authResponse(user: { id: string; companyId: string; email: string; name: string; role: UserRole; company?: { name: string } | null }) {
     const access_token = this.jwt.sign({
       sub: user.id,
       companyId: user.companyId,
@@ -71,6 +71,7 @@ export class AuthService {
         user: {
           id: user.id,
           company_id: user.companyId,
+          company_name: user.company?.name ?? null,
           email: user.email,
           name: user.name,
           role: user.role

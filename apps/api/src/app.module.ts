@@ -5,6 +5,7 @@ import { AdminModule } from "./admin/admin.module";
 import { AppController } from "./app.controller";
 import { AiModule } from "./ai/ai.module";
 import { AuthModule } from "./auth/auth.module";
+import { DashboardModule } from "./dashboard/dashboard.module";
 import { PhotosModule } from "./photos/photos.module";
 import { PrismaModule } from "./prisma/prisma.module";
 import { ProjectsModule } from "./projects/projects.module";
@@ -25,6 +26,7 @@ import { UploadsModule } from "./uploads/uploads.module";
     PrismaModule,
     AdminModule,
     AuthModule,
+    DashboardModule,
     ProjectsModule,
     RoomsModule,
     UploadsModule,
