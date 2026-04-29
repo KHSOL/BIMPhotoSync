@@ -11,7 +11,8 @@
     "dev:worker": "npm --workspace apps/ai-worker run start:dev",
     "dev:web": "npm --workspace apps/web run dev",
     "typecheck": "npm --workspaces --if-present run typecheck",
-    "build": "npm --workspaces --if-present run build"
+    "build": "npm --workspaces --if-present run build",
+    "create:super-admin": "node scripts/create-super-admin.mjs"
   },
   "engines": {
     "node": ">=20"

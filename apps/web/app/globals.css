@@ -1066,6 +1066,36 @@ a {
   grid-template-columns: minmax(180px, 1fr) minmax(260px, 1.6fr) auto auto;
 }
 
+.admin-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.3fr) minmax(320px, 0.7fr);
+  gap: 16px;
+}
+
+.admin-company-list,
+.admin-photo-list,
+.admin-project-list {
+  display: grid;
+  gap: 10px;
+}
+
+.admin-company,
+.admin-photo-list > div,
+.admin-project-list > div {
+  border: 1px solid var(--gray-200);
+  border-radius: 8px;
+  padding: 12px;
+  display: grid;
+  gap: 5px;
+}
+
+.admin-company span,
+.admin-photo-list span,
+.admin-photo-list small,
+.admin-project-list span {
+  color: var(--gray-500);
+}
+
 .field.compact {
   gap: 5px;
 }

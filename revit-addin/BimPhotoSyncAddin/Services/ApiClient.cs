@@ -24,6 +24,31 @@ public sealed class ApiClient
         return response?.Data;
     }
 
+    public async Task<AuthResponse?> LoginAsync(LoginRequest request)
+    {
+        var response = await _http.PostAsJsonAsync($"{AddinSettings.ApiBaseUrl}/auth/login", request)
+            .ConfigureAwait(false);
+        response.EnsureSuccessStatusCode();
+        return await response.Content.ReadFromJsonAsync<AuthResponse>().ConfigureAwait(false);
+    }
+
+    public async Task<ProjectListResponse?> GetProjectsAsync()
+    {
+        PrepareHeaders();
+        return await _http.GetFromJsonAsync<ProjectListResponse>($"{AddinSettings.ApiBaseUrl}/projects")
+            .ConfigureAwait(false);
+    }
+
+    public async Task<ProjectListItem?> CreateProjectAsync(CreateProjectRequest request)
+    {
+        PrepareHeaders();
+        var response = await _http.PostAsJsonAsync($"{AddinSettings.ApiBaseUrl}/projects", request)
+            .ConfigureAwait(false);
+        response.EnsureSuccessStatusCode();
+        ProjectResponse? envelope = await response.Content.ReadFromJsonAsync<ProjectResponse>().ConfigureAwait(false);
+        return envelope?.Data;
+    }
+
     public async Task<ConnectProjectResponse?> ConnectProjectAsync(ConnectProjectRequest request)
     {
         PrepareHeaders();
