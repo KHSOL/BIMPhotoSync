@@ -1062,6 +1062,10 @@ a {
   grid-template-columns: minmax(210px, 1.2fr) repeat(4, minmax(150px, 1fr)) minmax(260px, 1.6fr) auto;
 }
 
+.rooms-filter-row {
+  grid-template-columns: minmax(180px, 1fr) minmax(260px, 1.6fr) auto auto;
+}
+
 .field.compact {
   gap: 5px;
 }

@@ -31,6 +31,8 @@ export default function ViewerPage() {
   const [plans, setPlans] = useState<RevitFloorPlan[]>([]);
   const [planId, setPlanId] = useState("");
   const [selectedRoomId, setSelectedRoomId] = useState("");
+  const [activeTool, setActiveTool] = useState<"select" | "measure" | "note" | "section" | "settings">("select");
+  const [treeQuery, setTreeQuery] = useState("");
   const [photos, setPhotos] = useState<Photo[]>([]);
   const [status, setStatus] = useState("Revit Add-in에서 Sync Rooms를 실행하면 실제 Room 도면이 표시됩니다.");
 
@@ -47,6 +49,13 @@ export default function ViewerPage() {
     () => selectedPlan?.rooms.find((room) => room.bim_photo_room_id === selectedRoomId) ?? selectedPlan?.rooms[0],
     [selectedPlan, selectedRoomId]
   );
+  const visibleLevels = useMemo(
+    () => levels.filter((level) => level.toLowerCase().includes(treeQuery.trim().toLowerCase())),
+    [levels, treeQuery]
+  );
+  const selectedPhotosHref = selectedRoom?.room_id
+    ? `/photos?project_id=${projectId}&room_id=${selectedRoom.room_id}`
+    : "/photos";
 
   useEffect(() => {
     if (!token || !selectedRoom) return;
@@ -144,7 +153,7 @@ export default function ViewerPage() {
         <label className="field compact">
           <span className="label">층</span>
           <select className="input" value={selectedPlan?.level_name ?? ""} onChange={(event) => setPlanId(plans.find((plan) => plan.level_name === event.target.value)?.id ?? "")}>
-            {levels.map((level) => (
+            {visibleLevels.map((level) => (
               <option key={level} value={level}>
                 {level}
               </option>
@@ -152,10 +161,10 @@ export default function ViewerPage() {
           </select>
         </label>
         <div className="tool-segment">
-          <button className="active" type="button"><MousePointer2 size={17} />선택</button>
-          <button type="button"><Ruler size={17} />측정</button>
-          <button type="button"><Crosshair size={17} />주석</button>
-          <button type="button"><Box size={17} />단면</button>
+          <button className={activeTool === "select" ? "active" : ""} type="button" onClick={() => setActiveTool("select")}><MousePointer2 size={17} />선택</button>
+          <button className={activeTool === "measure" ? "active" : ""} type="button" onClick={() => setActiveTool("measure")}><Ruler size={17} />측정</button>
+          <button className={activeTool === "note" ? "active" : ""} type="button" onClick={() => setActiveTool("note")}><Crosshair size={17} />주석</button>
+          <button className={activeTool === "section" ? "active" : ""} type="button" onClick={() => setActiveTool("section")}><Box size={17} />단면</button>
         </div>
         <div className="tool-segment small">
           <button className="active" type="button">2D</button>
@@ -171,11 +180,11 @@ export default function ViewerPage() {
           <h2 className="section-title">층 / 뷰</h2>
           <label className="search-box">
             <Search size={16} />
-            <input placeholder="층 이름 검색" />
+            <input value={treeQuery} onChange={(event) => setTreeQuery(event.target.value)} placeholder="층 이름 검색" />
           </label>
           <div className="tree-group">
             <strong><Layers size={16} /> 실제 Revit 모델</strong>
-            {levels.map((level) => (
+            {visibleLevels.map((level) => (
               <button className={level === selectedPlan?.level_name ? "active" : ""} key={level} type="button" onClick={() => setPlanId(plans.find((plan) => plan.level_name === level)?.id ?? "")}>
                 <span>{level}</span>
                 <small>{level === selectedPlan?.level_name ? <Eye size={14} /> : ""}</small>
@@ -204,12 +213,12 @@ export default function ViewerPage() {
             </div>
           )}
           <div className="floating-tools">
-            <button type="button"><Move size={19} /></button>
-            <button className="active" type="button"><MousePointer2 size={19} /></button>
-            <button type="button"><Crosshair size={19} /></button>
-            <button type="button"><Box size={19} /></button>
-            <button type="button"><Ruler size={19} /></button>
-            <button type="button"><Settings size={19} /></button>
+            <button className={activeTool === "select" ? "active" : ""} type="button" onClick={() => setActiveTool("select")}><Move size={19} /></button>
+            <button className={activeTool === "select" ? "active" : ""} type="button" onClick={() => setActiveTool("select")}><MousePointer2 size={19} /></button>
+            <button className={activeTool === "note" ? "active" : ""} type="button" onClick={() => setActiveTool("note")}><Crosshair size={19} /></button>
+            <button className={activeTool === "section" ? "active" : ""} type="button" onClick={() => setActiveTool("section")}><Box size={19} /></button>
+            <button className={activeTool === "measure" ? "active" : ""} type="button" onClick={() => setActiveTool("measure")}><Ruler size={19} /></button>
+            <button className={activeTool === "settings" ? "active" : ""} type="button" onClick={() => setActiveTool("settings")}><Settings size={19} /></button>
           </div>
         </main>
 
@@ -217,7 +226,9 @@ export default function ViewerPage() {
           <section className="panel ref-card selected-room-card">
             <div className="room-detail-head">
               <h2>선택된 Room</h2>
-              <X size={18} />
+              <button className="icon-button" type="button" onClick={() => setSelectedRoomId("")} aria-label="Room 선택 해제">
+                <X size={18} />
+              </button>
             </div>
             {selectedRoom ? (
               <>
@@ -229,7 +240,7 @@ export default function ViewerPage() {
                   <dt>Revit Element</dt><dd>{selectedRoom.revit_element_id}</dd>
                   <dt>최근 사진</dt><dd>{photos.length}개</dd>
                 </dl>
-                <a className="button secondary" href="/photos">Room 사진 보기 <ChevronRight size={15} /></a>
+                <a className="button secondary" href={selectedPhotosHref}>Room 사진 보기 <ChevronRight size={15} /></a>
               </>
             ) : (
               <p className="muted">{status}</p>
@@ -251,7 +262,7 @@ export default function ViewerPage() {
       <section className="panel ref-card viewer-photo-strip">
         <div className="ref-panel-title">
           <h2>{selectedRoom ? `${selectedRoom.room_number ?? ""} ${selectedRoom.room_name}` : "Room"} 관련 사진 <span className="count-badge">{photos.length}</span></h2>
-          <a href="/photos">모든 사진 보기 <ChevronRight size={14} /></a>
+          <a href={selectedPhotosHref}>모든 사진 보기 <ChevronRight size={14} /></a>
         </div>
         <div className="strip-photos">
           {photos.slice(0, 6).map((photo, index) => (
@@ -262,7 +273,7 @@ export default function ViewerPage() {
             </article>
           ))}
           {photos.length === 0 ? <p className="muted">이 Room에 등록된 사진이 없습니다.</p> : null}
-          <a className="more-photo" href="/photos"><Camera size={25} />더보기</a>
+          <a className="more-photo" href={selectedPhotosHref}><Camera size={25} />더보기</a>
         </div>
       </section>
     </div>
