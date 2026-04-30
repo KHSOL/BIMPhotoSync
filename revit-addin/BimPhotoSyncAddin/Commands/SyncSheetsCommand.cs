@@ -5,31 +5,23 @@ using BimPhotoSyncAddin.Services;
 
 namespace BimPhotoSyncAddin.Commands;
 
-public enum RevitSyncOperation
-{
-    Rooms,
-    CurrentView,
-    Sheets
-}
-
 [Transaction(TransactionMode.Manual)]
-public sealed class SyncRoomsCommand : IExternalCommand
+public sealed class SyncSheetsCommand : IExternalCommand
 {
     public Result Execute(ExternalCommandData commandData, ref string message, ElementSet elements)
     {
-        ValidationLog.Write("SyncRoomsCommand.Execute entered.");
+        ValidationLog.Write("SyncSheetsCommand.Execute entered.");
         if (BimPhotoSyncApp.SyncRoomsHandler == null || BimPhotoSyncApp.SyncRoomsEvent == null)
         {
             message = "ExternalEvent is not initialized.";
-            ValidationLog.Write("SyncRoomsCommand failed: ExternalEvent is not initialized.");
+            ValidationLog.Write("SyncSheetsCommand failed: ExternalEvent is not initialized.");
             return Result.Failed;
         }
 
         BimPhotoSyncApp.SyncRoomsHandler.UiApplication = commandData.Application;
-        BimPhotoSyncApp.SyncRoomsHandler.Operation = RevitSyncOperation.Rooms;
+        BimPhotoSyncApp.SyncRoomsHandler.Operation = RevitSyncOperation.Sheets;
         BimPhotoSyncApp.SyncRoomsEvent.Raise();
-        ValidationLog.Write("SyncRoomsCommand raised ExternalEvent.");
+        ValidationLog.Write("SyncSheetsCommand raised ExternalEvent.");
         return Result.Succeeded;
     }
 }
-

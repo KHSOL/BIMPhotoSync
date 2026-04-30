@@ -12,6 +12,10 @@ public class BimPhotoSyncApp : IExternalApplication
     public static PhotoDockPane? Pane { get; private set; }
     public static ExternalEvent? SyncRoomsEvent { get; private set; }
     public static SyncRoomsExternalHandler? SyncRoomsHandler { get; private set; }
+#if DEBUG
+    public static ExternalEvent? CreateTestModelEvent { get; private set; }
+    public static CreateTestModelExternalHandler? CreateTestModelHandler { get; private set; }
+#endif
     private static bool _autoSyncRaised;
 
     public Result OnStartup(UIControlledApplication app)
@@ -38,6 +42,23 @@ public class BimPhotoSyncApp : IExternalApplication
             "Sync Rooms",
             typeof(BimPhotoSyncApp).Assembly.Location,
             typeof(SyncRoomsCommand).FullName));
+        panel.AddItem(new PushButtonData(
+            "SyncCurrentView",
+            "Sync View",
+            typeof(BimPhotoSyncApp).Assembly.Location,
+            typeof(SyncCurrentViewCommand).FullName));
+        panel.AddItem(new PushButtonData(
+            "SyncSheets",
+            "Sync Sheets",
+            typeof(BimPhotoSyncApp).Assembly.Location,
+            typeof(SyncSheetsCommand).FullName));
+#if DEBUG
+        panel.AddItem(new PushButtonData(
+            "CreateTestModel",
+            "Create Test",
+            typeof(BimPhotoSyncApp).Assembly.Location,
+            typeof(CreateTestModelCommand).FullName));
+#endif
 
         Pane = new PhotoDockPane();
         var paneId = new DockablePaneId(PaneGuid);
@@ -45,6 +66,10 @@ public class BimPhotoSyncApp : IExternalApplication
 
         SyncRoomsHandler = new SyncRoomsExternalHandler();
         SyncRoomsEvent = ExternalEvent.Create(SyncRoomsHandler);
+#if DEBUG
+        CreateTestModelHandler = new CreateTestModelExternalHandler();
+        CreateTestModelEvent = ExternalEvent.Create(CreateTestModelHandler);
+#endif
 
         app.SelectionChanged += (_, args) => SelectionRefresh.Handle(args);
         app.Idling += OnIdling;

@@ -270,7 +270,7 @@ model Room {
   revitModelId    String?    @map("revit_model_id") @db.Uuid
   levelId         String?    @map("level_id") @db.Uuid
   bimPhotoRoomId  String     @unique @map("bim_photo_room_id")
-  revitUniqueId   String?    @unique @map("revit_unique_id")
+  revitUniqueId   String?    @map("revit_unique_id")
   revitElementId  String?    @map("revit_element_id")
   roomNumber      String?    @map("room_number")
   roomName        String     @map("room_name")
@@ -288,6 +288,7 @@ model Room {
   deletedAt       DateTime?  @map("deleted_at")
 
   @@index([projectId, levelName, roomName], map: "idx_rooms_project_level_name")
+  @@unique([projectId, revitUniqueId], map: "uq_rooms_project_revit_unique_id")
   @@map("rooms")
 }
 

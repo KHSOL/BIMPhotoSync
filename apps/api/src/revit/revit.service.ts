@@ -49,27 +49,47 @@ export class RevitService {
       revit_element_id: string | null;
     }> = [];
     for (const incoming of dto.rooms) {
-      const bimPhotoRoomId = incoming.bim_photo_room_id || `rm_${randomUUID()}`;
-      const room = await this.prisma.room.upsert({
-        where: { revitUniqueId: incoming.revit_unique_id },
-        create: {
-          projectId: dto.project_id,
-          revitModelId: dto.revit_model_id,
-          bimPhotoRoomId,
-          revitUniqueId: incoming.revit_unique_id,
-          revitElementId: incoming.revit_element_id,
-          roomNumber: incoming.room_number,
-          roomName: incoming.room_name,
-          levelName: incoming.level_name
-        },
-        update: {
-          revitModelId: dto.revit_model_id,
-          revitElementId: incoming.revit_element_id,
-          roomNumber: incoming.room_number,
-          roomName: incoming.room_name,
-          levelName: incoming.level_name
-        }
-      });
+      const existingByBimPhotoRoomId = incoming.bim_photo_room_id
+        ? await this.prisma.room.findUnique({ where: { bimPhotoRoomId: incoming.bim_photo_room_id } })
+        : null;
+      const existingByProjectRoomId =
+        existingByBimPhotoRoomId?.projectId === dto.project_id ? existingByBimPhotoRoomId : null;
+      const existingByProjectRevitId =
+        existingByProjectRoomId ??
+        (await this.prisma.room.findFirst({
+          where: { projectId: dto.project_id, revitUniqueId: incoming.revit_unique_id }
+        }));
+      const canReuseIncomingBimPhotoRoomId =
+        Boolean(incoming.bim_photo_room_id) &&
+        (!existingByBimPhotoRoomId || existingByBimPhotoRoomId.projectId === dto.project_id);
+      const bimPhotoRoomId =
+        existingByProjectRevitId?.bimPhotoRoomId ??
+        (canReuseIncomingBimPhotoRoomId && incoming.bim_photo_room_id ? incoming.bim_photo_room_id : `rm_${randomUUID()}`);
+
+      const room = existingByProjectRevitId
+        ? await this.prisma.room.update({
+            where: { id: existingByProjectRevitId.id },
+            data: {
+              revitModelId: dto.revit_model_id,
+              revitUniqueId: incoming.revit_unique_id,
+              revitElementId: incoming.revit_element_id,
+              roomNumber: incoming.room_number,
+              roomName: incoming.room_name,
+              levelName: incoming.level_name
+            }
+          })
+        : await this.prisma.room.create({
+            data: {
+              projectId: dto.project_id,
+              revitModelId: dto.revit_model_id,
+              bimPhotoRoomId,
+              revitUniqueId: incoming.revit_unique_id,
+              revitElementId: incoming.revit_element_id,
+              roomNumber: incoming.room_number,
+              roomName: incoming.room_name,
+              levelName: incoming.level_name
+            }
+          });
       mappings.push({
         room_id: room.id,
         bim_photo_room_id: room.bimPhotoRoomId,

@@ -28,7 +28,7 @@ public sealed class ApiClient
     {
         var response = await _http.PostAsJsonAsync($"{AddinSettings.ApiBaseUrl}/auth/login", request)
             .ConfigureAwait(false);
-        response.EnsureSuccessStatusCode();
+        await EnsureSuccessAsync(response).ConfigureAwait(false);
         return await response.Content.ReadFromJsonAsync<AuthResponse>().ConfigureAwait(false);
     }
 
@@ -44,7 +44,7 @@ public sealed class ApiClient
         PrepareHeaders();
         var response = await _http.PostAsJsonAsync($"{AddinSettings.ApiBaseUrl}/projects", request)
             .ConfigureAwait(false);
-        response.EnsureSuccessStatusCode();
+        await EnsureSuccessAsync(response).ConfigureAwait(false);
         ProjectResponse? envelope = await response.Content.ReadFromJsonAsync<ProjectResponse>().ConfigureAwait(false);
         return envelope?.Data;
     }
@@ -54,7 +54,7 @@ public sealed class ApiClient
         PrepareHeaders();
         var response = await _http.PostAsJsonAsync($"{AddinSettings.ApiBaseUrl}/revit/connect", request)
             .ConfigureAwait(false);
-        response.EnsureSuccessStatusCode();
+        await EnsureSuccessAsync(response).ConfigureAwait(false);
         return await response.Content.ReadFromJsonAsync<ConnectProjectResponse>().ConfigureAwait(false);
     }
 
@@ -76,7 +76,7 @@ public sealed class ApiClient
         PrepareHeaders();
         var response = await _http.PostAsJsonAsync($"{AddinSettings.ApiBaseUrl}/revit/sync-rooms", request)
             .ConfigureAwait(false);
-        response.EnsureSuccessStatusCode();
+        await EnsureSuccessAsync(response).ConfigureAwait(false);
         return await response.Content.ReadFromJsonAsync<SyncRoomsResponse>().ConfigureAwait(false);
     }
 
@@ -85,7 +85,7 @@ public sealed class ApiClient
         PrepareHeaders();
         var response = await _http.PostAsJsonAsync($"{AddinSettings.ApiBaseUrl}/revit/floor-plans", request)
             .ConfigureAwait(false);
-        response.EnsureSuccessStatusCode();
+        await EnsureSuccessAsync(response).ConfigureAwait(false);
         return await response.Content.ReadFromJsonAsync<SyncFloorPlanResponse>().ConfigureAwait(false);
     }
 
@@ -94,7 +94,7 @@ public sealed class ApiClient
         PrepareHeaders();
         var response = await _http.PostAsJsonAsync($"{AddinSettings.ApiBaseUrl}/uploads/drawings/presign", request)
             .ConfigureAwait(false);
-        response.EnsureSuccessStatusCode();
+        await EnsureSuccessAsync(response).ConfigureAwait(false);
         return await response.Content.ReadFromJsonAsync<PresignDrawingAssetResponse>().ConfigureAwait(false);
     }
 
@@ -105,7 +105,7 @@ public sealed class ApiClient
         content.Headers.ContentType = new MediaTypeHeaderValue(mimeType);
         using HttpRequestMessage request = new(HttpMethod.Put, presignedUrl) { Content = content };
         using HttpResponseMessage response = await _http.SendAsync(request).ConfigureAwait(false);
-        response.EnsureSuccessStatusCode();
+        await EnsureSuccessAsync(response).ConfigureAwait(false);
     }
 
     public async Task<SyncSheetsResponse?> SyncSheetsAsync(SyncSheetsRequest request)
@@ -113,8 +113,22 @@ public sealed class ApiClient
         PrepareHeaders();
         var response = await _http.PostAsJsonAsync($"{AddinSettings.ApiBaseUrl}/revit/sheets", request)
             .ConfigureAwait(false);
-        response.EnsureSuccessStatusCode();
+        await EnsureSuccessAsync(response).ConfigureAwait(false);
         return await response.Content.ReadFromJsonAsync<SyncSheetsResponse>().ConfigureAwait(false);
+    }
+
+    private static async Task EnsureSuccessAsync(HttpResponseMessage response)
+    {
+        if (response.IsSuccessStatusCode) return;
+
+        string body = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
+        string message = $"HTTP {(int)response.StatusCode} {response.ReasonPhrase}";
+        if (!string.IsNullOrWhiteSpace(body))
+        {
+            message += $": {body}";
+        }
+
+        throw new HttpRequestException(message, null, response.StatusCode);
     }
 
     private void PrepareHeaders()
