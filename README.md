@@ -396,7 +396,7 @@ New-Item -ItemType Directory -Force "$env:APPDATA\BimPhotoSync"
 Copy-Item revit-addin\config.example.json "$env:APPDATA\BimPhotoSync\config.json"
 ```
 
-`config.json`은 Connect 화면에서 저장되므로 일반 사용자가 직접 작성하지 않아도 됩니다. Windows에서 백엔드가 다른 PC에서 실행 중이면 API URL에 `localhost`가 아니라 해당 PC의 LAN IP 또는 배포 API URL을 사용해야 합니다.
+`config.json`은 Connect 화면에서 저장되므로 일반 사용자가 직접 작성하지 않아도 됩니다. Windows에서 백엔드가 다른 PC에서 실행 중이면 API URL에 `localhost`가 아니라 해당 PC의 LAN IP 또는 배포 API URL을 사용해야 합니다. 대형 Revit 모델에서는 Room 수집과 서버 동기화가 20초를 넘을 수 있으므로 Add-in HTTP timeout 기본값은 180초입니다. 더 큰 모델은 `%APPDATA%\BimPhotoSync\config.json`의 `HttpTimeoutSeconds` 값을 300~600초 범위로 늘려서 검증합니다.
 
 Add-in 사용 흐름:
 

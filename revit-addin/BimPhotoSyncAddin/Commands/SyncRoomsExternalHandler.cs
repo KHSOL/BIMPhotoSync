@@ -96,6 +96,14 @@ public sealed class SyncRoomsExternalHandler : IExternalEventHandler
                 TaskDialog.Show("BIM Photo Sync", $"Synced {response.Data.Room_Mappings.Count} Rooms.\n{syncSummary}");
             }
         }
+        catch (TaskCanceledException ex)
+        {
+            ValidationLog.Write($"SyncRoomsExternalHandler timed out: {ex}");
+            TaskDialog.Show(
+                "BIM Photo Sync",
+                $"API request timed out after {AddinSettings.HttpTimeoutSeconds} seconds.\n" +
+                "Large Revit models can take longer. Increase HttpTimeoutSeconds in %APPDATA%\\BimPhotoSync\\config.json and try again.");
+        }
         catch (Exception ex)
         {
             ValidationLog.Write($"SyncRoomsExternalHandler failed: {ex}");

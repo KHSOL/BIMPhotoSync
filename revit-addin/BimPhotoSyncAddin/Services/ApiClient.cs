@@ -12,7 +12,7 @@ public sealed class ApiClient
 
     public ApiClient()
     {
-        _http.Timeout = TimeSpan.FromSeconds(20);
+        _http.Timeout = TimeSpan.FromSeconds(AddinSettings.HttpTimeoutSeconds);
     }
 
     public async Task<RevitRoomPhotoResponse?> GetRoomPhotosAsync(string bimPhotoRoomId)
