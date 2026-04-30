@@ -18,7 +18,8 @@ import {
   Star,
   X
 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import type { PDFDocumentProxy, RenderTask } from "pdfjs-dist";
 import {
   apiJson,
   authHeaders,
@@ -37,6 +38,20 @@ type ProjectList = { data: Project[] };
 type FloorPlanList = { data: RevitFloorPlan[] };
 type SheetList = { data: RevitSheet[] };
 type RoomPhotosResponse = { data: { photos: Photo[] } };
+type PdfJsModule = typeof import("pdfjs-dist");
+type PdfRenderState = "idle" | "loading" | "ready" | "error";
+
+let pdfJsModulePromise: Promise<PdfJsModule> | null = null;
+
+function loadPdfJs() {
+  if (!pdfJsModulePromise) {
+    pdfJsModulePromise = import("pdfjs-dist").then((module) => {
+      module.GlobalWorkerOptions.workerSrc = new URL("pdfjs-dist/build/pdf.worker.mjs", import.meta.url).toString();
+      return module;
+    });
+  }
+  return pdfJsModulePromise;
+}
 
 export default function ViewerPage() {
   const [token, setToken] = useState("");
@@ -71,7 +86,9 @@ export default function ViewerPage() {
     () => selectedSheet?.overlays.find((overlay) => overlay.bim_photo_room_id === selectedRoomId),
     [selectedRoomId, selectedSheet]
   );
+  const selectedOverlayRoom = selectedOverlay?.room ?? null;
   const selectedRoom = selectedPlanRoom ?? selectedOverlay;
+  const selectedRoomArea = selectedPlanRoom?.area_m2 ?? selectedOverlayRoom?.area_m2 ?? null;
   const visibleSheets = useMemo(() => {
     const query = treeQuery.trim().toLowerCase();
     if (!query) return sheets;
@@ -357,15 +374,15 @@ export default function ViewerPage() {
                   <dt>표시 기준</dt>
                   <dd>{selectedSheet ? "Sheet overlay" : "Fallback floor plan"}</dd>
                   <dt>층 / 영역</dt>
-                  <dd>{selectedPlanRoom?.level_name ?? selectedPlan?.level_name ?? "-"}</dd>
+                  <dd>{selectedPlanRoom?.level_name ?? selectedOverlayRoom?.level_name ?? selectedPlan?.level_name ?? "-"}</dd>
                   <dt>면적</dt>
-                  <dd>{selectedPlanRoom?.area_m2 ? `${selectedPlanRoom.area_m2} m²` : "-"}</dd>
+                  <dd>{selectedRoomArea !== null ? `${selectedRoomArea} m²` : "-"}</dd>
                   <dt>Room ID</dt>
                   <dd>
                     <code>{selectedRoom.bim_photo_room_id}</code>
                   </dd>
                   <dt>Revit Element</dt>
-                  <dd>{selectedPlanRoom?.revit_element_id ?? "-"}</dd>
+                  <dd>{selectedPlanRoom?.revit_element_id ?? selectedOverlayRoom?.revit_element_id ?? "-"}</dd>
                   <dt>최근 사진</dt>
                   <dd>{photos.length}개</dd>
                 </dl>
@@ -438,16 +455,13 @@ function SheetViewer({
 }) {
   const isPdf = sheet.asset?.mime_type === "application/pdf";
   const stageStyle = sheet.width_mm && sheet.height_mm ? { aspectRatio: `${sheet.width_mm} / ${sheet.height_mm}` } : undefined;
+  const selectedOverlay = sheet.overlays.find((overlay) => overlay.bim_photo_room_id === selectedRoomId);
   return (
     <div className="floor-plan sheet-plan">
-      <div className="sheet-stage" style={stageStyle}>
+      <div className="sheet-stage canvas-sheet-stage" style={stageStyle}>
         {assetUrl ? (
           isPdf ? (
-            <object className="sheet-asset" data={assetUrl} type="application/pdf" aria-label={`${sheet.sheet_number} ${sheet.sheet_name}`}>
-              <a className="button secondary" href={assetUrl} target="_blank" rel="noreferrer">
-                PDF 열기
-              </a>
-            </object>
+            <PdfSheetCanvas assetUrl={assetUrl} label={`${sheet.sheet_number} ${sheet.sheet_name}`} />
           ) : (
             <img className="sheet-asset" src={assetUrl} alt={`${sheet.sheet_number} ${sheet.sheet_name}`} />
           )
@@ -463,7 +477,99 @@ function SheetViewer({
             <SheetRoomShape key={overlay.id} overlay={overlay} selected={overlay.bim_photo_room_id === selectedRoomId} onSelect={onSelect} />
           ))}
         </svg>
+        <div className="sheet-room-hint">
+          <MousePointer2 size={15} />
+          <span>{selectedOverlay ? formatRoomTitle(selectedOverlay) : "도면 위 파란 Room 영역을 선택하세요."}</span>
+        </div>
       </div>
+    </div>
+  );
+}
+
+function PdfSheetCanvas({ assetUrl, label }: { assetUrl: string; label: string }) {
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const frameRef = useRef<HTMLDivElement | null>(null);
+  const [frameWidth, setFrameWidth] = useState(0);
+  const [renderState, setRenderState] = useState<PdfRenderState>("idle");
+
+  useEffect(() => {
+    const frame = frameRef.current;
+    if (!frame) return;
+    const updateWidth = () => setFrameWidth(Math.max(1, Math.round(frame.clientWidth)));
+    updateWidth();
+    const observer = new ResizeObserver(updateWidth);
+    observer.observe(frame);
+    return () => observer.disconnect();
+  }, []);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    const frame = frameRef.current;
+    if (!assetUrl || !canvas || !frame || frameWidth <= 0) return;
+    const targetCanvas = canvas;
+    const targetFrame = frame;
+
+    let cancelled = false;
+    let renderTask: RenderTask | null = null;
+    let pdf: PDFDocumentProxy | null = null;
+
+    async function renderPdf() {
+      setRenderState("loading");
+      try {
+        const [pdfjs, blobResponse] = await Promise.all([loadPdfJs(), fetch(assetUrl)]);
+        if (!blobResponse.ok) throw new Error(`PDF asset ${blobResponse.status}`);
+        const data = await blobResponse.arrayBuffer();
+        if (cancelled) return;
+
+        const loadingTask = pdfjs.getDocument({ data });
+        pdf = await loadingTask.promise;
+        const page = await pdf.getPage(1);
+        const baseViewport = page.getViewport({ scale: 1 });
+        const scale = targetFrame.clientWidth / baseViewport.width;
+        const viewport = page.getViewport({ scale });
+        const pixelRatio = Math.min(window.devicePixelRatio || 1, 2);
+        const context = targetCanvas.getContext("2d");
+        if (!context) throw new Error("Canvas context is unavailable.");
+
+        targetCanvas.width = Math.max(1, Math.floor(viewport.width * pixelRatio));
+        targetCanvas.height = Math.max(1, Math.floor(viewport.height * pixelRatio));
+        targetCanvas.style.width = `${viewport.width}px`;
+        targetCanvas.style.height = `${viewport.height}px`;
+        context.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
+        context.clearRect(0, 0, viewport.width, viewport.height);
+
+        renderTask = page.render({ canvasContext: context, viewport });
+        await renderTask.promise;
+        if (!cancelled) setRenderState("ready");
+      } catch {
+        if (!cancelled) setRenderState("error");
+      }
+    }
+
+    void renderPdf();
+
+    return () => {
+      cancelled = true;
+      renderTask?.cancel();
+      void pdf?.destroy();
+    };
+  }, [assetUrl, frameWidth]);
+
+  return (
+    <div className="sheet-canvas-frame" ref={frameRef}>
+      <canvas className="sheet-canvas" ref={canvasRef} aria-label={label} />
+      {renderState === "loading" || renderState === "idle" ? (
+        <div className="sheet-render-status">
+          <FileText size={24} />
+          <span>도면을 렌더링하는 중입니다.</span>
+        </div>
+      ) : null}
+      {renderState === "error" ? (
+        <div className="sheet-render-status error">
+          <FileText size={24} />
+          <span>PDF 도면을 캔버스로 렌더링하지 못했습니다.</span>
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -478,12 +584,17 @@ function SheetRoomShape({
   onSelect: (roomId: string) => void;
 }) {
   const points = overlay.normalized_polygon.map((point) => `${point.x},${point.y}`).join(" ");
+  const center = getNormalizedPolygonCenter(overlay);
+  const label = formatRoomTitle(overlay);
   return (
-    <polygon
-      className={selected ? "sheet-room-zone selected" : "sheet-room-zone"}
-      points={points}
-      onClick={() => onSelect(overlay.bim_photo_room_id)}
-    />
+    <g className={selected ? "sheet-room-zone-group selected" : "sheet-room-zone-group"} onClick={() => onSelect(overlay.bim_photo_room_id)}>
+      <polygon className={selected ? "sheet-room-zone selected" : "sheet-room-zone"} points={points} />
+      <circle className="sheet-room-pin" cx={center.x} cy={center.y} r="0.008" />
+      <text className="sheet-room-label" x={center.x} y={center.y - 0.012} textAnchor="middle" fontSize="0.014">
+        {label}
+      </text>
+      <title>{label}</title>
+    </g>
   );
 }
 
@@ -550,8 +661,26 @@ function getRoomDatabaseId(room: FloorPlanRoom | RevitRoomOverlay | undefined) {
   return room.room_id ?? "";
 }
 
+function getNormalizedPolygonCenter(overlay: RevitRoomOverlay) {
+  if (overlay.normalized_polygon.length === 0) return { x: 0.5, y: 0.5 };
+  const total = overlay.normalized_polygon.reduce(
+    (sum, point) => ({ x: sum.x + point.x, y: sum.y + point.y }),
+    { x: 0, y: 0 }
+  );
+  return {
+    x: total.x / overlay.normalized_polygon.length,
+    y: total.y / overlay.normalized_polygon.length
+  };
+}
+
 function formatRoomTitle(room: FloorPlanRoom | RevitRoomOverlay, planRoom?: FloorPlanRoom) {
   if (planRoom) return `${planRoom.room_number ?? ""} ${planRoom.room_name}`.trim();
   if ("room_name" in room) return `${room.room_number ?? ""} ${room.room_name}`.trim();
-  return room.bim_photo_room_id;
+  if (room.room) return `${room.room.room_number ?? ""} ${room.room.room_name}`.trim();
+  return formatBimRoomFallback(room.bim_photo_room_id);
+}
+
+function formatBimRoomFallback(bimPhotoRoomId: string) {
+  const id = bimPhotoRoomId.startsWith("rm_") ? bimPhotoRoomId.slice(3) : bimPhotoRoomId;
+  return `Room ${id.slice(0, 8)}`;
 }

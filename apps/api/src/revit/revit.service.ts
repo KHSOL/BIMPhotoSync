@@ -8,7 +8,7 @@ import { ProjectsService } from "../projects/projects.service";
 import { toPhotoResponse } from "../photos/photos.service";
 import { RevitRoomOverlayDto, RevitSheetViewDto, RevitConnectDto, SyncFloorPlanDto, SyncRoomsDto, SyncSheetsDto } from "./dto";
 
-type RevitSheetWithRelations = Prisma.RevitSheetGetPayload<{ include: { views: true; overlays: true } }>;
+type RevitSheetWithRelations = Prisma.RevitSheetGetPayload<{ include: { views: true; overlays: { include: { room: true } } } }>;
 
 const RevitSheetTransactionOptions = {
   maxWait: 10000,
@@ -206,7 +206,7 @@ export class RevitService {
 
         const hydrated = await tx.revitSheet.findUnique({
           where: { id: sheet.id },
-          include: { views: true, overlays: true }
+          include: { views: true, overlays: { include: { room: true } } }
         });
         if (hydrated) syncedSheets.push(hydrated);
       }
@@ -220,7 +220,7 @@ export class RevitService {
     await this.projects.assertProjectAccess(user.sub, user.companyId, projectId);
     const sheets = await this.prisma.revitSheet.findMany({
       where: { projectId },
-      include: { views: true, overlays: true },
+      include: { views: true, overlays: { include: { room: true } } },
       orderBy: [{ sheetNumber: "asc" }, { syncedAt: "desc" }]
     });
     return { data: sheets.map((sheet) => toSheetResponse(sheet, this.config)) };
@@ -346,6 +346,14 @@ function toSheetResponse(sheet: {
     id: string;
     viewId: string | null;
     roomId: string | null;
+    room?: {
+      id: string;
+      roomNumber: string | null;
+      roomName: string;
+      levelName: string | null;
+      areaM2: Prisma.Decimal | null;
+      revitElementId: string | null;
+    } | null;
     bimPhotoRoomId: string;
     polygon: Prisma.JsonValue;
     normalizedPolygon: Prisma.JsonValue;
@@ -388,6 +396,16 @@ function toSheetResponse(sheet: {
         id: overlay.id,
         view_id: overlay.viewId,
         room_id: overlay.roomId,
+        room: overlay.room
+          ? {
+              id: overlay.room.id,
+              room_number: overlay.room.roomNumber,
+              room_name: overlay.room.roomName,
+              level_name: overlay.room.levelName,
+              area_m2: overlay.room.areaM2 ? Number(overlay.room.areaM2) : null,
+              revit_element_id: overlay.room.revitElementId
+            }
+          : null,
         bim_photo_room_id: overlay.bimPhotoRoomId,
         polygon: overlay.polygon,
         normalized_polygon: overlay.normalizedPolygon,

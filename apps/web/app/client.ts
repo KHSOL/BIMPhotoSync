@@ -37,6 +37,7 @@ export type Room = {
   room_number?: string | null;
   room_name: string;
   level_name?: string | null;
+  area_m2?: number | null;
   location_text?: string | null;
   status: string;
 };
@@ -110,6 +111,7 @@ export type RevitRoomOverlay = {
   id: string;
   view_id?: string | null;
   room_id?: string | null;
+  room?: Pick<Room, "id" | "room_number" | "room_name" | "level_name" | "area_m2" | "revit_element_id"> | null;
   bim_photo_room_id: string;
   polygon: PlanPoint[];
   normalized_polygon: PlanPoint[];
