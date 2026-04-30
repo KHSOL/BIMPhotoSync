@@ -33,4 +33,4 @@ COPY --from=build /app/package.json /app/package-lock.json ./
 COPY --from=build /app/node_modules node_modules
 COPY --from=build /app/apps/api apps/api
 
-CMD ["npm", "--workspace", "@bim-photo-sync/api", "run", "start"]
+CMD ["sh", "-c", "npx prisma migrate deploy --schema apps/api/prisma/schema.prisma && npm --workspace @bim-photo-sync/api run start"]
