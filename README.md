@@ -195,7 +195,7 @@ flowchart TB
   Mobile["Expo Mobile App"] --> RailwayAPI
 ```
 
-로컬 개발에서는 Supabase/R2/Railway 대신 `docker-compose.yml`의 PostgreSQL, Redis, MinIO를 사용합니다. 운영에서는 PostgreSQL과 Object Storage를 관리형 서비스로 교체해도 API 계약은 유지됩니다.
+로컬 개발에서는 Supabase/R2/Railway 대신 `docker-compose.yml`의 PostgreSQL, Redis, MinIO를 사용합니다. 운영에서는 PostgreSQL과 Object Storage를 관리형 서비스로 교체해도 API 계약은 유지됩니다. Railway API 컨테이너는 시작 시 `prisma migrate deploy`를 먼저 실행한 뒤 NestJS API를 시작하므로, `apps/api/prisma/migrations`에 추가된 DB 변경은 GitHub main 배포에 맞춰 적용됩니다.
 
 ## GitHub 연동 배포
 
