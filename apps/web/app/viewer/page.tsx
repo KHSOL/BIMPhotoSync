@@ -6,6 +6,7 @@ import {
   ChevronRight,
   Crosshair,
   Eye,
+  FileText,
   Filter,
   KeyRound,
   Layers,
@@ -18,10 +19,23 @@ import {
   X
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
-import { apiJson, authHeaders, FloorPlanRoom, Photo, Project, readProjectId, readSession, RevitFloorPlan, saveProjectId } from "../client";
+import {
+  apiJson,
+  authHeaders,
+  FloorPlanRoom,
+  Photo,
+  Project,
+  readProjectId,
+  readSession,
+  RevitFloorPlan,
+  RevitRoomOverlay,
+  RevitSheet,
+  saveProjectId
+} from "../client";
 
 type ProjectList = { data: Project[] };
 type FloorPlanList = { data: RevitFloorPlan[] };
+type SheetList = { data: RevitSheet[] };
 type RoomPhotosResponse = { data: { photos: Photo[] } };
 
 export default function ViewerPage() {
@@ -30,11 +44,14 @@ export default function ViewerPage() {
   const [projectId, setProjectId] = useState("");
   const [plans, setPlans] = useState<RevitFloorPlan[]>([]);
   const [planId, setPlanId] = useState("");
+  const [sheets, setSheets] = useState<RevitSheet[]>([]);
+  const [sheetId, setSheetId] = useState("");
+  const [sheetAssetUrl, setSheetAssetUrl] = useState("");
   const [selectedRoomId, setSelectedRoomId] = useState("");
   const [activeTool, setActiveTool] = useState<"select" | "measure" | "note" | "section" | "settings">("select");
   const [treeQuery, setTreeQuery] = useState("");
   const [photos, setPhotos] = useState<Photo[]>([]);
-  const [status, setStatus] = useState("Revit Add-in에서 Sync Rooms를 실행하면 실제 Room 도면이 표시됩니다.");
+  const [status, setStatus] = useState("Revit Add-in에서 Connect 후 Sync Rooms를 실행하면 Sheet와 Room 구역이 표시됩니다.");
 
   useEffect(() => {
     const session = readSession();
@@ -43,25 +60,69 @@ export default function ViewerPage() {
     void loadProjects(session.token).catch((err) => setStatus(err.message));
   }, []);
 
+  const selectedSheet = useMemo(() => sheets.find((sheet) => sheet.id === sheetId) ?? sheets[0], [sheetId, sheets]);
   const selectedPlan = useMemo(() => plans.find((plan) => plan.id === planId) ?? plans[0], [planId, plans]);
-  const levels = useMemo(() => Array.from(new Set(plans.map((plan) => plan.level_name))), [plans]);
-  const selectedRoom = useMemo(
-    () => selectedPlan?.rooms.find((room) => room.bim_photo_room_id === selectedRoomId) ?? selectedPlan?.rooms[0],
-    [selectedPlan, selectedRoomId]
+  const allPlanRooms = useMemo(() => plans.flatMap((plan) => plan.rooms), [plans]);
+  const selectedPlanRoom = useMemo(
+    () => allPlanRooms.find((room) => room.bim_photo_room_id === selectedRoomId),
+    [allPlanRooms, selectedRoomId]
   );
-  const visibleLevels = useMemo(
-    () => levels.filter((level) => level.toLowerCase().includes(treeQuery.trim().toLowerCase())),
-    [levels, treeQuery]
+  const selectedOverlay = useMemo(
+    () => selectedSheet?.overlays.find((overlay) => overlay.bim_photo_room_id === selectedRoomId),
+    [selectedRoomId, selectedSheet]
   );
-  const selectedPhotosHref = selectedRoom?.room_id
-    ? `/photos?project_id=${projectId}&room_id=${selectedRoom.room_id}`
-    : "/photos";
+  const selectedRoom = selectedPlanRoom ?? selectedOverlay;
+  const visibleSheets = useMemo(() => {
+    const query = treeQuery.trim().toLowerCase();
+    if (!query) return sheets;
+    return sheets.filter((sheet) => `${sheet.sheet_number} ${sheet.sheet_name}`.toLowerCase().includes(query));
+  }, [sheets, treeQuery]);
+  const visiblePlans = useMemo(() => {
+    const query = treeQuery.trim().toLowerCase();
+    if (!query) return plans;
+    return plans.filter((plan) => `${plan.level_name} ${plan.view_name}`.toLowerCase().includes(query));
+  }, [plans, treeQuery]);
+  const selectedPhotosHref =
+    getRoomDatabaseId(selectedRoom) !== "" ? `/photos?project_id=${projectId}&room_id=${getRoomDatabaseId(selectedRoom)}` : "/photos";
 
   useEffect(() => {
-    if (!token || !selectedRoom) return;
-    setSelectedRoomId(selectedRoom.bim_photo_room_id);
-    void loadRoomPhotos(selectedRoom.bim_photo_room_id).catch((err) => setStatus(err.message));
-  }, [token, selectedRoom?.bim_photo_room_id]);
+    if (!token || !selectedRoomId) {
+      setPhotos([]);
+      return;
+    }
+    void loadRoomPhotos(selectedRoomId).catch((err) => setStatus(err.message));
+  }, [token, selectedRoomId]);
+
+  useEffect(() => {
+    if (!token || !selectedSheet?.asset?.url) {
+      setSheetAssetUrl("");
+      return;
+    }
+
+    let objectUrl = "";
+    let cancelled = false;
+    void fetch(selectedSheet.asset.url, { headers: authHeaders(token) })
+      .then((res) => {
+        if (!res.ok) throw new Error(`Sheet asset ${res.status}`);
+        return res.blob();
+      })
+      .then((blob) => {
+        objectUrl = URL.createObjectURL(blob);
+        if (cancelled) {
+          URL.revokeObjectURL(objectUrl);
+          return;
+        }
+        setSheetAssetUrl(objectUrl);
+      })
+      .catch(() => {
+        if (!cancelled) setSheetAssetUrl("");
+      });
+
+    return () => {
+      cancelled = true;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [selectedSheet?.id, selectedSheet?.asset?.url, token]);
 
   async function loadProjects(nextToken = token) {
     const json = await apiJson<ProjectList>("/projects", { headers: authHeaders(nextToken) });
@@ -71,19 +132,31 @@ export default function ViewerPage() {
     setProjectId(nextProjectId);
     if (nextProjectId) {
       saveProjectId(nextProjectId);
-      await loadFloorPlans(nextToken, nextProjectId);
+      await loadProjectGeometry(nextToken, nextProjectId);
     }
   }
 
-  async function loadFloorPlans(nextToken = token, nextProjectId = projectId) {
+  async function loadProjectGeometry(nextToken = token, nextProjectId = projectId) {
     if (!nextProjectId) return;
-    const json = await apiJson<FloorPlanList>(`/revit/projects/${nextProjectId}/floor-plans`, {
-      headers: authHeaders(nextToken)
-    });
-    setPlans(json.data);
-    setPlanId(json.data[0]?.id ?? "");
-    setSelectedRoomId(json.data[0]?.rooms[0]?.bim_photo_room_id ?? "");
-    setStatus(json.data.length ? `${json.data[0].view_name} 도면을 불러왔습니다.` : "동기화된 Revit 도면이 없습니다.");
+    const [floorPlanJson, sheetJson] = await Promise.all([
+      apiJson<FloorPlanList>(`/revit/projects/${nextProjectId}/floor-plans`, { headers: authHeaders(nextToken) }),
+      apiJson<SheetList>(`/revit/projects/${nextProjectId}/sheets`, { headers: authHeaders(nextToken) })
+    ]);
+
+    setPlans(floorPlanJson.data);
+    setSheets(sheetJson.data);
+    setPlanId(floorPlanJson.data[0]?.id ?? "");
+    setSheetId(sheetJson.data[0]?.id ?? "");
+
+    const firstRoomId =
+      sheetJson.data[0]?.overlays[0]?.bim_photo_room_id ?? floorPlanJson.data[0]?.rooms[0]?.bim_photo_room_id ?? "";
+    setSelectedRoomId(firstRoomId);
+
+    if (sheetJson.data.length > 0) {
+      setStatus(`${sheetJson.data.length}개 Sheet와 ${sheetJson.data.reduce((sum, sheet) => sum + sheet.overlays.length, 0)}개 Room 구역을 불러왔습니다.`);
+      return;
+    }
+    setStatus(floorPlanJson.data.length ? `${floorPlanJson.data[0].view_name} 도면을 불러왔습니다.` : "동기화된 Revit Sheet/도면이 없습니다.");
   }
 
   async function loadRoomPhotos(bimPhotoRoomId: string) {
@@ -111,7 +184,19 @@ export default function ViewerPage() {
   function changeProject(nextProjectId: string) {
     setProjectId(nextProjectId);
     saveProjectId(nextProjectId);
-    void loadFloorPlans(token, nextProjectId).catch((err) => setStatus(err.message));
+    void loadProjectGeometry(token, nextProjectId).catch((err) => setStatus(err.message));
+  }
+
+  function selectSheet(nextSheetId: string) {
+    const nextSheet = sheets.find((sheet) => sheet.id === nextSheetId);
+    setSheetId(nextSheetId);
+    setSelectedRoomId(nextSheet?.overlays[0]?.bim_photo_room_id ?? selectedRoomId);
+  }
+
+  function selectPlan(nextPlanId: string) {
+    const nextPlan = plans.find((plan) => plan.id === nextPlanId);
+    setPlanId(nextPlanId);
+    if (!selectedSheet) setSelectedRoomId(nextPlan?.rooms[0]?.bim_photo_room_id ?? selectedRoomId);
   }
 
   if (!token) {
@@ -141,60 +226,77 @@ export default function ViewerPage() {
           </select>
         </label>
         <label className="field compact">
-          <span className="label">모델 / 뷰</span>
-          <select className="input" value={planId} onChange={(event) => setPlanId(event.target.value)}>
-            {plans.map((plan) => (
-              <option key={plan.id} value={plan.id}>
-                {plan.view_name}
+          <span className="label">Sheet</span>
+          <select className="input" value={selectedSheet?.id ?? ""} onChange={(event) => selectSheet(event.target.value)}>
+            {sheets.map((sheet) => (
+              <option key={sheet.id} value={sheet.id}>
+                {sheet.sheet_number} · {sheet.sheet_name}
               </option>
             ))}
           </select>
         </label>
         <label className="field compact">
-          <span className="label">층</span>
-          <select className="input" value={selectedPlan?.level_name ?? ""} onChange={(event) => setPlanId(plans.find((plan) => plan.level_name === event.target.value)?.id ?? "")}>
-            {visibleLevels.map((level) => (
-              <option key={level} value={level}>
-                {level}
+          <span className="label">Fallback View</span>
+          <select className="input" value={selectedPlan?.id ?? ""} onChange={(event) => selectPlan(event.target.value)}>
+            {plans.map((plan) => (
+              <option key={plan.id} value={plan.id}>
+                {plan.level_name} · {plan.view_name}
               </option>
             ))}
           </select>
         </label>
         <div className="tool-segment">
-          <button className={activeTool === "select" ? "active" : ""} type="button" onClick={() => setActiveTool("select")}><MousePointer2 size={17} />선택</button>
-          <button className={activeTool === "measure" ? "active" : ""} type="button" onClick={() => setActiveTool("measure")}><Ruler size={17} />측정</button>
-          <button className={activeTool === "note" ? "active" : ""} type="button" onClick={() => setActiveTool("note")}><Crosshair size={17} />주석</button>
-          <button className={activeTool === "section" ? "active" : ""} type="button" onClick={() => setActiveTool("section")}><Box size={17} />단면</button>
+          <button className={activeTool === "select" ? "active" : ""} type="button" onClick={() => setActiveTool("select")}>
+            <MousePointer2 size={17} />선택
+          </button>
+          <button className={activeTool === "measure" ? "active" : ""} type="button" onClick={() => setActiveTool("measure")}>
+            <Ruler size={17} />측정
+          </button>
+          <button className={activeTool === "note" ? "active" : ""} type="button" onClick={() => setActiveTool("note")}>
+            <Crosshair size={17} />주석
+          </button>
+          <button className={activeTool === "section" ? "active" : ""} type="button" onClick={() => setActiveTool("section")}>
+            <Box size={17} />단면
+          </button>
         </div>
         <div className="tool-segment small">
-          <button className="active" type="button">2D</button>
-          <button type="button" disabled>3D</button>
+          <button className="active" type="button">
+            2D
+          </button>
+          <button type="button" disabled>
+            3D
+          </button>
         </div>
-        <button className="filter-button" type="button" onClick={() => loadFloorPlans().catch((err) => setStatus(err.message))}>
+        <button className="filter-button" type="button" onClick={() => loadProjectGeometry().catch((err) => setStatus(err.message))}>
           <Filter size={16} />새로고침
         </button>
       </section>
 
       <section className="viewer-layout">
         <aside className="panel viewer-tree">
-          <h2 className="section-title">층 / 뷰</h2>
+          <h2 className="section-title">Sheet / View</h2>
           <label className="search-box">
             <Search size={16} />
-            <input value={treeQuery} onChange={(event) => setTreeQuery(event.target.value)} placeholder="층 이름 검색" />
+            <input value={treeQuery} onChange={(event) => setTreeQuery(event.target.value)} placeholder="Sheet 또는 View 검색" />
           </label>
           <div className="tree-group">
-            <strong><Layers size={16} /> 실제 Revit 모델</strong>
-            {visibleLevels.map((level) => (
-              <button className={level === selectedPlan?.level_name ? "active" : ""} key={level} type="button" onClick={() => setPlanId(plans.find((plan) => plan.level_name === level)?.id ?? "")}>
-                <span>{level}</span>
-                <small>{level === selectedPlan?.level_name ? <Eye size={14} /> : ""}</small>
+            <strong>
+              <FileText size={16} /> Revit Sheet
+            </strong>
+            {visibleSheets.map((sheet) => (
+              <button className={sheet.id === selectedSheet?.id ? "active" : ""} key={sheet.id} type="button" onClick={() => selectSheet(sheet.id)}>
+                <span>
+                  {sheet.sheet_number}
+                  <small>{sheet.sheet_name}</small>
+                </span>
+                <small>{sheet.overlays.length}</small>
               </button>
             ))}
           </div>
           <div className="tree-group">
-            <h3>뷰 목록</h3>
-            {plans.map((plan) => (
-              <button className={plan.id === selectedPlan?.id ? "active" : ""} key={plan.id} type="button" onClick={() => setPlanId(plan.id)}>
+            <h3>View 목록</h3>
+            {visiblePlans.map((plan) => (
+              <button className={plan.id === selectedPlan?.id && !selectedSheet ? "active" : ""} key={plan.id} type="button" onClick={() => selectPlan(plan.id)}>
                 <span>{plan.view_name}</span>
                 {plan.id === selectedPlan?.id ? <Eye size={14} /> : null}
               </button>
@@ -203,22 +305,36 @@ export default function ViewerPage() {
         </aside>
 
         <main className="viewer-main">
-          {selectedPlan ? (
-            <FloorPlanSvg plan={selectedPlan} selectedRoomId={selectedRoom?.bim_photo_room_id ?? ""} onSelect={setSelectedRoomId} />
+          {selectedSheet ? (
+            <SheetViewer sheet={selectedSheet} assetUrl={sheetAssetUrl} selectedRoomId={selectedRoomId} onSelect={setSelectedRoomId} />
+          ) : selectedPlan ? (
+            <FloorPlanSvg plan={selectedPlan} selectedRoomId={selectedRoomId} onSelect={setSelectedRoomId} />
           ) : (
             <div className="floor-plan real-plan-empty">
               <KeyRound size={30} />
-              <strong>동기화된 Revit 도면이 없습니다</strong>
+              <strong>동기화된 Revit Sheet가 없습니다</strong>
               <span>Revit에서 BIM Photo Sync 탭의 Connect 후 Sync Rooms를 실행하세요.</span>
             </div>
           )}
           <div className="floating-tools">
-            <button className={activeTool === "select" ? "active" : ""} type="button" onClick={() => setActiveTool("select")}><Move size={19} /></button>
-            <button className={activeTool === "select" ? "active" : ""} type="button" onClick={() => setActiveTool("select")}><MousePointer2 size={19} /></button>
-            <button className={activeTool === "note" ? "active" : ""} type="button" onClick={() => setActiveTool("note")}><Crosshair size={19} /></button>
-            <button className={activeTool === "section" ? "active" : ""} type="button" onClick={() => setActiveTool("section")}><Box size={19} /></button>
-            <button className={activeTool === "measure" ? "active" : ""} type="button" onClick={() => setActiveTool("measure")}><Ruler size={19} /></button>
-            <button className={activeTool === "settings" ? "active" : ""} type="button" onClick={() => setActiveTool("settings")}><Settings size={19} /></button>
+            <button className={activeTool === "select" ? "active" : ""} type="button" onClick={() => setActiveTool("select")}>
+              <Move size={19} />
+            </button>
+            <button className={activeTool === "select" ? "active" : ""} type="button" onClick={() => setActiveTool("select")}>
+              <MousePointer2 size={19} />
+            </button>
+            <button className={activeTool === "note" ? "active" : ""} type="button" onClick={() => setActiveTool("note")}>
+              <Crosshair size={19} />
+            </button>
+            <button className={activeTool === "section" ? "active" : ""} type="button" onClick={() => setActiveTool("section")}>
+              <Box size={19} />
+            </button>
+            <button className={activeTool === "measure" ? "active" : ""} type="button" onClick={() => setActiveTool("measure")}>
+              <Ruler size={19} />
+            </button>
+            <button className={activeTool === "settings" ? "active" : ""} type="button" onClick={() => setActiveTool("settings")}>
+              <Settings size={19} />
+            </button>
           </div>
         </main>
 
@@ -232,15 +348,30 @@ export default function ViewerPage() {
             </div>
             {selectedRoom ? (
               <>
-                <h3><span className="badge blue">연동됨</span>{selectedRoom.room_number ?? ""} {selectedRoom.room_name} <Star size={17} /></h3>
+                <h3>
+                  <span className="badge blue">연동됨</span>
+                  {formatRoomTitle(selectedRoom, selectedPlanRoom)}
+                  <Star size={17} />
+                </h3>
                 <dl className="detail-definition">
-                  <dt>층 / 영역</dt><dd>{selectedRoom.level_name ?? selectedPlan?.level_name}</dd>
-                  <dt>면적</dt><dd>{selectedRoom.area_m2 ? `${selectedRoom.area_m2} m²` : "-"}</dd>
-                  <dt>Room ID</dt><dd><code>{selectedRoom.bim_photo_room_id}</code></dd>
-                  <dt>Revit Element</dt><dd>{selectedRoom.revit_element_id}</dd>
-                  <dt>최근 사진</dt><dd>{photos.length}개</dd>
+                  <dt>표시 기준</dt>
+                  <dd>{selectedSheet ? "Sheet overlay" : "Fallback floor plan"}</dd>
+                  <dt>층 / 영역</dt>
+                  <dd>{selectedPlanRoom?.level_name ?? selectedPlan?.level_name ?? "-"}</dd>
+                  <dt>면적</dt>
+                  <dd>{selectedPlanRoom?.area_m2 ? `${selectedPlanRoom.area_m2} m²` : "-"}</dd>
+                  <dt>Room ID</dt>
+                  <dd>
+                    <code>{selectedRoom.bim_photo_room_id}</code>
+                  </dd>
+                  <dt>Revit Element</dt>
+                  <dd>{selectedPlanRoom?.revit_element_id ?? "-"}</dd>
+                  <dt>최근 사진</dt>
+                  <dd>{photos.length}개</dd>
                 </dl>
-                <a className="button secondary" href={selectedPhotosHref}>Room 사진 보기 <ChevronRight size={15} /></a>
+                <a className="button secondary" href={selectedPhotosHref}>
+                  Room 사진 보기 <ChevronRight size={15} />
+                </a>
               </>
             ) : (
               <p className="muted">{status}</p>
@@ -249,10 +380,16 @@ export default function ViewerPage() {
           <section className="panel ref-card">
             <h2 className="section-title">연결 정보</h2>
             <dl className="detail-definition">
-              <dt>Revit View</dt><dd>{selectedPlan?.view_name ?? "-"}</dd>
-              <dt>동기화 층</dt><dd>{selectedPlan?.level_name ?? "-"}</dd>
-              <dt>Room 수</dt><dd>{selectedPlan?.rooms.length ?? 0}</dd>
-              <dt>동기화 시각</dt><dd>{selectedPlan ? new Date(selectedPlan.created_at).toLocaleString("ko-KR") : "-"}</dd>
+              <dt>Sheet</dt>
+              <dd>{selectedSheet ? `${selectedSheet.sheet_number} · ${selectedSheet.sheet_name}` : "-"}</dd>
+              <dt>Sheet 구역</dt>
+              <dd>{selectedSheet?.overlays.length ?? 0}</dd>
+              <dt>Fallback View</dt>
+              <dd>{selectedPlan?.view_name ?? "-"}</dd>
+              <dt>Room 수</dt>
+              <dd>{selectedPlan?.rooms.length ?? 0}</dd>
+              <dt>동기화 시각</dt>
+              <dd>{selectedSheet ? new Date(selectedSheet.synced_at).toLocaleString("ko-KR") : "-"}</dd>
             </dl>
             <p className="muted">{status}</p>
           </section>
@@ -261,22 +398,92 @@ export default function ViewerPage() {
 
       <section className="panel ref-card viewer-photo-strip">
         <div className="ref-panel-title">
-          <h2>{selectedRoom ? `${selectedRoom.room_number ?? ""} ${selectedRoom.room_name}` : "Room"} 관련 사진 <span className="count-badge">{photos.length}</span></h2>
-          <a href={selectedPhotosHref}>모든 사진 보기 <ChevronRight size={14} /></a>
+          <h2>
+            {selectedRoom ? formatRoomTitle(selectedRoom, selectedPlanRoom) : "Room"} 관련 사진 <span className="count-badge">{photos.length}</span>
+          </h2>
+          <a href={selectedPhotosHref}>
+            모든 사진 보기 <ChevronRight size={14} />
+          </a>
         </div>
         <div className="strip-photos">
           {photos.slice(0, 6).map((photo, index) => (
             <article className={index === 0 ? "strip-photo active" : "strip-photo"} key={photo.id}>
               {photo.preview_url ? <img src={photo.preview_url} alt={photo.description ?? "Room photo"} /> : <div className="photo-fallback" />}
               <strong>{photo.work_date}</strong>
-              <span>{photo.work_surface} · {photo.trade}</span>
+              <span>
+                {photo.work_surface} · {photo.trade}
+              </span>
             </article>
           ))}
           {photos.length === 0 ? <p className="muted">이 Room에 등록된 사진이 없습니다.</p> : null}
-          <a className="more-photo" href={selectedPhotosHref}><Camera size={25} />더보기</a>
+          <a className="more-photo" href={selectedPhotosHref}>
+            <Camera size={25} />더보기
+          </a>
         </div>
       </section>
     </div>
+  );
+}
+
+function SheetViewer({
+  sheet,
+  assetUrl,
+  selectedRoomId,
+  onSelect
+}: {
+  sheet: RevitSheet;
+  assetUrl: string;
+  selectedRoomId: string;
+  onSelect: (roomId: string) => void;
+}) {
+  const isPdf = sheet.asset?.mime_type === "application/pdf";
+  const stageStyle = sheet.width_mm && sheet.height_mm ? { aspectRatio: `${sheet.width_mm} / ${sheet.height_mm}` } : undefined;
+  return (
+    <div className="floor-plan sheet-plan">
+      <div className="sheet-stage" style={stageStyle}>
+        {assetUrl ? (
+          isPdf ? (
+            <object className="sheet-asset" data={assetUrl} type="application/pdf" aria-label={`${sheet.sheet_number} ${sheet.sheet_name}`}>
+              <a className="button secondary" href={assetUrl} target="_blank" rel="noreferrer">
+                PDF 열기
+              </a>
+            </object>
+          ) : (
+            <img className="sheet-asset" src={assetUrl} alt={`${sheet.sheet_number} ${sheet.sheet_name}`} />
+          )
+        ) : (
+          <div className="sheet-asset-empty">
+            <FileText size={30} />
+            <strong>{sheet.sheet_number}</strong>
+            <span>Sheet asset을 불러오는 중이거나 PDF export가 없는 Sheet입니다.</span>
+          </div>
+        )}
+        <svg className="sheet-overlay-svg" viewBox="0 0 1 1" preserveAspectRatio="none" aria-label="Room overlay">
+          {sheet.overlays.map((overlay) => (
+            <SheetRoomShape key={overlay.id} overlay={overlay} selected={overlay.bim_photo_room_id === selectedRoomId} onSelect={onSelect} />
+          ))}
+        </svg>
+      </div>
+    </div>
+  );
+}
+
+function SheetRoomShape({
+  overlay,
+  selected,
+  onSelect
+}: {
+  overlay: RevitRoomOverlay;
+  selected: boolean;
+  onSelect: (roomId: string) => void;
+}) {
+  const points = overlay.normalized_polygon.map((point) => `${point.x},${point.y}`).join(" ");
+  return (
+    <polygon
+      className={selected ? "sheet-room-zone selected" : "sheet-room-zone"}
+      points={points}
+      onClick={() => onSelect(overlay.bim_photo_room_id)}
+    />
   );
 }
 
@@ -336,4 +543,15 @@ function PlanRoomShape({ room, selected, onSelect }: { room: FloorPlanRoom; sele
       </text>
     </g>
   );
+}
+
+function getRoomDatabaseId(room: FloorPlanRoom | RevitRoomOverlay | undefined) {
+  if (!room) return "";
+  return room.room_id ?? "";
+}
+
+function formatRoomTitle(room: FloorPlanRoom | RevitRoomOverlay, planRoom?: FloorPlanRoom) {
+  if (planRoom) return `${planRoom.room_number ?? ""} ${planRoom.room_name}`.trim();
+  if ("room_name" in room) return `${room.room_number ?? ""} ${room.room_name}`.trim();
+  return room.bim_photo_room_id;
 }

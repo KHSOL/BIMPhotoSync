@@ -71,6 +71,7 @@ public sealed class SyncRoomsExternalHandler : IExternalEventHandler
             ValidationLog.Write("Committed BIM_PHOTO_ROOM_ID writes.");
 
             SyncFloorPlan(doc, response.Data.Room_Mappings);
+            SyncSheets(doc, response.Data.Room_Mappings);
 
             if (Environment.GetEnvironmentVariable("BIM_PHOTO_SYNC_AUTORUN_SELECT_AFTER_SYNC") == "1")
             {
@@ -169,6 +170,382 @@ public sealed class SyncRoomsExternalHandler : IExternalEventHandler
             floorPlanResponse == null
                 ? "Floor plan sync returned null."
                 : $"Synced floor plan {floorPlanResponse.Data.Id} for {levelName} with {planRooms.Count} rooms.");
+    }
+
+    private static void SyncSheets(Document doc, IReadOnlyList<RoomMappingDto> mappings)
+    {
+        if (mappings.Count == 0) return;
+        if (string.IsNullOrWhiteSpace(AddinSettings.ProjectId)) return;
+
+        Dictionary<string, RoomMappingDto> mappingsByElementId = mappings
+            .Where(mapping => !string.IsNullOrWhiteSpace(mapping.Revit_Element_Id))
+            .ToDictionary(mapping => mapping.Revit_Element_Id, mapping => mapping);
+        if (mappingsByElementId.Count == 0) return;
+
+        List<RevitSheetDto> sheets = new();
+        foreach (ViewSheet sheet in new FilteredElementCollector(doc)
+                     .OfClass(typeof(ViewSheet))
+                     .Cast<ViewSheet>()
+                     .Where(sheet => !sheet.IsPlaceholder)
+                     .OrderBy(sheet => sheet.SheetNumber))
+        {
+            try
+            {
+                SheetAssetDto? asset = ExportAndUploadSheetPdf(doc, sheet);
+                SheetBounds bounds = GetSheetBounds(sheet);
+                List<RevitSheetViewDto> views = new();
+                List<RevitRoomOverlayDto> overlays = new();
+
+                foreach (Viewport viewport in new FilteredElementCollector(doc)
+                             .OfClass(typeof(Viewport))
+                             .Cast<Viewport>()
+                             .Where(viewport => viewport.SheetId == sheet.Id))
+                {
+                    View? view = doc.GetElement(viewport.ViewId) as View;
+                    if (view == null) continue;
+
+                    views.Add(new RevitSheetViewDto(
+                        Source_View_Id: view.Id.Value.ToString(),
+                        Viewport_Element_Id: viewport.Id.Value.ToString(),
+                        View_Name: view.Name,
+                        View_Type: view.ViewType.ToString(),
+                        Scale: view.Scale,
+                        Viewport_Box: GetViewportBox(viewport)));
+
+                    if (view.ViewType != ViewType.FloorPlan &&
+                        view.ViewType != ViewType.CeilingPlan &&
+                        view.ViewType != ViewType.AreaPlan)
+                    {
+                        continue;
+                    }
+
+                    overlays.AddRange(BuildRoomOverlaysForViewport(
+                        doc,
+                        view,
+                        viewport,
+                        bounds,
+                        mappingsByElementId));
+                }
+
+                sheets.Add(new RevitSheetDto(
+                    Revit_Unique_Id: sheet.UniqueId,
+                    Revit_Element_Id: sheet.Id.Value.ToString(),
+                    Sheet_Number: sheet.SheetNumber,
+                    Sheet_Name: sheet.Name,
+                    Width_Mm: UnitUtils.ConvertFromInternalUnits(bounds.Width, UnitTypeId.Millimeters),
+                    Height_Mm: UnitUtils.ConvertFromInternalUnits(bounds.Height, UnitTypeId.Millimeters),
+                    Asset: asset,
+                    Views: views,
+                    Overlays: overlays));
+            }
+            catch (Exception ex)
+            {
+                ValidationLog.Write($"Skipped sheet {sheet.SheetNumber}: {ex.Message}");
+            }
+        }
+
+        if (sheets.Count == 0)
+        {
+            ValidationLog.Write("Skipped sheet sync: no sheets could be exported.");
+            return;
+        }
+
+        int syncedCount = 0;
+        foreach (RevitSheetDto sheet in sheets)
+        {
+            SyncSheetsResponse? sheetResponse = new ApiClient()
+                .SyncSheetsAsync(new SyncSheetsRequest(AddinSettings.ProjectId, AddinSettings.RevitModelId, new[] { sheet }))
+                .GetAwaiter()
+                .GetResult();
+
+            syncedCount += sheetResponse?.Data.Count ?? 0;
+        }
+
+        ValidationLog.Write($"Synced {syncedCount} sheets with room overlays.");
+    }
+
+    private static SheetAssetDto? ExportAndUploadSheetPdf(Document doc, ViewSheet sheet)
+    {
+        if (!sheet.CanBePrinted)
+        {
+            ValidationLog.Write($"Sheet {sheet.SheetNumber} is not printable. Metadata will sync without a PDF asset.");
+            return null;
+        }
+
+        string exportDirectory = Path.Combine(Path.GetTempPath(), "BimPhotoSync", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(exportDirectory);
+        string fileStem = SanitizeFileName($"{sheet.SheetNumber}_{sheet.Name}");
+        PDFExportOptions options = new()
+        {
+            Combine = false,
+            FileName = fileStem
+        };
+
+        try
+        {
+            string[] before = Directory.GetFiles(exportDirectory, "*.pdf");
+            bool exported = doc.Export(exportDirectory, new List<ElementId> { sheet.Id }, options);
+            if (!exported)
+            {
+                ValidationLog.Write($"PDF export returned false for sheet {sheet.SheetNumber}.");
+                return null;
+            }
+
+            FileInfo? exportedFile = Directory.GetFiles(exportDirectory, "*.pdf")
+                .Select(path => new FileInfo(path))
+                .Where(file => !before.Contains(file.FullName, StringComparer.OrdinalIgnoreCase))
+                .OrderByDescending(file => file.LastWriteTimeUtc)
+                .FirstOrDefault();
+
+            if (exportedFile == null || !exportedFile.Exists)
+            {
+                ValidationLog.Write($"PDF export produced no file for sheet {sheet.SheetNumber}.");
+                return null;
+            }
+
+            byte[] bytes = File.ReadAllBytes(exportedFile.FullName);
+            PresignDrawingAssetResponse? presign = new ApiClient()
+                .PresignDrawingAssetAsync(new PresignDrawingAssetRequest(
+                    AddinSettings.ProjectId,
+                    "application/pdf",
+                    bytes.LongLength,
+                    sheet.SheetNumber,
+                    null))
+                .GetAwaiter()
+                .GetResult();
+
+            if (presign == null)
+            {
+                ValidationLog.Write($"Drawing presign returned null for sheet {sheet.SheetNumber}.");
+                return null;
+            }
+
+            new ApiClient()
+                .UploadBytesAsync(presign.Data.Presigned_Url, "application/pdf", bytes)
+                .GetAwaiter()
+                .GetResult();
+
+            return new SheetAssetDto(
+                Object_Key: presign.Data.Object_Key,
+                Mime_Type: "application/pdf",
+                Width_Px: null,
+                Height_Px: null);
+        }
+        finally
+        {
+            try
+            {
+                Directory.Delete(exportDirectory, true);
+            }
+            catch (Exception ex)
+            {
+                ValidationLog.Write($"Could not delete temporary export directory {exportDirectory}: {ex.Message}");
+            }
+        }
+    }
+
+    private static IEnumerable<RevitRoomOverlayDto> BuildRoomOverlaysForViewport(
+        Document doc,
+        View view,
+        Viewport viewport,
+        SheetBounds sheetBounds,
+        IReadOnlyDictionary<string, RoomMappingDto> mappingsByElementId)
+    {
+        Transform projectionToSheet;
+        IList<TransformWithBoundary> modelToProjectionTransforms;
+        try
+        {
+            projectionToSheet = viewport.GetProjectionToSheetTransform();
+            modelToProjectionTransforms = view.GetModelToProjectionTransforms();
+        }
+        catch (Exception ex)
+        {
+            ValidationLog.Write($"Skipped overlay transform for view {view.Name}: {ex.Message}");
+            yield break;
+        }
+
+        if (modelToProjectionTransforms.Count == 0) yield break;
+
+        foreach (SpatialElement room in new FilteredElementCollector(doc, view.Id)
+                     .OfCategory(BuiltInCategory.OST_Rooms)
+                     .WhereElementIsNotElementType()
+                     .Cast<SpatialElement>())
+        {
+            string elementId = room.Id.Value.ToString();
+            if (!mappingsByElementId.TryGetValue(elementId, out RoomMappingDto? mapping)) continue;
+
+            IReadOnlyList<XYZ> boundary = GetRoomBoundaryXyz(room);
+            if (boundary.Count < 3) continue;
+
+            List<PlanPointDto> sheetPolygon = new();
+            foreach (XYZ modelPoint in boundary)
+            {
+                Transform modelToProjection = PickModelToProjectionTransform(modelToProjectionTransforms, modelPoint);
+                XYZ projectionPoint = modelToProjection.OfPoint(modelPoint);
+                XYZ sheetPoint = projectionToSheet.OfPoint(projectionPoint);
+                sheetPolygon.Add(new PlanPointDto(Math.Round(sheetPoint.X, 6), Math.Round(sheetPoint.Y, 6)));
+            }
+
+            if (sheetPolygon.Count < 3) continue;
+            PlanBoundsDto bbox = CalculateTightBounds(sheetPolygon);
+            List<PlanPointDto> normalized = sheetPolygon
+                .Select(point => NormalizeSheetPoint(point, sheetBounds))
+                .ToList();
+
+            yield return new RevitRoomOverlayDto(
+                Room_Id: mapping.Room_Id,
+                Bim_Photo_Room_Id: mapping.Bim_Photo_Room_Id,
+                Source_View_Id: view.Id.Value.ToString(),
+                Viewport_Element_Id: viewport.Id.Value.ToString(),
+                Polygon: sheetPolygon,
+                Normalized_Polygon: normalized,
+                Bbox: bbox);
+        }
+    }
+
+    private static Transform PickModelToProjectionTransform(
+        IList<TransformWithBoundary> transforms,
+        XYZ modelPoint)
+    {
+        foreach (TransformWithBoundary transformWithBoundary in transforms)
+        {
+            if (CurveLoopContainsPoint(transformWithBoundary.GetBoundary(), modelPoint))
+            {
+                return transformWithBoundary.GetModelToProjectionTransform();
+            }
+        }
+
+        return transforms[0].GetModelToProjectionTransform();
+    }
+
+    private static bool CurveLoopContainsPoint(CurveLoop boundary, XYZ point)
+    {
+        List<XYZ> points = new();
+        foreach (Curve curve in boundary)
+        {
+            foreach (XYZ tessellatedPoint in curve.Tessellate())
+            {
+                AddXyzPoint(points, tessellatedPoint);
+            }
+        }
+
+        if (points.Count < 3) return false;
+
+        bool inside = false;
+        for (int currentIndex = 0, previousIndex = points.Count - 1;
+             currentIndex < points.Count;
+             previousIndex = currentIndex++)
+        {
+            XYZ current = points[currentIndex];
+            XYZ previous = points[previousIndex];
+            bool crossesY = current.Y > point.Y != previous.Y > point.Y;
+            if (!crossesY) continue;
+
+            double denominator = previous.Y - current.Y;
+            if (Math.Abs(denominator) < 0.000001) continue;
+
+            double intersectionX = (previous.X - current.X) * (point.Y - current.Y) / denominator + current.X;
+            if (point.X < intersectionX) inside = !inside;
+        }
+
+        return inside;
+    }
+
+    private static IReadOnlyList<XYZ> GetRoomBoundaryXyz(SpatialElement room)
+    {
+        SpatialElementBoundaryOptions options = new()
+        {
+            SpatialElementBoundaryLocation = SpatialElementBoundaryLocation.Finish
+        };
+        IList<IList<BoundarySegment>>? loops = room.GetBoundarySegments(options);
+        if (loops == null || loops.Count == 0) return Array.Empty<XYZ>();
+
+        IList<BoundarySegment> outerLoop = loops
+            .OrderByDescending(loop => Math.Abs(SignedArea(loop.SelectMany(segment => SegmentPoints(segment.GetCurve())))))
+            .First();
+
+        List<XYZ> points = new();
+        foreach (BoundarySegment segment in outerLoop)
+        {
+            IList<XYZ> tessellated = segment.GetCurve().Tessellate();
+            foreach (XYZ point in tessellated)
+            {
+                AddXyzPoint(points, point);
+            }
+        }
+
+        if (points.Count > 1 && points[0].DistanceTo(points[^1]) < 0.001)
+        {
+            points.RemoveAt(points.Count - 1);
+        }
+
+        return points;
+    }
+
+    private static ViewportBoxDto GetViewportBox(Viewport viewport)
+    {
+        Outline box = viewport.GetBoxOutline();
+        XYZ center = viewport.GetBoxCenter();
+        return new ViewportBoxDto(
+            Min_X: Math.Round(box.MinimumPoint.X, 6),
+            Min_Y: Math.Round(box.MinimumPoint.Y, 6),
+            Max_X: Math.Round(box.MaximumPoint.X, 6),
+            Max_Y: Math.Round(box.MaximumPoint.Y, 6),
+            Center_X: Math.Round(center.X, 6),
+            Center_Y: Math.Round(center.Y, 6),
+            Rotation: viewport.Rotation.ToString());
+    }
+
+    private static SheetBounds GetSheetBounds(ViewSheet sheet)
+    {
+        BoundingBoxUV outline = sheet.Outline;
+        return new SheetBounds(outline.Min.U, outline.Min.V, outline.Max.U, outline.Max.V);
+    }
+
+    private static PlanPointDto NormalizeSheetPoint(PlanPointDto point, SheetBounds sheetBounds)
+    {
+        double width = Math.Max(0.000001, sheetBounds.Width);
+        double height = Math.Max(0.000001, sheetBounds.Height);
+        double x = (point.X - sheetBounds.MinX) / width;
+        double y = 1 - ((point.Y - sheetBounds.MinY) / height);
+        return new PlanPointDto(Math.Round(x, 6), Math.Round(y, 6));
+    }
+
+    private static PlanBoundsDto CalculateTightBounds(IEnumerable<PlanPointDto> points)
+    {
+        List<PlanPointDto> list = points.ToList();
+        double minX = list.Min(point => point.X);
+        double minY = list.Min(point => point.Y);
+        double maxX = list.Max(point => point.X);
+        double maxY = list.Max(point => point.Y);
+        return new PlanBoundsDto(
+            Math.Round(minX, 6),
+            Math.Round(minY, 6),
+            Math.Round(maxX, 6),
+            Math.Round(maxY, 6),
+            Math.Round(maxX - minX, 6),
+            Math.Round(maxY - minY, 6));
+    }
+
+    private static void AddXyzPoint(List<XYZ> points, XYZ point)
+    {
+        XYZ? previous = points.LastOrDefault();
+        if (previous != null && previous.DistanceTo(point) < 0.001) return;
+        points.Add(point);
+    }
+
+    private static string SanitizeFileName(string fileName)
+    {
+        char[] invalidChars = Path.GetInvalidFileNameChars();
+        string sanitized = new(fileName.Select(character => invalidChars.Contains(character) ? '-' : character).ToArray());
+        sanitized = sanitized.Trim('-', ' ', '.');
+        return string.IsNullOrWhiteSpace(sanitized) ? "sheet" : sanitized;
+    }
+
+    private sealed record SheetBounds(double MinX, double MinY, double MaxX, double MaxY)
+    {
+        public double Width => MaxX - MinX;
+        public double Height => MaxY - MinY;
     }
 
     private static string GetActiveLevelName(Document doc, View activeView)

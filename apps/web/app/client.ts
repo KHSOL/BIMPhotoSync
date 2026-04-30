@@ -80,6 +80,60 @@ export type RevitFloorPlan = {
   created_at: string;
 };
 
+export type RevitSheetAsset = {
+  object_key: string;
+  mime_type?: string | null;
+  width_px?: number | null;
+  height_px?: number | null;
+  url: string;
+};
+
+export type RevitSheetView = {
+  id: string;
+  source_view_id: string;
+  viewport_element_id?: string | null;
+  view_name: string;
+  view_type: string;
+  scale?: number | null;
+  viewport_box?: {
+    min_x: number;
+    min_y: number;
+    max_x: number;
+    max_y: number;
+    center_x: number;
+    center_y: number;
+    rotation?: string | null;
+  } | null;
+};
+
+export type RevitRoomOverlay = {
+  id: string;
+  view_id?: string | null;
+  room_id?: string | null;
+  bim_photo_room_id: string;
+  polygon: PlanPoint[];
+  normalized_polygon: PlanPoint[];
+  bbox: PlanBounds;
+  coordinate_version: string;
+};
+
+export type RevitSheet = {
+  id: string;
+  project_id: string;
+  revit_model_id?: string | null;
+  revit_unique_id?: string | null;
+  revit_element_id?: string | null;
+  sheet_number: string;
+  sheet_name: string;
+  width_mm?: number | null;
+  height_mm?: number | null;
+  asset?: RevitSheetAsset | null;
+  views: RevitSheetView[];
+  overlays: RevitRoomOverlay[];
+  synced_at: string;
+  created_at: string;
+};
+
 export type Photo = {
   id: string;
   project_id: string;

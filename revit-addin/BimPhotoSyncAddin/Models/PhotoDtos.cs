@@ -152,3 +152,76 @@ public sealed record SyncedFloorPlanDto(
     [property: JsonPropertyName("level_name")] string Level_Name,
     [property: JsonPropertyName("view_name")] string View_Name);
 
+public sealed record PresignDrawingAssetRequest(
+    [property: JsonPropertyName("project_id")] string Project_Id,
+    [property: JsonPropertyName("mime_type")] string Mime_Type,
+    [property: JsonPropertyName("file_size")] long File_Size,
+    [property: JsonPropertyName("sheet_number")] string? Sheet_Number,
+    [property: JsonPropertyName("checksum_sha256")] string? Checksum_Sha256);
+
+public sealed record PresignDrawingAssetResponse(
+    [property: JsonPropertyName("data")] PresignDrawingAssetData Data);
+
+public sealed record PresignDrawingAssetData(
+    [property: JsonPropertyName("upload_id")] string Upload_Id,
+    [property: JsonPropertyName("presigned_url")] string Presigned_Url,
+    [property: JsonPropertyName("method")] string Method,
+    [property: JsonPropertyName("object_key")] string Object_Key,
+    [property: JsonPropertyName("expires_at")] string Expires_At);
+
+public sealed record SyncSheetsRequest(
+    [property: JsonPropertyName("project_id")] string Project_Id,
+    [property: JsonPropertyName("revit_model_id")] string? Revit_Model_Id,
+    [property: JsonPropertyName("sheets")] IReadOnlyList<RevitSheetDto> Sheets);
+
+public sealed record RevitSheetDto(
+    [property: JsonPropertyName("revit_unique_id")] string? Revit_Unique_Id,
+    [property: JsonPropertyName("revit_element_id")] string? Revit_Element_Id,
+    [property: JsonPropertyName("sheet_number")] string Sheet_Number,
+    [property: JsonPropertyName("sheet_name")] string Sheet_Name,
+    [property: JsonPropertyName("width_mm")] double? Width_Mm,
+    [property: JsonPropertyName("height_mm")] double? Height_Mm,
+    [property: JsonPropertyName("asset")] SheetAssetDto? Asset,
+    [property: JsonPropertyName("views")] IReadOnlyList<RevitSheetViewDto> Views,
+    [property: JsonPropertyName("overlays")] IReadOnlyList<RevitRoomOverlayDto> Overlays);
+
+public sealed record SheetAssetDto(
+    [property: JsonPropertyName("object_key")] string Object_Key,
+    [property: JsonPropertyName("mime_type")] string Mime_Type,
+    [property: JsonPropertyName("width_px")] int? Width_Px,
+    [property: JsonPropertyName("height_px")] int? Height_Px);
+
+public sealed record RevitSheetViewDto(
+    [property: JsonPropertyName("source_view_id")] string Source_View_Id,
+    [property: JsonPropertyName("viewport_element_id")] string? Viewport_Element_Id,
+    [property: JsonPropertyName("view_name")] string View_Name,
+    [property: JsonPropertyName("view_type")] string View_Type,
+    [property: JsonPropertyName("scale")] int? Scale,
+    [property: JsonPropertyName("viewport_box")] ViewportBoxDto? Viewport_Box);
+
+public sealed record ViewportBoxDto(
+    [property: JsonPropertyName("min_x")] double Min_X,
+    [property: JsonPropertyName("min_y")] double Min_Y,
+    [property: JsonPropertyName("max_x")] double Max_X,
+    [property: JsonPropertyName("max_y")] double Max_Y,
+    [property: JsonPropertyName("center_x")] double Center_X,
+    [property: JsonPropertyName("center_y")] double Center_Y,
+    [property: JsonPropertyName("rotation")] string? Rotation);
+
+public sealed record RevitRoomOverlayDto(
+    [property: JsonPropertyName("room_id")] string? Room_Id,
+    [property: JsonPropertyName("bim_photo_room_id")] string Bim_Photo_Room_Id,
+    [property: JsonPropertyName("source_view_id")] string? Source_View_Id,
+    [property: JsonPropertyName("viewport_element_id")] string? Viewport_Element_Id,
+    [property: JsonPropertyName("polygon")] IReadOnlyList<PlanPointDto> Polygon,
+    [property: JsonPropertyName("normalized_polygon")] IReadOnlyList<PlanPointDto> Normalized_Polygon,
+    [property: JsonPropertyName("bbox")] PlanBoundsDto Bbox);
+
+public sealed record SyncSheetsResponse(
+    [property: JsonPropertyName("data")] IReadOnlyList<SyncedSheetDto> Data);
+
+public sealed record SyncedSheetDto(
+    [property: JsonPropertyName("id")] string Id,
+    [property: JsonPropertyName("sheet_number")] string Sheet_Number,
+    [property: JsonPropertyName("sheet_name")] string Sheet_Name);
+
