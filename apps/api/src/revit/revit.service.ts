@@ -10,6 +10,11 @@ import { RevitRoomOverlayDto, RevitSheetViewDto, RevitConnectDto, SyncFloorPlanD
 
 type RevitSheetWithRelations = Prisma.RevitSheetGetPayload<{ include: { views: true; overlays: true } }>;
 
+const RevitSheetTransactionOptions = {
+  maxWait: 10000,
+  timeout: 120000
+};
+
 @Injectable()
 export class RevitService {
   private readonly s3: S3Client;
@@ -182,20 +187,21 @@ export class RevitService {
         });
         const roomIdByBimPhotoRoomId = new Map(rooms.map((room) => [room.bimPhotoRoomId, room.id]));
 
-        for (const overlay of incoming.overlays) {
+        const overlayRows: Prisma.RevitRoomOverlayCreateManyInput[] = incoming.overlays.map((overlay) => {
           const resolvedRoomId = overlay.room_id ?? roomIdByBimPhotoRoomId.get(overlay.bim_photo_room_id);
-          await tx.revitRoomOverlay.create({
-            data: {
-              projectId: dto.project_id,
-              sheetId: sheet.id,
-              viewId: viewIdByKey.get(overlayKey(overlay)),
-              roomId: resolvedRoomId,
-              bimPhotoRoomId: overlay.bim_photo_room_id,
-              polygon: overlay.polygon as unknown as Prisma.InputJsonValue,
-              normalizedPolygon: overlay.normalized_polygon as unknown as Prisma.InputJsonValue,
-              bbox: overlay.bbox as unknown as Prisma.InputJsonValue
-            }
-          });
+          return {
+            projectId: dto.project_id,
+            sheetId: sheet.id,
+            viewId: viewIdByKey.get(overlayKey(overlay)) ?? null,
+            roomId: resolvedRoomId ?? null,
+            bimPhotoRoomId: overlay.bim_photo_room_id,
+            polygon: overlay.polygon as unknown as Prisma.InputJsonValue,
+            normalizedPolygon: overlay.normalized_polygon as unknown as Prisma.InputJsonValue,
+            bbox: overlay.bbox as unknown as Prisma.InputJsonValue
+          };
+        });
+        if (overlayRows.length > 0) {
+          await tx.revitRoomOverlay.createMany({ data: overlayRows });
         }
 
         const hydrated = await tx.revitSheet.findUnique({
@@ -205,7 +211,7 @@ export class RevitService {
         if (hydrated) syncedSheets.push(hydrated);
       }
       return syncedSheets;
-    });
+    }, RevitSheetTransactionOptions);
 
     return { data: results.map((sheet) => toSheetResponse(sheet, this.config)) };
   }

@@ -145,7 +145,7 @@ sequenceDiagram
 
 Add-in은 `revit-addin/BimPhotoSyncAddin`에 있으며 .NET 8 WPF 기반입니다. `BimPhotoSyncApp`이 ribbon, Dockable Pane, External Event, selection changed handler를 등록합니다. `PhotoDockPane`은 Room 선택 결과를 받아 사진 타임라인과 AI 요약을 표시합니다.
 
-`Sync Rooms`는 Room ID 매핑과 `BIM_PHOTO_ROOM_ID` 기록만 담당합니다. 도면 동기화는 Revit 렉을 줄이기 위해 별도 버튼으로 분리합니다. `Sync View`는 현재 열린 평면도 또는 현재 Sheet만 동기화하고, `Sync Sheets`는 전체 Sheet를 명시적으로 동기화합니다. Sheet PDF는 화면 배경이고, Room 클릭은 PDF 내부 텍스트/선분이 아니라 별도 overlay polygon으로 처리합니다. Room boundary는 Revit `SpatialElement.GetBoundarySegments` 기반이며, Viewport 좌표 변환은 Revit 2025 API의 `View.GetModelToProjectionTransforms()`와 `Viewport.GetProjectionToSheetTransform()` 조합을 사용합니다. Sheet sync payload는 대형 프로젝트에서도 API body limit에 덜 민감하도록 Add-in이 Sheet 단위로 나누어 업로드합니다.
+`Sync Rooms`는 Room ID 매핑과 `BIM_PHOTO_ROOM_ID` 기록만 담당합니다. 도면 동기화는 Revit 렉을 줄이기 위해 별도 버튼으로 분리합니다. `Sync View`는 현재 열린 평면도 또는 현재 Sheet만 동기화하고, `Sync Sheets`는 전체 Sheet를 명시적으로 동기화합니다. Sheet PDF는 화면 배경이고, Room 클릭은 PDF 내부 텍스트/선분이 아니라 별도 overlay polygon으로 처리합니다. Room boundary는 Revit `SpatialElement.GetBoundarySegments` 기반이며, Viewport 좌표 변환은 Revit 2025 API의 `View.GetModelToProjectionTransforms()`와 `Viewport.GetProjectionToSheetTransform()` 조합을 사용합니다. Sheet sync payload는 대형 프로젝트에서도 API body limit에 덜 민감하도록 Add-in이 Sheet 단위로 나누어 업로드합니다. API는 Sheet 저장 transaction timeout을 120초로 설정하고 Room overlay를 batch insert해 Snowdon처럼 overlay가 많은 Sheet도 저장할 수 있게 합니다.
 
 ## Dynamo 사용 여부와 비교
 
