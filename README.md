@@ -82,7 +82,7 @@ erDiagram
   User ||--o{ Photo : uploads
 ```
 
-가장 중요한 연결은 `Project -> Room -> Photo -> PhotoAiAnalysis`입니다. Revit Room에는 공유 파라미터 `BIM_PHOTO_ROOM_ID`만 기록하고, 실제 사진/분석/검토 데이터는 백엔드 DB가 관리합니다. 한 Room은 여러 Sheet나 확대 View에 반복 표시될 수 있으므로 화면 클릭 영역은 `RevitRoomOverlay`로 분리하고, 사진 데이터는 항상 Room에 연결합니다.
+가장 중요한 연결은 `Project -> Room -> Photo -> PhotoAiAnalysis`입니다. Revit Room에는 공유 파라미터 `BIM_PHOTO_ROOM_ID`만 기록하고, 실제 사진/분석/검토 데이터는 백엔드 DB가 관리합니다. Revit Room의 `revit_unique_id`는 프로젝트 안에서만 고유하게 취급합니다. 같은 샘플 RVT를 다른 프로젝트에 다시 연결할 수 있으므로 Room upsert 기준은 `project_id + revit_unique_id`이며, 이미 다른 프로젝트가 사용하는 `BIM_PHOTO_ROOM_ID`가 모델에 남아 있으면 새 ID를 발급해 현재 프로젝트 Room으로 다시 기록합니다. 한 Room은 여러 Sheet나 확대 View에 반복 표시될 수 있으므로 화면 클릭 영역은 `RevitRoomOverlay`로 분리하고, 사진 데이터는 항상 Room에 연결합니다.
 
 ## 주요 데이터 흐름
 
@@ -129,10 +129,12 @@ sequenceDiagram
   Event->>Revit: Room 목록 읽기 및 shared parameter 기록
   Event->>API: POST /revit/sync-rooms
   API->>DB: Room upsert 및 bimPhotoRoomId 유지
-  Event->>Revit: Sheet/View/Room boundary/좌표 변환 추출
+  Revit->>Addin: Sync View 또는 Sync Sheets 실행
+  Addin->>Event: ExternalEvent.Raise()
+  Event->>Revit: 현재 View/Sheet 또는 전체 Sheet의 boundary/좌표 변환 추출
   Event->>API: POST /uploads/drawings/presign
   Event->>API: PUT Sheet PDF to object storage
-  Event->>API: POST /revit/sheets
+  Event->>API: POST /revit/floor-plans 또는 POST /revit/sheets
   API->>DB: Sheet, View, Room overlay 저장
   Revit->>Addin: Room 선택 변경
   Addin->>Revit: BIM_PHOTO_ROOM_ID 읽기
@@ -143,7 +145,7 @@ sequenceDiagram
 
 Add-in은 `revit-addin/BimPhotoSyncAddin`에 있으며 .NET 8 WPF 기반입니다. `BimPhotoSyncApp`이 ribbon, Dockable Pane, External Event, selection changed handler를 등록합니다. `PhotoDockPane`은 Room 선택 결과를 받아 사진 타임라인과 AI 요약을 표시합니다.
 
-`Sync Rooms`는 Room ID 매핑 외에 모든 Sheet를 PDF로 export하고, Sheet 안의 Viewport와 Room boundary를 읽어 Sheet normalized 좌표의 polygon overlay를 서버에 업로드합니다. PDF는 화면 배경이고, Room 클릭은 PDF 내부 텍스트/선분이 아니라 별도 overlay polygon으로 처리합니다. Room boundary는 Revit `SpatialElement.GetBoundarySegments` 기반이며, Viewport 좌표 변환은 Revit 2025 API의 `View.GetModelToProjectionTransforms()`와 `Viewport.GetProjectionToSheetTransform()` 조합을 사용합니다. Sheet sync payload는 대형 프로젝트에서도 API body limit에 덜 민감하도록 Add-in이 Sheet 단위로 나누어 업로드합니다.
+`Sync Rooms`는 Room ID 매핑과 `BIM_PHOTO_ROOM_ID` 기록만 담당합니다. 도면 동기화는 Revit 렉을 줄이기 위해 별도 버튼으로 분리합니다. `Sync View`는 현재 열린 평면도 또는 현재 Sheet만 동기화하고, `Sync Sheets`는 전체 Sheet를 명시적으로 동기화합니다. Sheet PDF는 화면 배경이고, Room 클릭은 PDF 내부 텍스트/선분이 아니라 별도 overlay polygon으로 처리합니다. Room boundary는 Revit `SpatialElement.GetBoundarySegments` 기반이며, Viewport 좌표 변환은 Revit 2025 API의 `View.GetModelToProjectionTransforms()`와 `Viewport.GetProjectionToSheetTransform()` 조합을 사용합니다. Sheet sync payload는 대형 프로젝트에서도 API body limit에 덜 민감하도록 Add-in이 Sheet 단위로 나누어 업로드합니다.
 
 ## Dynamo 사용 여부와 비교
 
@@ -402,8 +404,11 @@ Add-in 사용 흐름:
 2. Backend API URL, 이메일, 비밀번호를 입력하고 `Login / Refresh Projects`를 누릅니다.
 3. 프로젝트를 선택하거나 상위 관리자 계정으로 새 프로젝트를 생성합니다.
 4. `Save + Connect`를 누르면 `%APPDATA%\BimPhotoSync\config.json`에 토큰/프로젝트가 저장되고 현재 Revit 문서가 서버 프로젝트에 연결됩니다.
-5. `Sync Rooms`를 누르면 External Event를 통해 Revit Room의 `BIM_PHOTO_ROOM_ID`를 기록하고 active floor plan을 서버로 동기화합니다.
-6. 같은 External Event 안에서 Revit Sheet를 PDF로 export하고, Viewport별 Room boundary를 Sheet 좌표로 변환해 overlay polygon을 서버로 동기화합니다.
+5. `Sync Rooms`를 누르면 External Event를 통해 Revit Room의 `BIM_PHOTO_ROOM_ID`를 기록합니다.
+6. 현재 열어둔 평면도 또는 Sheet만 웹 Viewer에 올리려면 `Sync View`를 누릅니다.
+7. 전체 Sheet PDF와 Sheet별 Room overlay를 모두 올려야 할 때만 `Sync Sheets`를 누릅니다. 큰 Revit 모델에서는 시간이 오래 걸릴 수 있으므로 먼저 `Sync View`로 검증하는 흐름을 권장합니다.
+
+Debug 빌드에는 검증 편의를 위해 `Create Test` 버튼이 추가됩니다. 이 버튼은 현재 모델을 수정하지 않고 `Documents\BimPhotoSync\BPS_Minimal_Room_Test.rvt`에 Room 3개, 평면도 1개, Sheet 1개로 구성된 초소형 Revit 테스트 모델을 생성합니다. 생성한 파일을 열고 `Connect -> Sync Rooms -> Sync View` 순서로 실행하면 Snowdon 샘플보다 빠르게 Room/도면/polygon 연동을 검증할 수 있습니다.
 
 브라우저는 로컬 Revit 파일 목록을 직접 읽을 수 없습니다. Revit 모델 감지, 프로젝트 연결, Room/Floor Plan sync는 Revit Add-in이 담당합니다.
 
@@ -433,7 +438,8 @@ npx eas-cli@latest build -p android --profile preview
 - Revit 시작 시 BIM Photo Sync ribbon과 Dockable Panel이 로드됩니다.
 - Connect Project가 API 연결과 인증을 통과합니다.
 - Sync Rooms가 Revit Room에 `BIM_PHOTO_ROOM_ID`를 기록합니다.
-- Sync Rooms가 Sheet PDF와 Room overlay polygon을 백엔드에 업로드합니다.
+- Sync View가 현재 열린 평면도 또는 Sheet를 백엔드에 업로드합니다.
+- Sync Sheets가 전체 Sheet PDF와 Room overlay polygon을 백엔드에 업로드합니다.
 - Viewer에서 Sheet PDF 위 Room polygon을 클릭할 수 있습니다.
 - Room 선택 시 `GET /api/v1/revit/rooms/{bimPhotoRoomId}/photos`가 호출됩니다.
 - 사진은 `workDate`, `takenAt`, `uploadedAt` 기준의 최신순 타임라인으로 표시됩니다.

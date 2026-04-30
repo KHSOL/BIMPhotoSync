@@ -11,12 +11,14 @@ public sealed class SyncRoomsExternalHandler : IExternalEventHandler
     private const string SharedParameterName = "BIM_PHOTO_ROOM_ID";
     private const string SharedParameterGuid = "5E6A21CE-7829-4A8A-A354-448246AD687D";
     public UIApplication? UiApplication { get; set; }
+    public RevitSyncOperation Operation { get; set; } = RevitSyncOperation.Rooms;
 
     public void Execute(UIApplication app)
     {
         try
         {
-            ValidationLog.Write("SyncRoomsExternalHandler.Execute entered.");
+            RevitSyncOperation operation = Operation;
+            ValidationLog.Write($"SyncRoomsExternalHandler.Execute entered. Operation={operation}.");
             UIApplication uiapp = UiApplication ?? app;
             Document doc = uiapp.ActiveUIDocument.Document;
             ValidationLog.Write($"Active document: {doc.Title}");
@@ -70,8 +72,12 @@ public sealed class SyncRoomsExternalHandler : IExternalEventHandler
             tx.Commit();
             ValidationLog.Write("Committed BIM_PHOTO_ROOM_ID writes.");
 
-            SyncFloorPlan(doc, response.Data.Room_Mappings);
-            SyncSheets(doc, response.Data.Room_Mappings);
+            string syncSummary = operation switch
+            {
+                RevitSyncOperation.CurrentView => SyncCurrentView(doc, response.Data.Room_Mappings),
+                RevitSyncOperation.Sheets => $"Synced {SyncSheets(doc, response.Data.Room_Mappings)} Revit Sheets.",
+                _ => "Room sync complete. Use Sync View for the current drawing, or Sync Sheets for every sheet."
+            };
 
             if (Environment.GetEnvironmentVariable("BIM_PHOTO_SYNC_AUTORUN_SELECT_AFTER_SYNC") == "1")
             {
@@ -87,7 +93,7 @@ public sealed class SyncRoomsExternalHandler : IExternalEventHandler
 
             if (Environment.GetEnvironmentVariable("BIM_PHOTO_SYNC_AUTORUN_SYNC") != "1")
             {
-                TaskDialog.Show("BIM Photo Sync", $"Synced {response.Data.Room_Mappings.Count} Rooms.");
+                TaskDialog.Show("BIM Photo Sync", $"Synced {response.Data.Room_Mappings.Count} Rooms.\n{syncSummary}");
             }
         }
         catch (Exception ex)
@@ -111,15 +117,32 @@ public sealed class SyncRoomsExternalHandler : IExternalEventHandler
         return mappings.FirstOrDefault();
     }
 
-    private static void SyncFloorPlan(Document doc, IReadOnlyList<RoomMappingDto> mappings)
+    private static string SyncCurrentView(Document doc, IReadOnlyList<RoomMappingDto> mappings)
     {
-        if (mappings.Count == 0) return;
+        Dictionary<string, RoomMappingDto> mappingsByElementId = BuildMappingsByElementId(mappings);
+        if (mappingsByElementId.Count == 0) return "Skipped drawing sync: no Room mappings were available.";
+
+        View activeView = doc.ActiveView;
+        if (activeView is ViewSheet activeSheet)
+        {
+            int sheetCount = SyncSheet(doc, activeSheet, mappingsByElementId);
+            return sheetCount == 0
+                ? $"Skipped current Sheet sync: {activeSheet.SheetNumber} could not be exported."
+                : $"Synced current Sheet {activeSheet.SheetNumber} - {activeSheet.Name}.";
+        }
+
+        int floorPlanRoomCount = SyncFloorPlan(doc, mappingsByElementId);
+        return floorPlanRoomCount == 0
+            ? "Skipped current view sync: active view has no bounded Rooms."
+            : $"Synced current view {activeView.Name} with {floorPlanRoomCount} Room overlays.";
+    }
+
+    private static int SyncFloorPlan(Document doc, IReadOnlyDictionary<string, RoomMappingDto> mappingsByElementId)
+    {
+        if (mappingsByElementId.Count == 0) return 0;
 
         View activeView = doc.ActiveView;
         string levelName = GetActiveLevelName(doc, activeView);
-        Dictionary<string, RoomMappingDto> mappingsByElementId = mappings
-            .Where(mapping => !string.IsNullOrWhiteSpace(mapping.Revit_Element_Id))
-            .ToDictionary(mapping => mapping.Revit_Element_Id, mapping => mapping);
 
         List<FloorPlanRoomDto> planRooms = new();
         foreach (SpatialElement room in new FilteredElementCollector(doc, activeView.Id)
@@ -150,7 +173,7 @@ public sealed class SyncRoomsExternalHandler : IExternalEventHandler
         if (planRooms.Count == 0)
         {
             ValidationLog.Write("Skipped floor plan sync: active view has no bounded Rooms.");
-            return;
+            return 0;
         }
 
         PlanBoundsDto bounds = CalculateBounds(planRooms.SelectMany(room => room.Polygon));
@@ -170,98 +193,120 @@ public sealed class SyncRoomsExternalHandler : IExternalEventHandler
             floorPlanResponse == null
                 ? "Floor plan sync returned null."
                 : $"Synced floor plan {floorPlanResponse.Data.Id} for {levelName} with {planRooms.Count} rooms.");
+        return floorPlanResponse == null ? 0 : planRooms.Count;
     }
 
-    private static void SyncSheets(Document doc, IReadOnlyList<RoomMappingDto> mappings)
+    private static int SyncSheets(Document doc, IReadOnlyList<RoomMappingDto> mappings)
     {
-        if (mappings.Count == 0) return;
-        if (string.IsNullOrWhiteSpace(AddinSettings.ProjectId)) return;
+        if (mappings.Count == 0) return 0;
+        if (string.IsNullOrWhiteSpace(AddinSettings.ProjectId)) return 0;
 
-        Dictionary<string, RoomMappingDto> mappingsByElementId = mappings
-            .Where(mapping => !string.IsNullOrWhiteSpace(mapping.Revit_Element_Id))
-            .ToDictionary(mapping => mapping.Revit_Element_Id, mapping => mapping);
-        if (mappingsByElementId.Count == 0) return;
-
-        List<RevitSheetDto> sheets = new();
+        Dictionary<string, RoomMappingDto> mappingsByElementId = BuildMappingsByElementId(mappings);
+        if (mappingsByElementId.Count == 0) return 0;
+        int syncedCount = 0;
         foreach (ViewSheet sheet in new FilteredElementCollector(doc)
                      .OfClass(typeof(ViewSheet))
                      .Cast<ViewSheet>()
                      .Where(sheet => !sheet.IsPlaceholder)
                      .OrderBy(sheet => sheet.SheetNumber))
         {
-            try
-            {
-                SheetAssetDto? asset = ExportAndUploadSheetPdf(doc, sheet);
-                SheetBounds bounds = GetSheetBounds(sheet);
-                List<RevitSheetViewDto> views = new();
-                List<RevitRoomOverlayDto> overlays = new();
-
-                foreach (Viewport viewport in new FilteredElementCollector(doc)
-                             .OfClass(typeof(Viewport))
-                             .Cast<Viewport>()
-                             .Where(viewport => viewport.SheetId == sheet.Id))
-                {
-                    View? view = doc.GetElement(viewport.ViewId) as View;
-                    if (view == null) continue;
-
-                    views.Add(new RevitSheetViewDto(
-                        Source_View_Id: view.Id.Value.ToString(),
-                        Viewport_Element_Id: viewport.Id.Value.ToString(),
-                        View_Name: view.Name,
-                        View_Type: view.ViewType.ToString(),
-                        Scale: view.Scale,
-                        Viewport_Box: GetViewportBox(viewport)));
-
-                    if (view.ViewType != ViewType.FloorPlan &&
-                        view.ViewType != ViewType.CeilingPlan &&
-                        view.ViewType != ViewType.AreaPlan)
-                    {
-                        continue;
-                    }
-
-                    overlays.AddRange(BuildRoomOverlaysForViewport(
-                        doc,
-                        view,
-                        viewport,
-                        bounds,
-                        mappingsByElementId));
-                }
-
-                sheets.Add(new RevitSheetDto(
-                    Revit_Unique_Id: sheet.UniqueId,
-                    Revit_Element_Id: sheet.Id.Value.ToString(),
-                    Sheet_Number: sheet.SheetNumber,
-                    Sheet_Name: sheet.Name,
-                    Width_Mm: UnitUtils.ConvertFromInternalUnits(bounds.Width, UnitTypeId.Millimeters),
-                    Height_Mm: UnitUtils.ConvertFromInternalUnits(bounds.Height, UnitTypeId.Millimeters),
-                    Asset: asset,
-                    Views: views,
-                    Overlays: overlays));
-            }
-            catch (Exception ex)
-            {
-                ValidationLog.Write($"Skipped sheet {sheet.SheetNumber}: {ex.Message}");
-            }
+            syncedCount += SyncSheet(doc, sheet, mappingsByElementId);
         }
 
-        if (sheets.Count == 0)
+        if (syncedCount == 0)
         {
             ValidationLog.Write("Skipped sheet sync: no sheets could be exported.");
-            return;
-        }
-
-        int syncedCount = 0;
-        foreach (RevitSheetDto sheet in sheets)
-        {
-            SyncSheetsResponse? sheetResponse = new ApiClient()
-                .SyncSheetsAsync(new SyncSheetsRequest(AddinSettings.ProjectId, AddinSettings.RevitModelId, new[] { sheet }))
-                .GetAwaiter()
-                .GetResult();
-
-            syncedCount += sheetResponse?.Data.Count ?? 0;
+            return 0;
         }
 
         ValidationLog.Write($"Synced {syncedCount} sheets with room overlays.");
+        return syncedCount;
+    }
+
+    private static int SyncSheet(
+        Document doc,
+        ViewSheet sheet,
+        IReadOnlyDictionary<string, RoomMappingDto> mappingsByElementId)
+    {
+        RevitSheetDto? sheetDto = BuildSheetDto(doc, sheet, mappingsByElementId);
+        if (sheetDto == null) return 0;
+
+        SyncSheetsResponse? sheetResponse = new ApiClient()
+            .SyncSheetsAsync(new SyncSheetsRequest(AddinSettings.ProjectId, AddinSettings.RevitModelId, new[] { sheetDto }))
+            .GetAwaiter()
+            .GetResult();
+
+        int syncedCount = sheetResponse?.Data.Count ?? 0;
+        ValidationLog.Write($"Synced sheet {sheet.SheetNumber} result count={syncedCount}.");
+        return syncedCount;
+    }
+
+    private static RevitSheetDto? BuildSheetDto(
+        Document doc,
+        ViewSheet sheet,
+        IReadOnlyDictionary<string, RoomMappingDto> mappingsByElementId)
+    {
+        try
+        {
+            SheetAssetDto? asset = ExportAndUploadSheetPdf(doc, sheet);
+            SheetBounds bounds = GetSheetBounds(sheet);
+            List<RevitSheetViewDto> views = new();
+            List<RevitRoomOverlayDto> overlays = new();
+
+            foreach (Viewport viewport in new FilteredElementCollector(doc)
+                         .OfClass(typeof(Viewport))
+                         .Cast<Viewport>()
+                         .Where(viewport => viewport.SheetId == sheet.Id))
+            {
+                View? view = doc.GetElement(viewport.ViewId) as View;
+                if (view == null) continue;
+
+                views.Add(new RevitSheetViewDto(
+                    Source_View_Id: view.Id.Value.ToString(),
+                    Viewport_Element_Id: viewport.Id.Value.ToString(),
+                    View_Name: view.Name,
+                    View_Type: view.ViewType.ToString(),
+                    Scale: view.Scale,
+                    Viewport_Box: GetViewportBox(viewport)));
+
+                if (view.ViewType != ViewType.FloorPlan &&
+                    view.ViewType != ViewType.CeilingPlan &&
+                    view.ViewType != ViewType.AreaPlan)
+                {
+                    continue;
+                }
+
+                overlays.AddRange(BuildRoomOverlaysForViewport(
+                    doc,
+                    view,
+                    viewport,
+                    bounds,
+                    mappingsByElementId));
+            }
+
+            return new RevitSheetDto(
+                Revit_Unique_Id: sheet.UniqueId,
+                Revit_Element_Id: sheet.Id.Value.ToString(),
+                Sheet_Number: sheet.SheetNumber,
+                Sheet_Name: sheet.Name,
+                Width_Mm: UnitUtils.ConvertFromInternalUnits(bounds.Width, UnitTypeId.Millimeters),
+                Height_Mm: UnitUtils.ConvertFromInternalUnits(bounds.Height, UnitTypeId.Millimeters),
+                Asset: asset,
+                Views: views,
+                Overlays: overlays);
+        }
+        catch (Exception ex)
+        {
+            ValidationLog.Write($"Skipped sheet {sheet.SheetNumber}: {ex.Message}");
+            return null;
+        }
+    }
+
+    private static Dictionary<string, RoomMappingDto> BuildMappingsByElementId(IReadOnlyList<RoomMappingDto> mappings)
+    {
+        return mappings
+            .Where(mapping => !string.IsNullOrWhiteSpace(mapping.Revit_Element_Id))
+            .ToDictionary(mapping => mapping.Revit_Element_Id, mapping => mapping);
     }
 
     private static SheetAssetDto? ExportAndUploadSheetPdf(Document doc, ViewSheet sheet)
