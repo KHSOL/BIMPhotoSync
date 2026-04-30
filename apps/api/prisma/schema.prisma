@@ -118,6 +118,9 @@ model Project {
   members       ProjectMember[]
   revitModels   RevitModel[]
   floorPlans    RevitFloorPlan[]
+  revitSheets   RevitSheet[]
+  revitViews    RevitView[]
+  roomOverlays  RevitRoomOverlay[]
   levels        Level[]
   rooms         Room[]
   uploads       PhotoUpload[]
@@ -151,6 +154,8 @@ model RevitModel {
   documentGuid String? @map("document_guid")
   rooms       Room[]
   floorPlans  RevitFloorPlan[]
+  sheets      RevitSheet[]
+  views       RevitView[]
   createdAt   DateTime @default(now()) @map("created_at")
 
   @@map("revit_models")
@@ -171,6 +176,80 @@ model RevitFloorPlan {
 
   @@index([projectId, levelName, createdAt(sort: Desc)], map: "idx_revit_floor_plans_project_level_created")
   @@map("revit_floor_plans")
+}
+
+model RevitSheet {
+  id             String              @id @default(uuid()) @db.Uuid
+  projectId      String              @map("project_id") @db.Uuid
+  revitModelId   String?             @map("revit_model_id") @db.Uuid
+  project        Project             @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  revitModel     RevitModel?         @relation(fields: [revitModelId], references: [id], onDelete: SetNull)
+  revitUniqueId  String?             @map("revit_unique_id")
+  revitElementId String?             @map("revit_element_id")
+  sheetNumber    String              @map("sheet_number")
+  sheetName      String              @map("sheet_name")
+  widthMm        Decimal?            @map("width_mm") @db.Decimal(12, 3)
+  heightMm       Decimal?            @map("height_mm") @db.Decimal(12, 3)
+  assetObjectKey String?             @map("asset_object_key")
+  assetMimeType  String?             @map("asset_mime_type")
+  assetWidthPx   Int?                @map("asset_width_px")
+  assetHeightPx  Int?                @map("asset_height_px")
+  views          RevitView[]
+  overlays       RevitRoomOverlay[]
+  syncedAt       DateTime            @default(now()) @map("synced_at")
+  createdAt      DateTime            @default(now()) @map("created_at")
+  updatedAt      DateTime            @updatedAt @map("updated_at")
+
+  @@unique([projectId, sheetNumber], map: "uq_revit_sheets_project_number")
+  @@unique([projectId, revitUniqueId], map: "uq_revit_sheets_project_unique_id")
+  @@index([projectId, syncedAt(sort: Desc)], map: "idx_revit_sheets_project_synced")
+  @@map("revit_sheets")
+}
+
+model RevitView {
+  id                String              @id @default(uuid()) @db.Uuid
+  projectId         String              @map("project_id") @db.Uuid
+  revitModelId      String?             @map("revit_model_id") @db.Uuid
+  sheetId           String              @map("sheet_id") @db.Uuid
+  project           Project             @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  revitModel        RevitModel?         @relation(fields: [revitModelId], references: [id], onDelete: SetNull)
+  sheet             RevitSheet          @relation(fields: [sheetId], references: [id], onDelete: Cascade)
+  sourceViewId      String              @map("source_view_id")
+  viewportElementId String?             @map("viewport_element_id")
+  viewName          String              @map("view_name")
+  viewType          String              @map("view_type")
+  scale             Int?
+  viewportBox       Json?               @map("viewport_box")
+  overlays          RevitRoomOverlay[]
+  createdAt         DateTime            @default(now()) @map("created_at")
+  updatedAt         DateTime            @updatedAt @map("updated_at")
+
+  @@unique([sheetId, sourceViewId, viewportElementId], map: "uq_revit_views_sheet_view_viewport")
+  @@index([projectId, sourceViewId], map: "idx_revit_views_project_source")
+  @@map("revit_views")
+}
+
+model RevitRoomOverlay {
+  id                String      @id @default(uuid()) @db.Uuid
+  projectId         String      @map("project_id") @db.Uuid
+  sheetId           String      @map("sheet_id") @db.Uuid
+  viewId            String?     @map("view_id") @db.Uuid
+  roomId            String?     @map("room_id") @db.Uuid
+  project           Project     @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  sheet             RevitSheet  @relation(fields: [sheetId], references: [id], onDelete: Cascade)
+  view              RevitView?  @relation(fields: [viewId], references: [id], onDelete: Cascade)
+  room              Room?       @relation(fields: [roomId], references: [id], onDelete: SetNull)
+  bimPhotoRoomId    String      @map("bim_photo_room_id")
+  polygon           Json
+  normalizedPolygon Json        @map("normalized_polygon")
+  bbox              Json
+  coordinateVersion String      @default("sheet-pixel-v1") @map("coordinate_version")
+  createdAt         DateTime    @default(now()) @map("created_at")
+  updatedAt         DateTime    @updatedAt @map("updated_at")
+
+  @@index([projectId, sheetId], map: "idx_revit_room_overlays_project_sheet")
+  @@index([roomId], map: "idx_revit_room_overlays_room")
+  @@map("revit_room_overlays")
 }
 
 model Level {
@@ -203,6 +282,7 @@ model Room {
   revitModel      RevitModel? @relation(fields: [revitModelId], references: [id], onDelete: SetNull)
   level           Level?     @relation(fields: [levelId], references: [id], onDelete: SetNull)
   photos          Photo[]
+  overlays        RevitRoomOverlay[]
   createdAt       DateTime   @default(now()) @map("created_at")
   updatedAt       DateTime   @updatedAt @map("updated_at")
   deletedAt       DateTime?  @map("deleted_at")
