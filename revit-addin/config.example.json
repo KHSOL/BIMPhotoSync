@@ -2,5 +2,6 @@
   "ApiBaseUrl": "http://localhost:4000/api/v1",
   "JwtToken": "paste-jwt-token-here",
   "ProjectId": "paste-project-id-here",
-  "RevitModelId": null
+  "RevitModelId": null,
+  "HttpTimeoutSeconds": 180
 }
