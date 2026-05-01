@@ -48,6 +48,11 @@ public class BimPhotoSyncApp : IExternalApplication
             typeof(BimPhotoSyncApp).Assembly.Location,
             typeof(SyncCurrentViewCommand).FullName));
         panel.AddItem(new PushButtonData(
+            "SyncFloorPlans",
+            "Sync Floor Plans",
+            typeof(BimPhotoSyncApp).Assembly.Location,
+            typeof(SyncFloorPlansCommand).FullName));
+        panel.AddItem(new PushButtonData(
             "SyncSheets",
             "Sync Sheets",
             typeof(BimPhotoSyncApp).Assembly.Location,

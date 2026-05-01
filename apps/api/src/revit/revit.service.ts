@@ -108,17 +108,23 @@ export class RevitService {
   async syncFloorPlan(user: { sub: string; companyId: string; role: string }, dto: SyncFloorPlanDto) {
     await this.projects.assertProjectRole(user, dto.project_id, ["BIM_MANAGER", "PROJECT_ADMIN", "COMPANY_ADMIN"]);
 
-    const floorPlan = await this.prisma.revitFloorPlan.create({
-      data: {
-        projectId: dto.project_id,
-        revitModelId: dto.revit_model_id,
-        levelName: dto.level_name,
-        viewName: dto.view_name,
-        sourceViewId: dto.source_view_id,
-        bounds: dto.bounds as unknown as Prisma.InputJsonValue,
-        rooms: dto.rooms as unknown as Prisma.InputJsonValue
-      }
-    });
+    const data = {
+      projectId: dto.project_id,
+      revitModelId: dto.revit_model_id,
+      levelName: dto.level_name,
+      viewName: dto.view_name,
+      sourceViewId: dto.source_view_id,
+      bounds: dto.bounds as unknown as Prisma.InputJsonValue,
+      rooms: dto.rooms as unknown as Prisma.InputJsonValue
+    };
+    const existingFloorPlan = dto.source_view_id
+      ? await this.prisma.revitFloorPlan.findFirst({
+          where: { projectId: dto.project_id, sourceViewId: dto.source_view_id }
+        })
+      : null;
+    const floorPlan = existingFloorPlan
+      ? await this.prisma.revitFloorPlan.update({ where: { id: existingFloorPlan.id }, data })
+      : await this.prisma.revitFloorPlan.create({ data });
 
     return { data: toFloorPlanResponse(floorPlan) };
   }
@@ -127,8 +133,8 @@ export class RevitService {
     await this.projects.assertProjectAccess(user.sub, user.companyId, projectId);
     const plans = await this.prisma.revitFloorPlan.findMany({
       where: { projectId },
-      orderBy: [{ createdAt: "desc" }],
-      take: 20
+      orderBy: [{ levelName: "asc" }, { viewName: "asc" }, { createdAt: "desc" }],
+      take: 100
     });
     return { data: plans.map(toFloorPlanResponse) };
   }

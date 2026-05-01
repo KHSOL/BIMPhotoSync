@@ -1,6 +1,6 @@
 "use client";
 
-import { Box, Building2, FileText, Home, Images, LogIn, LogOut, MapPinned, Settings, ShieldCheck } from "lucide-react";
+import { Building2, FileText, Home, Images, Layers, LogIn, LogOut, MapPinned, Settings, ShieldCheck } from "lucide-react";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { clearSession, isSuperAdmin, readSession, type User } from "./client";
@@ -11,7 +11,8 @@ const navItems = [
   { href: "/rooms", label: "Rooms", icon: MapPinned },
   { href: "/photos", label: "Photos", icon: Images },
   { href: "/reports", label: "Reports", icon: FileText },
-  { href: "/viewer", label: "Viewer", icon: Box },
+  { href: "/viewer", label: "Floor Plan", icon: Layers },
+  { href: "/sheets", label: "Sheets", icon: FileText },
   { href: "/audit", label: "Audit", icon: ShieldCheck },
   { href: "/mypage", label: "My Page", icon: Settings },
   { href: "/admin", label: "Admin", icon: ShieldCheck, superOnly: true }

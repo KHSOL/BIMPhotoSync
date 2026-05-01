@@ -133,7 +133,7 @@ export default function ProjectsPage() {
     setActiveProjectId(project.id);
     saveProjectId(project.id);
     setGeneratedKey("");
-    setStatus(`${project.name} 프로젝트를 Rooms, Photos, Viewer의 작업 기준으로 설정했습니다.`);
+    setStatus(`${project.name} 프로젝트를 Rooms, Photos, Floor Plan의 작업 기준으로 설정했습니다.`);
   }
 
   function showRevitImportGuide() {
@@ -169,7 +169,7 @@ export default function ProjectsPage() {
             <div>
               <p className="eyebrow-text">회사 프로젝트</p>
               <h1 className="page-title">우리 회사 프로젝트 목록</h1>
-              <p className="muted">Room, 사진, Viewer, Revit Add-in은 작업 프로젝트 기준으로 동작합니다.</p>
+              <p className="muted">Room, 사진, Floor Plan, Revit Add-in은 작업 프로젝트 기준으로 동작합니다.</p>
             </div>
             <button
               aria-label="프로젝트 새로고침"
@@ -205,7 +205,7 @@ export default function ProjectsPage() {
                       Rooms
                     </a>
                     <a className="small-button ghost" href="/viewer" onClick={() => setWorkProject(project)}>
-                      Viewer
+                      Floor Plan
                     </a>
                   </div>
                 </article>
