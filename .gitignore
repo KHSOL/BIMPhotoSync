@@ -15,6 +15,7 @@ tmp
 *.tsbuildinfo
 bin
 obj
+revit-addin/.package/
 .vercel-local
 
 .codex/external/

@@ -75,8 +75,9 @@ public sealed class SyncRoomsExternalHandler : IExternalEventHandler
             string syncSummary = operation switch
             {
                 RevitSyncOperation.CurrentView => SyncCurrentView(doc, response.Data.Room_Mappings),
+                RevitSyncOperation.FloorPlans => $"Synced {SyncFloorPlans(doc, response.Data.Room_Mappings)} Revit Floor Plan views.",
                 RevitSyncOperation.Sheets => $"Synced {SyncSheets(doc, response.Data.Room_Mappings)} Revit Sheets.",
-                _ => "Room sync complete. Use Sync View for the current drawing, or Sync Sheets for every sheet."
+                _ => "Room sync complete. Use Sync Floor Plans or Sync Sheets for drawing sync."
             };
 
             if (Environment.GetEnvironmentVariable("BIM_PHOTO_SYNC_AUTORUN_SELECT_AFTER_SYNC") == "1")
@@ -139,21 +140,59 @@ public sealed class SyncRoomsExternalHandler : IExternalEventHandler
                 : $"Synced current Sheet {activeSheet.SheetNumber} - {activeSheet.Name}.";
         }
 
-        int floorPlanRoomCount = SyncFloorPlan(doc, mappingsByElementId);
+        int floorPlanRoomCount = SyncFloorPlan(doc, activeView, mappingsByElementId);
         return floorPlanRoomCount == 0
             ? "Skipped current view sync: active view has no bounded Rooms."
             : $"Synced current view {activeView.Name} with {floorPlanRoomCount} Room overlays.";
     }
 
-    private static int SyncFloorPlan(Document doc, IReadOnlyDictionary<string, RoomMappingDto> mappingsByElementId)
+    private static int SyncFloorPlans(Document doc, IReadOnlyList<RoomMappingDto> mappings)
+    {
+        if (mappings.Count == 0) return 0;
+        if (string.IsNullOrWhiteSpace(AddinSettings.ProjectId)) return 0;
+
+        Dictionary<string, RoomMappingDto> mappingsByElementId = BuildMappingsByElementId(mappings);
+        if (mappingsByElementId.Count == 0) return 0;
+
+        int syncedCount = 0;
+        foreach (ViewPlan floorPlan in new FilteredElementCollector(doc)
+                     .OfClass(typeof(ViewPlan))
+                     .Cast<ViewPlan>()
+                     .Where(view => !view.IsTemplate && view.ViewType == ViewType.FloorPlan)
+                     .OrderBy(view => view.GenLevel?.Elevation ?? 0)
+                     .ThenBy(view => view.Name))
+        {
+            try
+            {
+                if (SyncFloorPlan(doc, floorPlan, mappingsByElementId) > 0)
+                {
+                    syncedCount++;
+                }
+            }
+            catch (Exception ex)
+            {
+                ValidationLog.Write($"Skipped floor plan {floorPlan.Name}: {ex.Message}");
+            }
+        }
+
+        if (syncedCount == 0)
+        {
+            ValidationLog.Write("Skipped floor plan sync: no Floor Plan views with bounded Rooms were synced.");
+            return 0;
+        }
+
+        ValidationLog.Write($"Synced {syncedCount} floor plan views.");
+        return syncedCount;
+    }
+
+    private static int SyncFloorPlan(Document doc, View view, IReadOnlyDictionary<string, RoomMappingDto> mappingsByElementId)
     {
         if (mappingsByElementId.Count == 0) return 0;
 
-        View activeView = doc.ActiveView;
-        string levelName = GetActiveLevelName(doc, activeView);
+        string levelName = GetViewLevelName(doc, view);
 
         List<FloorPlanRoomDto> planRooms = new();
-        foreach (SpatialElement room in new FilteredElementCollector(doc, activeView.Id)
+        foreach (SpatialElement room in new FilteredElementCollector(doc, view.Id)
                      .OfCategory(BuiltInCategory.OST_Rooms)
                      .WhereElementIsNotElementType()
                      .Cast<SpatialElement>())
@@ -180,7 +219,7 @@ public sealed class SyncRoomsExternalHandler : IExternalEventHandler
 
         if (planRooms.Count == 0)
         {
-            ValidationLog.Write("Skipped floor plan sync: active view has no bounded Rooms.");
+            ValidationLog.Write($"Skipped floor plan sync: {view.Name} has no bounded Rooms.");
             return 0;
         }
 
@@ -190,8 +229,8 @@ public sealed class SyncRoomsExternalHandler : IExternalEventHandler
                 AddinSettings.ProjectId,
                 AddinSettings.RevitModelId,
                 levelName,
-                activeView.Name,
-                activeView.Id.Value.ToString(),
+                view.Name,
+                view.Id.Value.ToString(),
                 bounds,
                 planRooms))
             .GetAwaiter()
@@ -601,10 +640,10 @@ public sealed class SyncRoomsExternalHandler : IExternalEventHandler
         public double Height => MaxY - MinY;
     }
 
-    private static string GetActiveLevelName(Document doc, View activeView)
+    private static string GetViewLevelName(Document doc, View view)
     {
-        if (activeView is ViewPlan viewPlan && viewPlan.GenLevel != null) return viewPlan.GenLevel.Name;
-        return doc.ActiveView.Name;
+        if (view is ViewPlan viewPlan && viewPlan.GenLevel != null) return viewPlan.GenLevel.Name;
+        return view.Name;
     }
 
     private static IReadOnlyList<PlanPointDto> GetRoomBoundary(SpatialElement room)

@@ -80,7 +80,7 @@ export default function AdminPage() {
       <section className="panel empty-state">
         <KeyRound size={28} />
         <h1 className="panel-title">SUPER_ADMIN 전용 화면입니다</h1>
-        <p className="muted">회사 관리자는 Projects, Rooms, Viewer에서 본인 회사 프로젝트를 관리합니다.</p>
+        <p className="muted">회사 관리자는 Projects, Rooms, Floor Plan에서 본인 회사 프로젝트를 관리합니다.</p>
       </section>
     );
   }

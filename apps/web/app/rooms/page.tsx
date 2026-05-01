@@ -140,7 +140,7 @@ export default function RoomsPage() {
             새로고침
           </button>
           <a className="button secondary" href="/viewer">
-            도면 Viewer
+            Floor Plan
           </a>
         </div>
       </header>
@@ -262,7 +262,7 @@ export default function RoomsPage() {
           <div className="tab-row">
             <button className="active" type="button">개요</button>
             <a href={selectedPhotosHref}>사진</a>
-            <a href="/viewer">도면</a>
+            <a href="/viewer">Floor Plan</a>
           </div>
           <div className="mini-plan">
             <div className="plan-room selected"><span /></div>
@@ -278,7 +278,7 @@ export default function RoomsPage() {
           </dl>
           <div className="room-actions">
             <a className="filter-button" href={selectedPhotosHref}>사진 보기</a>
-            <a className="button" href="/viewer">도면에서 보기</a>
+            <a className="button" href="/viewer">Floor Plan에서 보기</a>
           </div>
           <p className="muted">{selectedProject?.name ?? "프로젝트"} / {status}</p>
         </aside>
