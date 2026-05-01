@@ -89,6 +89,16 @@ public sealed class ApiClient
         return await response.Content.ReadFromJsonAsync<SyncFloorPlanResponse>().ConfigureAwait(false);
     }
 
+    public async Task ClearFloorPlansAsync(string projectId)
+    {
+        PrepareHeaders();
+        var response = await _http.PostAsync(
+            $"{AddinSettings.ApiBaseUrl}/revit/projects/{Uri.EscapeDataString(projectId)}/floor-plans/clear",
+            null)
+            .ConfigureAwait(false);
+        await EnsureSuccessAsync(response).ConfigureAwait(false);
+    }
+
     public async Task<PresignDrawingAssetResponse?> PresignDrawingAssetAsync(PresignDrawingAssetRequest request)
     {
         PrepareHeaders();

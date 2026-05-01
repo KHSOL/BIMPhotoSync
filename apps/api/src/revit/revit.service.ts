@@ -144,6 +144,12 @@ export class RevitService {
     return { data: plans.map((plan) => toFloorPlanResponse(plan, this.config)) };
   }
 
+  async clearFloorPlans(user: { sub: string; companyId: string; role: string }, projectId: string) {
+    await this.projects.assertProjectRole(user, projectId, ["BIM_MANAGER", "PROJECT_ADMIN", "COMPANY_ADMIN"]);
+    const result = await this.prisma.revitFloorPlan.deleteMany({ where: { projectId } });
+    return { data: { project_id: projectId, deleted_count: result.count } };
+  }
+
   async floorPlanAsset(user: { sub: string; companyId: string }, floorPlanId: string) {
     const floorPlan = await this.prisma.revitFloorPlan.findUnique({ where: { id: floorPlanId } });
     if (!floorPlan || !floorPlan.assetObjectKey) throw new NotFoundException("Floor plan asset not found.");

@@ -154,13 +154,27 @@ public sealed class SyncRoomsExternalHandler : IExternalEventHandler
         Dictionary<string, RoomMappingDto> mappingsByElementId = BuildMappingsByElementId(mappings);
         if (mappingsByElementId.Count == 0) return 0;
 
+        List<ViewPlan> floorPlans = new FilteredElementCollector(doc)
+            .OfClass(typeof(ViewPlan))
+            .Cast<ViewPlan>()
+            .Where(view => IsCanonicalFloorPlanView(doc, view))
+            .OrderBy(view => view.GenLevel?.Elevation ?? 0)
+            .ThenBy(view => view.Name)
+            .ToList();
+
+        if (floorPlans.Count == 0)
+        {
+            ValidationLog.Write("Skipped floor plan sync: no canonical Floor Plan views were found.");
+            return 0;
+        }
+
+        new ApiClient()
+            .ClearFloorPlansAsync(AddinSettings.ProjectId)
+            .GetAwaiter()
+            .GetResult();
+
         int syncedCount = 0;
-        foreach (ViewPlan floorPlan in new FilteredElementCollector(doc)
-                     .OfClass(typeof(ViewPlan))
-                     .Cast<ViewPlan>()
-                     .Where(view => !view.IsTemplate && view.ViewType == ViewType.FloorPlan)
-                     .OrderBy(view => view.GenLevel?.Elevation ?? 0)
-                     .ThenBy(view => view.Name))
+        foreach (ViewPlan floorPlan in floorPlans)
         {
             try
             {
@@ -190,6 +204,7 @@ public sealed class SyncRoomsExternalHandler : IExternalEventHandler
         if (mappingsByElementId.Count == 0) return 0;
 
         string levelName = GetViewLevelName(doc, view);
+        Transform? modelToViewTransform = GetModelToViewTransform(view);
 
         List<FloorPlanRoomDto> planRooms = new();
         foreach (SpatialElement room in new FilteredElementCollector(doc, view.Id)
@@ -200,10 +215,10 @@ public sealed class SyncRoomsExternalHandler : IExternalEventHandler
             string elementId = room.Id.Value.ToString();
             if (!mappingsByElementId.TryGetValue(elementId, out RoomMappingDto? mapping)) continue;
 
-            IReadOnlyList<PlanPointDto> polygon = GetRoomBoundary(room);
+            IReadOnlyList<PlanPointDto> polygon = GetRoomBoundary(room, modelToViewTransform);
             if (polygon.Count < 3) continue;
 
-            PlanPointDto center = GetRoomCenter(room, polygon);
+            PlanPointDto center = GetRoomCenter(room, polygon, modelToViewTransform);
             planRooms.Add(new FloorPlanRoomDto(
                 Room_Id: mapping.Room_Id,
                 Bim_Photo_Room_Id: mapping.Bim_Photo_Room_Id,
@@ -223,7 +238,7 @@ public sealed class SyncRoomsExternalHandler : IExternalEventHandler
             return 0;
         }
 
-        PlanBoundsDto bounds = CalculateBounds(planRooms.SelectMany(room => room.Polygon));
+        PlanBoundsDto bounds = GetViewPlanBounds(view, modelToViewTransform) ?? CalculateBounds(planRooms.SelectMany(room => room.Polygon));
         SheetAssetDto? asset = ExportAndUploadViewPdf(doc, view, $"{levelName}_{view.Name}");
         SyncFloorPlanResponse? floorPlanResponse = new ApiClient()
             .SyncFloorPlanAsync(new SyncFloorPlanRequest(
@@ -356,6 +371,30 @@ public sealed class SyncRoomsExternalHandler : IExternalEventHandler
         return mappings
             .Where(mapping => !string.IsNullOrWhiteSpace(mapping.Revit_Element_Id))
             .ToDictionary(mapping => mapping.Revit_Element_Id, mapping => mapping);
+    }
+
+    private static bool IsCanonicalFloorPlanView(Document doc, ViewPlan view)
+    {
+        if (view.IsTemplate) return false;
+        if (view.ViewType != ViewType.FloorPlan) return false;
+        if (view.GenLevel == null) return false;
+        if (view.GetPrimaryViewId() != ElementId.InvalidElementId) return false;
+        if (doc.GetElement(view.GetTypeId()) is not ViewFamilyType viewFamilyType) return false;
+        if (viewFamilyType.ViewFamily != ViewFamily.FloorPlan) return false;
+
+        string viewTypeName = viewFamilyType.Name.Trim();
+        bool defaultFloorPlanType =
+            viewTypeName.Equals("Floor Plan", StringComparison.OrdinalIgnoreCase) ||
+            viewTypeName.Equals("평면", StringComparison.OrdinalIgnoreCase) ||
+            viewTypeName.Equals("평면도", StringComparison.OrdinalIgnoreCase);
+        if (!defaultFloorPlanType) return false;
+
+        return NormalizePlanName(view.Name) == NormalizePlanName(view.GenLevel.Name);
+    }
+
+    private static string NormalizePlanName(string value)
+    {
+        return new string(value.Where(char.IsLetterOrDigit).Select(char.ToUpperInvariant).ToArray());
     }
 
     private static SheetAssetDto? ExportAndUploadViewPdf(Document doc, View view, string assetName)
@@ -653,7 +692,7 @@ public sealed class SyncRoomsExternalHandler : IExternalEventHandler
         return view.Name;
     }
 
-    private static IReadOnlyList<PlanPointDto> GetRoomBoundary(SpatialElement room)
+    private static IReadOnlyList<PlanPointDto> GetRoomBoundary(SpatialElement room, Transform? modelToViewTransform = null)
     {
         SpatialElementBoundaryOptions options = new()
         {
@@ -669,8 +708,20 @@ public sealed class SyncRoomsExternalHandler : IExternalEventHandler
         List<PlanPointDto> points = new();
         foreach (BoundarySegment segment in outerLoop)
         {
-            XYZ start = segment.GetCurve().GetEndPoint(0);
-            AddPoint(points, new PlanPointDto(Math.Round(start.X, 4), Math.Round(start.Y, 4)));
+            foreach (XYZ modelPoint in segment.GetCurve().Tessellate())
+            {
+                AddPoint(points, ToPlanPoint(modelPoint, modelToViewTransform));
+            }
+        }
+
+        if (points.Count > 1)
+        {
+            PlanPointDto first = points[0];
+            PlanPointDto last = points[^1];
+            if (Math.Abs(first.X - last.X) < 0.001 && Math.Abs(first.Y - last.Y) < 0.001)
+            {
+                points.RemoveAt(points.Count - 1);
+            }
         }
         return points;
     }
@@ -702,11 +753,17 @@ public sealed class SyncRoomsExternalHandler : IExternalEventHandler
         return area / 2;
     }
 
-    private static PlanPointDto GetRoomCenter(SpatialElement room, IReadOnlyList<PlanPointDto> polygon)
+    private static PlanPointDto ToPlanPoint(XYZ modelPoint, Transform? modelToViewTransform = null)
+    {
+        XYZ point = modelToViewTransform == null ? modelPoint : modelToViewTransform.OfPoint(modelPoint);
+        return new PlanPointDto(Math.Round(point.X, 4), Math.Round(point.Y, 4));
+    }
+
+    private static PlanPointDto GetRoomCenter(SpatialElement room, IReadOnlyList<PlanPointDto> polygon, Transform? modelToViewTransform = null)
     {
         if (room.Location is LocationPoint locationPoint)
         {
-            return new PlanPointDto(Math.Round(locationPoint.Point.X, 4), Math.Round(locationPoint.Point.Y, 4));
+            return ToPlanPoint(locationPoint.Point, modelToViewTransform);
         }
 
         return new PlanPointDto(
@@ -719,6 +776,49 @@ public sealed class SyncRoomsExternalHandler : IExternalEventHandler
         Parameter? area = room.get_Parameter(BuiltInParameter.ROOM_AREA);
         if (area == null || !area.HasValue) return null;
         return Math.Round(UnitUtils.ConvertFromInternalUnits(area.AsDouble(), UnitTypeId.SquareMeters), 2);
+    }
+
+    private static Transform? GetModelToViewTransform(View view)
+    {
+        try
+        {
+            IList<TransformWithBoundary> transforms = view.GetModelToProjectionTransforms();
+            if (transforms.Count > 0)
+            {
+                return transforms[0].GetModelToProjectionTransform();
+            }
+        }
+        catch (Exception ex)
+        {
+            ValidationLog.Write($"Model-to-projection transform unavailable for {view.Name}: {ex.Message}");
+        }
+
+        BoundingBoxXYZ? cropBox = view.CropBox;
+        return cropBox?.Transform.Inverse;
+    }
+
+    private static PlanBoundsDto? GetViewPlanBounds(View view, Transform? modelToViewTransform)
+    {
+        BoundingBoxXYZ? cropBox = view.CropBox;
+        if (cropBox == null) return null;
+
+        PlanBoundsDto bounds = CalculateTightBounds(GetCropBoxModelCorners(cropBox)
+            .Select(point => ToPlanPoint(point, modelToViewTransform)));
+        return bounds.Width <= 0.001 || bounds.Height <= 0.001 ? null : bounds;
+    }
+
+    private static IEnumerable<XYZ> GetCropBoxModelCorners(BoundingBoxXYZ cropBox)
+    {
+        double minX = Math.Min(cropBox.Min.X, cropBox.Max.X);
+        double minY = Math.Min(cropBox.Min.Y, cropBox.Max.Y);
+        double maxX = Math.Max(cropBox.Min.X, cropBox.Max.X);
+        double maxY = Math.Max(cropBox.Min.Y, cropBox.Max.Y);
+        double z = cropBox.Min.Z;
+
+        yield return cropBox.Transform.OfPoint(new XYZ(minX, minY, z));
+        yield return cropBox.Transform.OfPoint(new XYZ(maxX, minY, z));
+        yield return cropBox.Transform.OfPoint(new XYZ(maxX, maxY, z));
+        yield return cropBox.Transform.OfPoint(new XYZ(minX, maxY, z));
     }
 
     private static PlanBoundsDto CalculateBounds(IEnumerable<PlanPointDto> points)
