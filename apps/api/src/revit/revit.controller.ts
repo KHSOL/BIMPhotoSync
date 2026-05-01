@@ -35,6 +35,11 @@ export class RevitController {
     return this.revit.floorPlans(user, projectId);
   }
 
+  @Post("projects/:projectId/floor-plans/clear")
+  clearFloorPlans(@CurrentUser() user: JwtUser, @Param("projectId") projectId: string) {
+    return this.revit.clearFloorPlans(user, projectId);
+  }
+
   @Get("floor-plans/:floorPlanId/asset")
   async floorPlanAsset(@CurrentUser() user: JwtUser, @Param("floorPlanId") floorPlanId: string, @Res() res: Response) {
     const asset = await this.revit.floorPlanAsset(user, floorPlanId);

@@ -578,15 +578,19 @@ function SheetViewer({
 function PdfSheetCanvas({ assetUrl, label }: { assetUrl: string; label: string }) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const frameRef = useRef<HTMLDivElement | null>(null);
-  const [frameWidth, setFrameWidth] = useState(0);
+  const [frameSize, setFrameSize] = useState({ width: 0, height: 0 });
   const [renderState, setRenderState] = useState<PdfRenderState>("idle");
 
   useEffect(() => {
     const frame = frameRef.current;
     if (!frame) return;
-    const updateWidth = () => setFrameWidth(Math.max(1, Math.round(frame.clientWidth)));
-    updateWidth();
-    const observer = new ResizeObserver(updateWidth);
+    const updateSize = () => {
+      const width = Math.max(1, Math.round(frame.clientWidth));
+      const height = Math.max(1, Math.round(frame.clientHeight));
+      setFrameSize((previous) => (previous.width === width && previous.height === height ? previous : { width, height }));
+    };
+    updateSize();
+    const observer = new ResizeObserver(updateSize);
     observer.observe(frame);
     return () => observer.disconnect();
   }, []);
@@ -594,9 +598,8 @@ function PdfSheetCanvas({ assetUrl, label }: { assetUrl: string; label: string }
   useEffect(() => {
     const canvas = canvasRef.current;
     const frame = frameRef.current;
-    if (!assetUrl || !canvas || !frame || frameWidth <= 0) return;
+    if (!assetUrl || !canvas || !frame || frameSize.width <= 0 || frameSize.height <= 0) return;
     const targetCanvas = canvas;
-    const targetFrame = frame;
 
     let cancelled = false;
     let renderTask: RenderTask | null = null;
@@ -613,21 +616,30 @@ function PdfSheetCanvas({ assetUrl, label }: { assetUrl: string; label: string }
         const loadingTask = pdfjs.getDocument({ data });
         pdf = await loadingTask.promise;
         const page = await pdf.getPage(1);
-        const baseViewport = page.getViewport({ scale: 1 });
-        const scale = targetFrame.clientWidth / baseViewport.width;
-        const viewport = page.getViewport({ scale });
+        const viewport = page.getViewport({ scale: 1 });
         const pixelRatio = Math.min(window.devicePixelRatio || 1, 2);
         const context = targetCanvas.getContext("2d");
         if (!context) throw new Error("Canvas context is unavailable.");
 
-        targetCanvas.width = Math.max(1, Math.floor(viewport.width * pixelRatio));
-        targetCanvas.height = Math.max(1, Math.floor(viewport.height * pixelRatio));
-        targetCanvas.style.width = `${viewport.width}px`;
-        targetCanvas.style.height = `${viewport.height}px`;
-        context.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
-        context.clearRect(0, 0, viewport.width, viewport.height);
+        targetCanvas.width = Math.max(1, Math.floor(frameSize.width * pixelRatio));
+        targetCanvas.height = Math.max(1, Math.floor(frameSize.height * pixelRatio));
+        targetCanvas.style.width = "100%";
+        targetCanvas.style.height = "100%";
+        context.setTransform(1, 0, 0, 1, 0, 0);
+        context.clearRect(0, 0, targetCanvas.width, targetCanvas.height);
 
-        renderTask = page.render({ canvasContext: context, viewport });
+        renderTask = page.render({
+          canvasContext: context,
+          viewport,
+          transform: [
+            (frameSize.width / viewport.width) * pixelRatio,
+            0,
+            0,
+            (frameSize.height / viewport.height) * pixelRatio,
+            0,
+            0
+          ]
+        });
         await renderTask.promise;
         if (!cancelled) setRenderState("ready");
       } catch {
@@ -642,7 +654,7 @@ function PdfSheetCanvas({ assetUrl, label }: { assetUrl: string; label: string }
       renderTask?.cancel();
       void pdf?.destroy();
     };
-  }, [assetUrl, frameWidth]);
+  }, [assetUrl, frameSize.height, frameSize.width]);
 
   return (
     <div className="sheet-canvas-frame" ref={frameRef}>
@@ -699,43 +711,56 @@ function FloorPlanSvg({
   onSelect: (roomId: string) => void;
 }) {
   const viewBox = `${plan.bounds.min_x} ${-plan.bounds.max_y} ${plan.bounds.width} ${plan.bounds.height}`;
+  const stageStyle = { aspectRatio: `${plan.bounds.width} / ${plan.bounds.height}` };
 
   return (
     <div className="floor-plan real-floor-plan">
-      {assetUrl ? (
-        <div className="floor-plan-asset-layer">
-          {plan.asset?.mime_type === "application/pdf" ? (
+      <div className="floor-plan-stage" style={stageStyle}>
+        {assetUrl ? (
+          plan.asset?.mime_type === "application/pdf" ? (
             <PdfSheetCanvas assetUrl={assetUrl} label={`${plan.level_name} ${plan.view_name}`} />
           ) : (
             <img className="sheet-asset" src={assetUrl} alt={`${plan.level_name} ${plan.view_name}`} />
-          )}
-        </div>
-      ) : null}
-      <svg className="floor-plan-svg" viewBox={viewBox} role="img" aria-label={`${plan.view_name} Revit floor plan`}>
-        <g className="plan-grid">
-          {Array.from({ length: 12 }).map((_, index) => (
-            <line
-              key={`v-${index}`}
-              x1={plan.bounds.min_x + (plan.bounds.width / 11) * index}
-              y1={-plan.bounds.max_y}
-              x2={plan.bounds.min_x + (plan.bounds.width / 11) * index}
-              y2={-plan.bounds.min_y}
-            />
+          )
+        ) : (
+          <div className="sheet-asset-empty">
+            <Layers size={30} />
+            <strong>{plan.view_name}</strong>
+            <span>Floor Plan PDF를 불러오는 중이거나 PDF export가 없는 View입니다.</span>
+          </div>
+        )}
+        <svg
+          className="floor-plan-svg"
+          viewBox={viewBox}
+          preserveAspectRatio="none"
+          role="img"
+          aria-label={`${plan.view_name} Revit floor plan`}
+        >
+          <g className="plan-grid">
+            {Array.from({ length: 12 }).map((_, index) => (
+              <line
+                key={`v-${index}`}
+                x1={plan.bounds.min_x + (plan.bounds.width / 11) * index}
+                y1={-plan.bounds.max_y}
+                x2={plan.bounds.min_x + (plan.bounds.width / 11) * index}
+                y2={-plan.bounds.min_y}
+              />
+            ))}
+            {Array.from({ length: 8 }).map((_, index) => (
+              <line
+                key={`h-${index}`}
+                x1={plan.bounds.min_x}
+                y1={-plan.bounds.max_y + (plan.bounds.height / 7) * index}
+                x2={plan.bounds.max_x}
+                y2={-plan.bounds.max_y + (plan.bounds.height / 7) * index}
+              />
+            ))}
+          </g>
+          {plan.rooms.map((room) => (
+            <PlanRoomShape key={room.bim_photo_room_id} room={room} selected={room.bim_photo_room_id === selectedRoomId} onSelect={onSelect} />
           ))}
-          {Array.from({ length: 8 }).map((_, index) => (
-            <line
-              key={`h-${index}`}
-              x1={plan.bounds.min_x}
-              y1={-plan.bounds.max_y + (plan.bounds.height / 7) * index}
-              x2={plan.bounds.max_x}
-              y2={-plan.bounds.max_y + (plan.bounds.height / 7) * index}
-            />
-          ))}
-        </g>
-        {plan.rooms.map((room) => (
-          <PlanRoomShape key={room.bim_photo_room_id} room={room} selected={room.bim_photo_room_id === selectedRoomId} onSelect={onSelect} />
-        ))}
-      </svg>
+        </svg>
+      </div>
     </div>
   );
 }
