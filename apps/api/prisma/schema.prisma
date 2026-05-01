@@ -162,17 +162,23 @@ model RevitModel {
 }
 
 model RevitFloorPlan {
-  id            String      @id @default(uuid()) @db.Uuid
-  projectId     String      @map("project_id") @db.Uuid
-  revitModelId  String?     @map("revit_model_id") @db.Uuid
-  project       Project     @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  revitModel    RevitModel? @relation(fields: [revitModelId], references: [id], onDelete: SetNull)
-  levelName     String      @map("level_name")
-  viewName      String      @map("view_name")
-  sourceViewId  String?     @map("source_view_id")
-  bounds        Json
-  rooms         Json
-  createdAt     DateTime    @default(now()) @map("created_at")
+  id             String      @id @default(uuid()) @db.Uuid
+  projectId      String      @map("project_id") @db.Uuid
+  revitModelId   String?     @map("revit_model_id") @db.Uuid
+  project        Project     @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  revitModel     RevitModel? @relation(fields: [revitModelId], references: [id], onDelete: SetNull)
+  levelName      String      @map("level_name")
+  viewName       String      @map("view_name")
+  sourceViewId   String?     @map("source_view_id")
+  bounds         Json
+  rooms          Json
+  assetObjectKey String?     @map("asset_object_key")
+  assetMimeType  String?     @map("asset_mime_type")
+  assetWidthPx   Int?        @map("asset_width_px")
+  assetHeightPx  Int?        @map("asset_height_px")
+  syncedAt       DateTime    @default(now()) @map("synced_at")
+  createdAt      DateTime    @default(now()) @map("created_at")
+  updatedAt      DateTime    @updatedAt @map("updated_at")
 
   @@index([projectId, levelName, createdAt(sort: Desc)], map: "idx_revit_floor_plans_project_level_created")
   @@map("revit_floor_plans")

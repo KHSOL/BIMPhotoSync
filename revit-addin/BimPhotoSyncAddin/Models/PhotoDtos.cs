@@ -118,6 +118,7 @@ public sealed record SyncFloorPlanRequest(
     [property: JsonPropertyName("view_name")] string View_Name,
     [property: JsonPropertyName("source_view_id")] string? Source_View_Id,
     [property: JsonPropertyName("bounds")] PlanBoundsDto Bounds,
+    [property: JsonPropertyName("asset")] SheetAssetDto? Asset,
     [property: JsonPropertyName("rooms")] IReadOnlyList<FloorPlanRoomDto> Rooms);
 
 public sealed record PlanPointDto(

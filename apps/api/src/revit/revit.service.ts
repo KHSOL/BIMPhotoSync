@@ -115,7 +115,12 @@ export class RevitService {
       viewName: dto.view_name,
       sourceViewId: dto.source_view_id,
       bounds: dto.bounds as unknown as Prisma.InputJsonValue,
-      rooms: dto.rooms as unknown as Prisma.InputJsonValue
+      rooms: dto.rooms as unknown as Prisma.InputJsonValue,
+      assetObjectKey: dto.asset?.object_key,
+      assetMimeType: dto.asset?.mime_type,
+      assetWidthPx: dto.asset?.width_px,
+      assetHeightPx: dto.asset?.height_px,
+      syncedAt: new Date()
     };
     const existingFloorPlan = dto.source_view_id
       ? await this.prisma.revitFloorPlan.findFirst({
@@ -126,7 +131,7 @@ export class RevitService {
       ? await this.prisma.revitFloorPlan.update({ where: { id: existingFloorPlan.id }, data })
       : await this.prisma.revitFloorPlan.create({ data });
 
-    return { data: toFloorPlanResponse(floorPlan) };
+    return { data: toFloorPlanResponse(floorPlan, this.config) };
   }
 
   async floorPlans(user: { sub: string; companyId: string }, projectId: string) {
@@ -136,7 +141,23 @@ export class RevitService {
       orderBy: [{ levelName: "asc" }, { viewName: "asc" }, { createdAt: "desc" }],
       take: 100
     });
-    return { data: plans.map(toFloorPlanResponse) };
+    return { data: plans.map((plan) => toFloorPlanResponse(plan, this.config)) };
+  }
+
+  async floorPlanAsset(user: { sub: string; companyId: string }, floorPlanId: string) {
+    const floorPlan = await this.prisma.revitFloorPlan.findUnique({ where: { id: floorPlanId } });
+    if (!floorPlan || !floorPlan.assetObjectKey) throw new NotFoundException("Floor plan asset not found.");
+    await this.projects.assertProjectAccess(user.sub, user.companyId, floorPlan.projectId);
+    const command = new GetObjectCommand({ Bucket: this.bucket, Key: floorPlan.assetObjectKey });
+    const object = await this.s3.send(command);
+    const chunks: Buffer[] = [];
+    for await (const chunk of object.Body as AsyncIterable<Uint8Array>) {
+      chunks.push(Buffer.from(chunk));
+    }
+    return {
+      buffer: Buffer.concat(chunks),
+      contentType: object.ContentType ?? floorPlan.assetMimeType ?? "application/octet-stream"
+    };
   }
 
   async syncSheets(user: { sub: string; companyId: string; role: string }, dto: SyncSheetsDto) {
@@ -308,8 +329,14 @@ function toFloorPlanResponse(plan: {
   sourceViewId: string | null;
   bounds: Prisma.JsonValue;
   rooms: Prisma.JsonValue;
+  assetObjectKey: string | null;
+  assetMimeType: string | null;
+  assetWidthPx: number | null;
+  assetHeightPx: number | null;
+  syncedAt: Date;
   createdAt: Date;
-}) {
+}, config: ConfigService) {
+  const publicBase = config.get<string>("API_PUBLIC_URL", "http://localhost:4000");
   return {
     id: plan.id,
     project_id: plan.projectId,
@@ -319,6 +346,16 @@ function toFloorPlanResponse(plan: {
     source_view_id: plan.sourceViewId,
     bounds: plan.bounds,
     rooms: plan.rooms,
+    asset: plan.assetObjectKey
+      ? {
+          object_key: plan.assetObjectKey,
+          mime_type: plan.assetMimeType,
+          width_px: plan.assetWidthPx,
+          height_px: plan.assetHeightPx,
+          url: `${publicBase}/api/v1/revit/floor-plans/${plan.id}/asset`
+        }
+      : null,
+    synced_at: plan.syncedAt,
     created_at: plan.createdAt
   };
 }

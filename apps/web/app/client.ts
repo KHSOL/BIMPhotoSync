@@ -78,6 +78,8 @@ export type RevitFloorPlan = {
   source_view_id?: string | null;
   bounds: PlanBounds;
   rooms: FloorPlanRoom[];
+  asset?: RevitSheetAsset | null;
+  synced_at: string;
   created_at: string;
 };
 
