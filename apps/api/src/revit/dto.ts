@@ -125,6 +125,24 @@ export class FloorPlanRoomDto {
   polygon!: PlanPointDto[];
 }
 
+export class SheetAssetDto {
+  @IsOptional()
+  @IsString()
+  object_key?: string;
+
+  @IsOptional()
+  @IsString()
+  mime_type?: string;
+
+  @IsOptional()
+  @IsNumber()
+  width_px?: number;
+
+  @IsOptional()
+  @IsNumber()
+  height_px?: number;
+}
+
 export class SyncFloorPlanDto {
   @IsUUID()
   project_id!: string;
@@ -149,28 +167,15 @@ export class SyncFloorPlanDto {
   @Type(() => PlanBoundsDto)
   bounds!: PlanBoundsDto;
 
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => SheetAssetDto)
+  asset?: SheetAssetDto;
+
   @IsArray()
   @ValidateNested({ each: true })
   @Type(() => FloorPlanRoomDto)
   rooms!: FloorPlanRoomDto[];
-}
-
-export class SheetAssetDto {
-  @IsOptional()
-  @IsString()
-  object_key?: string;
-
-  @IsOptional()
-  @IsString()
-  mime_type?: string;
-
-  @IsOptional()
-  @IsNumber()
-  width_px?: number;
-
-  @IsOptional()
-  @IsNumber()
-  height_px?: number;
 }
 
 export class ViewportBoxDto {

@@ -35,6 +35,14 @@ export class RevitController {
     return this.revit.floorPlans(user, projectId);
   }
 
+  @Get("floor-plans/:floorPlanId/asset")
+  async floorPlanAsset(@CurrentUser() user: JwtUser, @Param("floorPlanId") floorPlanId: string, @Res() res: Response) {
+    const asset = await this.revit.floorPlanAsset(user, floorPlanId);
+    res.setHeader("Content-Type", asset.contentType);
+    res.setHeader("Cache-Control", "private, max-age=300");
+    res.send(asset.buffer);
+  }
+
   @Get("projects/:projectId/sheets")
   sheets(@CurrentUser() user: JwtUser, @Param("projectId") projectId: string) {
     return this.revit.sheets(user, projectId);

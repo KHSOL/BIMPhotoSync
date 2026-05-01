@@ -224,6 +224,7 @@ public sealed class SyncRoomsExternalHandler : IExternalEventHandler
         }
 
         PlanBoundsDto bounds = CalculateBounds(planRooms.SelectMany(room => room.Polygon));
+        SheetAssetDto? asset = ExportAndUploadViewPdf(doc, view, $"{levelName}_{view.Name}");
         SyncFloorPlanResponse? floorPlanResponse = new ApiClient()
             .SyncFloorPlanAsync(new SyncFloorPlanRequest(
                 AddinSettings.ProjectId,
@@ -232,6 +233,7 @@ public sealed class SyncRoomsExternalHandler : IExternalEventHandler
                 view.Name,
                 view.Id.Value.ToString(),
                 bounds,
+                asset,
                 planRooms))
             .GetAwaiter()
             .GetResult();
@@ -295,7 +297,7 @@ public sealed class SyncRoomsExternalHandler : IExternalEventHandler
     {
         try
         {
-            SheetAssetDto? asset = ExportAndUploadSheetPdf(doc, sheet);
+            SheetAssetDto? asset = ExportAndUploadPrintablePdf(doc, sheet, sheet.SheetNumber, $"sheet {sheet.SheetNumber}");
             SheetBounds bounds = GetSheetBounds(sheet);
             List<RevitSheetViewDto> views = new();
             List<RevitRoomOverlayDto> overlays = new();
@@ -356,17 +358,22 @@ public sealed class SyncRoomsExternalHandler : IExternalEventHandler
             .ToDictionary(mapping => mapping.Revit_Element_Id, mapping => mapping);
     }
 
-    private static SheetAssetDto? ExportAndUploadSheetPdf(Document doc, ViewSheet sheet)
+    private static SheetAssetDto? ExportAndUploadViewPdf(Document doc, View view, string assetName)
     {
-        if (!sheet.CanBePrinted)
+        return ExportAndUploadPrintablePdf(doc, view, assetName, $"floor plan {view.Name}");
+    }
+
+    private static SheetAssetDto? ExportAndUploadPrintablePdf(Document doc, View printableView, string assetName, string label)
+    {
+        if (!printableView.CanBePrinted)
         {
-            ValidationLog.Write($"Sheet {sheet.SheetNumber} is not printable. Metadata will sync without a PDF asset.");
+            ValidationLog.Write($"{label} is not printable. Metadata will sync without a PDF asset.");
             return null;
         }
 
         string exportDirectory = Path.Combine(Path.GetTempPath(), "BimPhotoSync", Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(exportDirectory);
-        string fileStem = SanitizeFileName($"{sheet.SheetNumber}_{sheet.Name}");
+        string fileStem = SanitizeFileName(assetName);
         PDFExportOptions options = new()
         {
             Combine = false,
@@ -376,10 +383,10 @@ public sealed class SyncRoomsExternalHandler : IExternalEventHandler
         try
         {
             string[] before = Directory.GetFiles(exportDirectory, "*.pdf");
-            bool exported = doc.Export(exportDirectory, new List<ElementId> { sheet.Id }, options);
+            bool exported = doc.Export(exportDirectory, new List<ElementId> { printableView.Id }, options);
             if (!exported)
             {
-                ValidationLog.Write($"PDF export returned false for sheet {sheet.SheetNumber}.");
+                ValidationLog.Write($"PDF export returned false for {label}.");
                 return null;
             }
 
@@ -391,7 +398,7 @@ public sealed class SyncRoomsExternalHandler : IExternalEventHandler
 
             if (exportedFile == null || !exportedFile.Exists)
             {
-                ValidationLog.Write($"PDF export produced no file for sheet {sheet.SheetNumber}.");
+                ValidationLog.Write($"PDF export produced no file for {label}.");
                 return null;
             }
 
@@ -401,14 +408,14 @@ public sealed class SyncRoomsExternalHandler : IExternalEventHandler
                     AddinSettings.ProjectId,
                     "application/pdf",
                     bytes.LongLength,
-                    sheet.SheetNumber,
+                    assetName,
                     null))
                 .GetAwaiter()
                 .GetResult();
 
             if (presign == null)
             {
-                ValidationLog.Write($"Drawing presign returned null for sheet {sheet.SheetNumber}.");
+                ValidationLog.Write($"Drawing presign returned null for {label}.");
                 return null;
             }
 

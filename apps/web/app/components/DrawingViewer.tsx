@@ -59,6 +59,7 @@ export default function DrawingViewer({ mode }: { mode: DrawingViewerMode }) {
   const [projectId, setProjectId] = useState("");
   const [plans, setPlans] = useState<RevitFloorPlan[]>([]);
   const [planId, setPlanId] = useState("");
+  const [floorPlanAssetUrl, setFloorPlanAssetUrl] = useState("");
   const [sheets, setSheets] = useState<RevitSheet[]>([]);
   const [sheetId, setSheetId] = useState("");
   const [sheetAssetUrl, setSheetAssetUrl] = useState("");
@@ -120,6 +121,37 @@ export default function DrawingViewer({ mode }: { mode: DrawingViewerMode }) {
     }
     void loadRoomPhotos(selectedRoomId).catch((err: Error) => setStatus(err.message));
   }, [token, selectedRoomId]);
+
+  useEffect(() => {
+    if (!isFloorPlanMode || !token || !selectedPlan?.asset?.url) {
+      setFloorPlanAssetUrl("");
+      return;
+    }
+
+    let objectUrl = "";
+    let cancelled = false;
+    void fetch(selectedPlan.asset.url, { headers: authHeaders(token) })
+      .then((res) => {
+        if (!res.ok) throw new Error(`Floor plan asset ${res.status}`);
+        return res.blob();
+      })
+      .then((blob) => {
+        objectUrl = URL.createObjectURL(blob);
+        if (cancelled) {
+          URL.revokeObjectURL(objectUrl);
+          return;
+        }
+        setFloorPlanAssetUrl(objectUrl);
+      })
+      .catch(() => {
+        if (!cancelled) setFloorPlanAssetUrl("");
+      });
+
+    return () => {
+      cancelled = true;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [isFloorPlanMode, selectedPlan?.id, selectedPlan?.asset?.url, token]);
 
   useEffect(() => {
     if (isFloorPlanMode || !token || !selectedSheet?.asset?.url) {
@@ -365,7 +397,12 @@ export default function DrawingViewer({ mode }: { mode: DrawingViewerMode }) {
 
         <main className="viewer-main">
           {isFloorPlanMode && selectedPlan ? (
-            <FloorPlanSvg plan={selectedPlan} selectedRoomId={selectedRoomId} onSelect={setSelectedRoomId} />
+            <FloorPlanSvg
+              plan={selectedPlan}
+              assetUrl={floorPlanAssetUrl}
+              selectedRoomId={selectedRoomId}
+              onSelect={setSelectedRoomId}
+            />
           ) : !isFloorPlanMode && selectedSheet ? (
             <SheetViewer sheet={selectedSheet} assetUrl={sheetAssetUrl} selectedRoomId={selectedRoomId} onSelect={setSelectedRoomId} />
           ) : (
@@ -453,7 +490,7 @@ export default function DrawingViewer({ mode }: { mode: DrawingViewerMode }) {
               <dt>동기화 시각</dt>
               <dd>
                 {isFloorPlanMode && selectedPlan
-                  ? new Date(selectedPlan.created_at).toLocaleString("ko-KR")
+                  ? new Date(selectedPlan.synced_at).toLocaleString("ko-KR")
                   : selectedSheet
                     ? new Date(selectedSheet.synced_at).toLocaleString("ko-KR")
                     : "-"}
@@ -652,10 +689,12 @@ function SheetRoomShape({
 
 function FloorPlanSvg({
   plan,
+  assetUrl,
   selectedRoomId,
   onSelect
 }: {
   plan: RevitFloorPlan;
+  assetUrl: string;
   selectedRoomId: string;
   onSelect: (roomId: string) => void;
 }) {
@@ -663,6 +702,15 @@ function FloorPlanSvg({
 
   return (
     <div className="floor-plan real-floor-plan">
+      {assetUrl ? (
+        <div className="floor-plan-asset-layer">
+          {plan.asset?.mime_type === "application/pdf" ? (
+            <PdfSheetCanvas assetUrl={assetUrl} label={`${plan.level_name} ${plan.view_name}`} />
+          ) : (
+            <img className="sheet-asset" src={assetUrl} alt={`${plan.level_name} ${plan.view_name}`} />
+          )}
+        </div>
+      ) : null}
       <svg className="floor-plan-svg" viewBox={viewBox} role="img" aria-label={`${plan.view_name} Revit floor plan`}>
         <g className="plan-grid">
           {Array.from({ length: 12 }).map((_, index) => (
