@@ -2089,9 +2089,9 @@ a {
 }
 
 .revit-room-shape polygon {
-  fill: rgba(248, 250, 252, 0.92);
-  stroke: #94a3b8;
-  stroke-width: 0.12;
+  fill: rgba(37, 99, 235, 0.035);
+  stroke: rgba(37, 99, 235, 0.58);
+  stroke-width: 0.08;
   vector-effect: non-scaling-stroke;
   transition: fill 0.18s ease, stroke 0.18s ease;
 }
@@ -2099,32 +2099,41 @@ a {
 .revit-room-shape circle {
   fill: var(--blue-500);
   stroke: #fff;
-  stroke-width: 0.12;
+  stroke-width: 0.08;
+  opacity: 0;
   vector-effect: non-scaling-stroke;
+  transition: opacity 0.18s ease;
 }
 
 .revit-room-shape text {
   fill: #0f172a;
-  font-size: 1.25px;
   font-weight: 800;
+  opacity: 0;
   pointer-events: none;
   user-select: none;
+  transition: opacity 0.18s ease;
 }
 
 .revit-room-shape .room-name {
   fill: #475569;
-  font-size: 0.9px;
   font-weight: 700;
 }
 
 .revit-room-shape:hover polygon,
 .revit-room-shape.selected polygon {
-  fill: rgba(37, 99, 235, 0.18);
+  fill: rgba(37, 99, 235, 0.12);
   stroke: var(--blue-500);
 }
 
 .revit-room-shape.selected polygon {
-  stroke-width: 0.18;
+  stroke-width: 0.12;
+}
+
+.revit-room-shape:hover circle,
+.revit-room-shape.selected circle,
+.revit-room-shape:hover text,
+.revit-room-shape.selected text {
+  opacity: 1;
 }
 
 .real-plan-empty {

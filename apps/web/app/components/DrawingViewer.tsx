@@ -23,6 +23,7 @@ import {
   apiJson,
   authHeaders,
   FloorPlanRoom,
+  PlanBounds,
   Photo,
   Project,
   readProjectId,
@@ -757,7 +758,13 @@ function FloorPlanSvg({
             ))}
           </g>
           {plan.rooms.map((room) => (
-            <PlanRoomShape key={room.bim_photo_room_id} room={room} selected={room.bim_photo_room_id === selectedRoomId} onSelect={onSelect} />
+            <PlanRoomShape
+              key={room.bim_photo_room_id}
+              room={room}
+              bounds={plan.bounds}
+              selected={room.bim_photo_room_id === selectedRoomId}
+              onSelect={onSelect}
+            />
           ))}
         </svg>
       </div>
@@ -765,18 +772,35 @@ function FloorPlanSvg({
   );
 }
 
-function PlanRoomShape({ room, selected, onSelect }: { room: FloorPlanRoom; selected: boolean; onSelect: (roomId: string) => void }) {
+function PlanRoomShape({
+  room,
+  bounds,
+  selected,
+  onSelect
+}: {
+  room: FloorPlanRoom;
+  bounds: PlanBounds;
+  selected: boolean;
+  onSelect: (roomId: string) => void;
+}) {
   const points = room.polygon.map((point) => `${point.x},${-point.y}`).join(" ");
+  const minDimension = Math.max(0.1, Math.min(bounds.width, bounds.height));
+  const markerRadius = minDimension * 0.01;
+  const labelGap = minDimension * 0.025;
+  const numberFontSize = minDimension * 0.018;
+  const nameFontSize = minDimension * 0.014;
+
   return (
     <g className={selected ? "revit-room-shape selected" : "revit-room-shape"} onClick={() => onSelect(room.bim_photo_room_id)}>
       <polygon points={points} />
-      <circle cx={room.center.x} cy={-room.center.y} r="0.45" />
-      <text x={room.center.x} y={-room.center.y - 0.55} textAnchor="middle">
+      <circle cx={room.center.x} cy={-room.center.y} r={markerRadius} />
+      <text x={room.center.x} y={-room.center.y - labelGap} textAnchor="middle" fontSize={numberFontSize}>
         {room.room_number ?? ""}
       </text>
-      <text x={room.center.x} y={-room.center.y + 0.35} textAnchor="middle" className="room-name">
+      <text x={room.center.x} y={-room.center.y + labelGap} textAnchor="middle" className="room-name" fontSize={nameFontSize}>
         {room.room_name}
       </text>
+      <title>{formatRoomTitle(room)}</title>
     </g>
   );
 }
