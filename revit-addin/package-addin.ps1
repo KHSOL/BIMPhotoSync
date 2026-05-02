@@ -15,6 +15,7 @@ $stagingRoot = Join-Path $revitRoot ".package"
 $packageName = "BimPhotoSyncAddin-Revit$RevitVersion-$Configuration"
 $stagingDir = Join-Path $stagingRoot $packageName
 $payloadDir = Join-Path $stagingDir "BimPhotoSync"
+$scriptsDir = Join-Path $stagingDir "scripts"
 $distDir = Join-Path $revitRoot "dist"
 $zipPath = Join-Path $distDir "$packageName.zip"
 
@@ -37,15 +38,15 @@ if (Test-Path -LiteralPath $stagingDir) {
 }
 
 New-Item -ItemType Directory -Force -Path $payloadDir | Out-Null
+New-Item -ItemType Directory -Force -Path $scriptsDir | Out-Null
 New-Item -ItemType Directory -Force -Path $distDir | Out-Null
 
 Copy-Item -Path (Join-Path $buildOutput "*") -Destination $payloadDir -Recurse -Force
 Copy-Item -LiteralPath (Join-Path $revitRoot "BimPhotoSync.addin") -Destination $stagingDir
 Copy-Item -LiteralPath (Join-Path $revitRoot "config.example.json") -Destination $stagingDir
-Copy-Item -LiteralPath (Join-Path $revitRoot "install.cmd") -Destination $stagingDir
-Copy-Item -LiteralPath (Join-Path $revitRoot "install.ps1") -Destination $stagingDir
-Copy-Item -LiteralPath (Join-Path $revitRoot "uninstall.cmd") -Destination $stagingDir
-Copy-Item -LiteralPath (Join-Path $revitRoot "uninstall.ps1") -Destination $stagingDir
+Get-ChildItem -LiteralPath $revitRoot -Filter "*.cmd" | Copy-Item -Destination $stagingDir
+Copy-Item -LiteralPath (Join-Path $revitRoot "install.ps1") -Destination $scriptsDir
+Copy-Item -LiteralPath (Join-Path $revitRoot "uninstall.ps1") -Destination $scriptsDir
 
 $readme = @"
 BIM Photo Sync Revit Add-in
