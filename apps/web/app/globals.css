@@ -2079,11 +2079,6 @@ a {
   white-space: nowrap;
 }
 
-.plan-grid line {
-  stroke: #e2e8f0;
-  stroke-width: 0.035;
-}
-
 .revit-room-shape {
   cursor: pointer;
 }

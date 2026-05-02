@@ -737,26 +737,6 @@ function FloorPlanSvg({
           role="img"
           aria-label={`${plan.view_name} Revit floor plan`}
         >
-          <g className="plan-grid">
-            {Array.from({ length: 12 }).map((_, index) => (
-              <line
-                key={`v-${index}`}
-                x1={plan.bounds.min_x + (plan.bounds.width / 11) * index}
-                y1={-plan.bounds.max_y}
-                x2={plan.bounds.min_x + (plan.bounds.width / 11) * index}
-                y2={-plan.bounds.min_y}
-              />
-            ))}
-            {Array.from({ length: 8 }).map((_, index) => (
-              <line
-                key={`h-${index}`}
-                x1={plan.bounds.min_x}
-                y1={-plan.bounds.max_y + (plan.bounds.height / 7) * index}
-                x2={plan.bounds.max_x}
-                y2={-plan.bounds.max_y + (plan.bounds.height / 7) * index}
-              />
-            ))}
-          </g>
           {plan.rooms.map((room) => (
             <PlanRoomShape
               key={room.bim_photo_room_id}

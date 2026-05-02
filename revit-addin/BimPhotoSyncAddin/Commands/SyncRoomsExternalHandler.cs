@@ -239,7 +239,7 @@ public sealed class SyncRoomsExternalHandler : IExternalEventHandler
         }
 
         PlanBoundsDto bounds = GetViewPlanBounds(view, modelToViewTransform) ?? CalculateBounds(planRooms.SelectMany(room => room.Polygon));
-        SheetAssetDto? asset = ExportAndUploadViewPdf(doc, view, $"{levelName}_{view.Name}");
+        SheetAssetDto? asset = ExportAndUploadViewImage(doc, view, $"{levelName}_{view.Name}", bounds);
         SyncFloorPlanResponse? floorPlanResponse = new ApiClient()
             .SyncFloorPlanAsync(new SyncFloorPlanRequest(
                 AddinSettings.ProjectId,
@@ -397,9 +397,88 @@ public sealed class SyncRoomsExternalHandler : IExternalEventHandler
         return new string(value.Where(char.IsLetterOrDigit).Select(char.ToUpperInvariant).ToArray());
     }
 
-    private static SheetAssetDto? ExportAndUploadViewPdf(Document doc, View view, string assetName)
+    private static SheetAssetDto? ExportAndUploadViewImage(Document doc, View view, string assetName, PlanBoundsDto bounds)
     {
-        return ExportAndUploadPrintablePdf(doc, view, assetName, $"floor plan {view.Name}");
+        if (!view.CanBePrinted)
+        {
+            ValidationLog.Write($"floor plan {view.Name} is not printable. Metadata will sync without an image asset.");
+            return null;
+        }
+
+        string exportDirectory = Path.Combine(Path.GetTempPath(), "BimPhotoSync", Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(exportDirectory);
+        string fileStem = SanitizeFileName(assetName);
+        const int pixelWidth = 2400;
+        int pixelHeight = Math.Max(1, (int)Math.Round(pixelWidth * (bounds.Height / Math.Max(0.000001, bounds.Width))));
+        ImageExportOptions options = new()
+        {
+            ExportRange = ExportRange.SetOfViews,
+            FilePath = Path.Combine(exportDirectory, fileStem),
+            FitDirection = FitDirectionType.Horizontal,
+            HLRandWFViewsFileType = ImageFileType.PNG,
+            ImageResolution = ImageResolution.DPI_150,
+            PixelSize = pixelWidth,
+            ShadowViewsFileType = ImageFileType.PNG,
+            ZoomType = ZoomFitType.FitToPage
+        };
+        options.SetViewsAndSheets(new List<ElementId> { view.Id });
+
+        try
+        {
+            string[] before = Directory.GetFiles(exportDirectory, "*.png");
+            doc.ExportImage(options);
+
+            FileInfo? exportedFile = Directory.GetFiles(exportDirectory, "*.png")
+                .Select(path => new FileInfo(path))
+                .Where(file => !before.Contains(file.FullName, StringComparer.OrdinalIgnoreCase))
+                .OrderByDescending(file => file.LastWriteTimeUtc)
+                .FirstOrDefault();
+
+            if (exportedFile == null || !exportedFile.Exists)
+            {
+                ValidationLog.Write($"Image export produced no file for floor plan {view.Name}.");
+                return null;
+            }
+
+            byte[] bytes = File.ReadAllBytes(exportedFile.FullName);
+            PresignDrawingAssetResponse? presign = new ApiClient()
+                .PresignDrawingAssetAsync(new PresignDrawingAssetRequest(
+                    AddinSettings.ProjectId,
+                    "image/png",
+                    bytes.LongLength,
+                    assetName,
+                    null))
+                .GetAwaiter()
+                .GetResult();
+
+            if (presign == null)
+            {
+                ValidationLog.Write($"Drawing presign returned null for floor plan {view.Name}.");
+                return null;
+            }
+
+            new ApiClient()
+                .UploadBytesAsync(presign.Data.Presigned_Url, "image/png", bytes)
+                .GetAwaiter()
+                .GetResult();
+
+            return new SheetAssetDto(
+                Object_Key: presign.Data.Object_Key,
+                Mime_Type: "image/png",
+                Width_Px: pixelWidth,
+                Height_Px: pixelHeight);
+        }
+        finally
+        {
+            try
+            {
+                Directory.Delete(exportDirectory, true);
+            }
+            catch (Exception ex)
+            {
+                ValidationLog.Write($"Could not delete temporary export directory {exportDirectory}: {ex.Message}");
+            }
+        }
     }
 
     private static SheetAssetDto? ExportAndUploadPrintablePdf(Document doc, View printableView, string assetName, string label)
