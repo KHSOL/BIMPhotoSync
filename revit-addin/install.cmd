@@ -2,13 +2,18 @@
 setlocal
 
 set "SCRIPT_DIR=%~dp0"
+set "SCRIPT_FILE=%SCRIPT_DIR%scripts\install.ps1"
 set "POWERSHELL_EXE=%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe"
+
+if not exist "%SCRIPT_FILE%" (
+  set "SCRIPT_FILE=%SCRIPT_DIR%install.ps1"
+)
 
 if not exist "%POWERSHELL_EXE%" (
   set "POWERSHELL_EXE=powershell.exe"
 )
 
-"%POWERSHELL_EXE%" -NoProfile -ExecutionPolicy Bypass -File "%SCRIPT_DIR%install.ps1" %*
+"%POWERSHELL_EXE%" -NoProfile -ExecutionPolicy Bypass -File "%SCRIPT_FILE%" %*
 set "EXIT_CODE=%ERRORLEVEL%"
 
 echo.

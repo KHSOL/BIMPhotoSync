@@ -4,7 +4,12 @@ param(
 
 $ErrorActionPreference = "Stop"
 
-$sourceRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
+$scriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
+$sourceRoot = if (Test-Path -LiteralPath (Join-Path $scriptRoot "BimPhotoSync")) {
+  $scriptRoot
+} else {
+  Split-Path -Parent $scriptRoot
+}
 $payloadDir = Join-Path $sourceRoot "BimPhotoSync"
 $manifestSource = Join-Path $sourceRoot "BimPhotoSync.addin"
 $configExample = Join-Path $sourceRoot "config.example.json"
