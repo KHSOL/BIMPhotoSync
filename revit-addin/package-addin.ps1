@@ -42,7 +42,9 @@ New-Item -ItemType Directory -Force -Path $distDir | Out-Null
 Copy-Item -Path (Join-Path $buildOutput "*") -Destination $payloadDir -Recurse -Force
 Copy-Item -LiteralPath (Join-Path $revitRoot "BimPhotoSync.addin") -Destination $stagingDir
 Copy-Item -LiteralPath (Join-Path $revitRoot "config.example.json") -Destination $stagingDir
+Copy-Item -LiteralPath (Join-Path $revitRoot "install.cmd") -Destination $stagingDir
 Copy-Item -LiteralPath (Join-Path $revitRoot "install.ps1") -Destination $stagingDir
+Copy-Item -LiteralPath (Join-Path $revitRoot "uninstall.cmd") -Destination $stagingDir
 Copy-Item -LiteralPath (Join-Path $revitRoot "uninstall.ps1") -Destination $stagingDir
 
 $readme = @"
@@ -50,14 +52,11 @@ BIM Photo Sync Revit Add-in
 
 Install:
 1. Extract this zip.
-2. Open PowerShell in the extracted folder.
-3. Run:
-   powershell -ExecutionPolicy Bypass -File .\install.ps1
-4. Edit %APPDATA%\BimPhotoSync\config.json if needed.
-5. Restart Revit 2025.
+2. Double-click install.cmd.
+3. Restart Revit 2025.
 
 Uninstall:
-   powershell -ExecutionPolicy Bypass -File .\uninstall.ps1
+   Double-click uninstall.cmd.
 
 The installer copies the add-in DLLs to:
 %APPDATA%\Autodesk\Revit\Addins\$RevitVersion\BimPhotoSync
