@@ -29,3 +29,9 @@ export class LoginDto {
   password!: string;
 }
 
+export class UpdateAvatarDto {
+  @IsString()
+  @IsNotEmpty()
+  object_key!: string;
+}
+

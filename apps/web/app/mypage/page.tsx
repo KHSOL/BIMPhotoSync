@@ -11,8 +11,11 @@ type MeResult = {
     name: string;
     role: string;
     company: { id: string; name: string };
+    avatar_url?: string | null;
   };
 };
+type PresignResult = { data: { presigned_url: string; method: "PUT"; object_key: string } };
+type AvatarResult = { data: { access_token: string; user: User } };
 
 export default function MyPage() {
   const [token, setToken] = useState("");
@@ -36,25 +39,32 @@ export default function MyPage() {
       email: json.data.email,
       name: json.data.name,
       role: json.data.role,
-      avatar_url: user?.avatar_url ?? null
+      avatar_url: json.data.avatar_url ?? null
     };
     saveSession(token, nextUser);
     setUser(nextUser);
     setStatus("내 정보를 새로고침했습니다.");
   }
 
-  function changeAvatar(file: File | null) {
+  async function changeAvatar(file: File | null) {
     if (!file || !token || !user) return;
-    const reader = new FileReader();
-    reader.onload = () => {
-      const result = reader.result;
-      if (typeof result !== "string") return;
-      const nextUser = { ...user, avatar_url: result };
-      saveSession(token, nextUser);
-      setUser(nextUser);
-      setStatus("프로필 사진을 저장했습니다.");
-    };
-    reader.readAsDataURL(file);
+    const mime = file.type || "image/jpeg";
+    const presign = await apiJson<PresignResult>("/uploads/avatars/presign", {
+      method: "POST",
+      headers: { ...authHeaders(token), "Content-Type": "application/json" },
+      body: JSON.stringify({ mime_type: mime, file_size: file.size })
+    });
+    const putRes = await fetch(presign.data.presigned_url, { method: presign.data.method, headers: { "Content-Type": mime }, body: file });
+    if (!putRes.ok) throw new Error(`Avatar upload failed: ${putRes.status}`);
+    const json = await apiJson<AvatarResult>("/auth/me/avatar", {
+      method: "PATCH",
+      headers: { ...authHeaders(token), "Content-Type": "application/json" },
+      body: JSON.stringify({ object_key: presign.data.object_key })
+    });
+    saveSession(json.data.access_token, json.data.user);
+    setToken(json.data.access_token);
+    setUser(json.data.user);
+    setStatus("프로필 사진을 계정에 저장했습니다.");
   }
 
   if (!user) {
@@ -63,9 +73,7 @@ export default function MyPage() {
         <KeyRound size={28} />
         <h1 className="panel-title">로그인이 필요합니다</h1>
         <p className="muted">내 정보는 로그인 후 확인할 수 있습니다.</p>
-        <a className="button" href="/login">
-          로그인으로 이동
-        </a>
+        <a className="button" href="/login">로그인으로 이동</a>
       </section>
     );
   }
@@ -96,35 +104,20 @@ export default function MyPage() {
             <label className="filter-button">
               <ImagePlus size={16} />
               프로필 사진 변경
-              <input type="file" accept="image/*" onChange={(event) => changeAvatar(event.target.files?.[0] ?? null)} />
+              <input type="file" accept="image/*" onChange={(event) => changeAvatar(event.target.files?.[0] ?? null).catch((error) => setStatus(error instanceof Error ? error.message : "프로필 사진 저장 실패"))} />
             </label>
           </div>
           <dl className="info-list">
-            <div>
-              <dt>이름</dt>
-              <dd>{user.name}</dd>
-            </div>
-            <div>
-              <dt>이메일</dt>
-              <dd><Mail size={15} /> {user.email}</dd>
-            </div>
-            <div>
-              <dt>역할</dt>
-              <dd><ShieldCheck size={15} /> {roleLabel(user.role)}</dd>
-            </div>
-            <div>
-              <dt>회사</dt>
-              <dd><Building2 size={15} /> {user.company_name ?? user.company_id}</dd>
-            </div>
+            <div><dt>이름</dt><dd>{user.name}</dd></div>
+            <div><dt>이메일</dt><dd><Mail size={15} /> {user.email}</dd></div>
+            <div><dt>역할</dt><dd><ShieldCheck size={15} /> {roleLabel(user.role)}</dd></div>
+            <div><dt>회사</dt><dd><Building2 size={15} /> {user.company_name ?? user.company_id}</dd></div>
           </dl>
           {status ? <p className="muted">{status}</p> : null}
         </article>
 
         <article className="panel">
-          <div className="panel-header">
-            <h2 className="panel-title">Revit Add-in 사용</h2>
-            <span className="badge blue">Windows / Revit 2025</span>
-          </div>
+          <div className="panel-header"><h2 className="panel-title">Revit Add-in 사용</h2><span className="badge blue">Windows / Revit 2025</span></div>
           <div className="revit-import-steps">
             <span>1. Revit에서 BIM Photo Sync 탭을 엽니다.</span>
             <span>2. Connect Project에서 이 계정으로 로그인합니다.</span>
@@ -134,13 +127,8 @@ export default function MyPage() {
         </article>
 
         <article className="panel">
-          <div className="panel-header">
-            <h2 className="panel-title">모바일 앱 사용</h2>
-            <span className="badge green">iOS / Android</span>
-          </div>
-          <p className="muted">
-            설치형 테스트는 EAS internal build로 배포합니다. 현장 사용자는 모바일 앱에서 프로젝트와 Room을 선택하고 사진을 업로드합니다.
-          </p>
+          <div className="panel-header"><h2 className="panel-title">모바일 앱 사용</h2><span className="badge green">iOS / Android</span></div>
+          <p className="muted">설치형 테스트는 EAS internal build로 배포합니다. 현장 사용자는 모바일 앱에서 프로젝트와 Room을 선택하고 사진을 업로드합니다.</p>
         </article>
       </section>
     </div>

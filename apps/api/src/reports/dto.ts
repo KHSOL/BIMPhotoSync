@@ -24,6 +24,10 @@ export class GenerateReportDto {
   trade?: Trade;
 
   @IsOptional()
+  @IsUUID()
+  trade_category_id?: string;
+
+  @IsOptional()
   @IsDateString()
   date_from?: string;
 

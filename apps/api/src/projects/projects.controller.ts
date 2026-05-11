@@ -1,7 +1,7 @@
-import { Body, Controller, Get, Param, Post, UseGuards } from "@nestjs/common";
+import { Body, Controller, Delete, Get, Param, Post, Query, UseGuards } from "@nestjs/common";
 import { CurrentUser, JwtUser } from "../common/current-user";
 import { JwtAuthGuard } from "../common/jwt-auth.guard";
-import { CreateProjectDto, JoinProjectDto } from "./dto";
+import { CreateProjectDto, CreateTradeCategoryDto, JoinProjectDto } from "./dto";
 import { ProjectsService } from "./projects.service";
 
 @Controller("projects")
@@ -32,6 +32,31 @@ export class ProjectsController {
   @Get(":projectId/members")
   members(@CurrentUser() user: JwtUser, @Param("projectId") projectId: string) {
     return this.projects.members(user, projectId);
+  }
+
+  @Get(":projectId/trade-categories")
+  tradeCategories(@CurrentUser() user: JwtUser, @Param("projectId") projectId: string) {
+    return this.projects.tradeCategories(user, projectId);
+  }
+
+  @Post(":projectId/trade-categories")
+  createTradeCategory(@CurrentUser() user: JwtUser, @Param("projectId") projectId: string, @Body() dto: CreateTradeCategoryDto) {
+    return this.projects.createTradeCategory(user, projectId, dto);
+  }
+
+  @Delete(":projectId/trade-categories/:categoryId")
+  deleteTradeCategory(@CurrentUser() user: JwtUser, @Param("projectId") projectId: string, @Param("categoryId") categoryId: string) {
+    return this.projects.deleteTradeCategory(user, projectId, categoryId);
+  }
+
+  @Get(":projectId/audit-events")
+  auditEvents(@CurrentUser() user: JwtUser, @Param("projectId") projectId: string, @Query("limit") limit?: string) {
+    return this.projects.auditEvents(user, projectId, limit ? Number(limit) : undefined);
+  }
+
+  @Get(":projectId/auth-events")
+  authEvents(@CurrentUser() user: JwtUser, @Param("projectId") projectId: string, @Query("limit") limit?: string) {
+    return this.projects.authEvents(user, projectId, limit ? Number(limit) : undefined);
   }
 }
 

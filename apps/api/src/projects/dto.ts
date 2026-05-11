@@ -20,3 +20,9 @@ export class JoinProjectDto {
   access_key!: string;
 }
 
+export class CreateTradeCategoryDto {
+  @IsString()
+  @IsNotEmpty()
+  label!: string;
+}
+

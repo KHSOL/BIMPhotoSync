@@ -49,6 +49,37 @@ export type ProjectMember = {
   user: Pick<User, "id" | "email" | "name" | "role" | "company_id" | "company_name" | "avatar_url">;
 };
 
+export type TradeCategory = {
+  id: string;
+  code: string;
+  label: string;
+  is_system: boolean;
+  is_active: boolean;
+};
+
+export type AuditEvent = {
+  id: string;
+  action: string;
+  resource_type: string;
+  resource_id?: string | null;
+  detail?: string | null;
+  ip_address?: string | null;
+  created_at: string;
+  actor?: Pick<User, "id" | "name" | "email" | "role"> | null;
+  project?: Pick<Project, "id" | "name"> | null;
+};
+
+export type AuthEvent = {
+  id: string;
+  email: string;
+  event_type: string;
+  success: boolean;
+  ip_address?: string | null;
+  user_agent?: string | null;
+  created_at: string;
+  user?: Pick<User, "id" | "name" | "email" | "role"> | null;
+};
+
 export type Room = {
   id: string;
   project_id: string;
@@ -165,6 +196,8 @@ export type Photo = {
   room_id: string;
   work_surface: string;
   trade: string;
+  trade_category_id?: string | null;
+  trade_category?: Pick<TradeCategory, "id" | "code" | "label"> | null;
   work_date: string;
   worker_name?: string | null;
   description?: string | null;

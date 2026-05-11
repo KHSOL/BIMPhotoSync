@@ -34,8 +34,14 @@ export class PhotosService {
   }
 
   async commit(user: { sub: string; companyId: string }, dto: CommitPhotoDto) {
-    await this.projects.assertProjectAccess(user.sub, user.companyId, dto.project_id);
+    const project = await this.projects.assertProjectAccess(user.sub, user.companyId, dto.project_id);
     await this.rooms.assertRoomInProject(dto.room_id, dto.project_id);
+    const tradeCategory = dto.trade_category_id
+      ? await this.prisma.tradeCategory.findFirst({
+          where: { id: dto.trade_category_id, projectId: dto.project_id, companyId: project.companyId, isActive: true }
+        })
+      : null;
+    if (dto.trade_category_id && !tradeCategory) throw new BadRequestException("Trade category not found.");
     const upload = await this.prisma.photoUpload.findFirst({
       where: { id: dto.upload_id, projectId: dto.project_id, committedAt: null }
     });
@@ -50,6 +56,7 @@ export class PhotosService {
           uploadedById: user.sub,
           workSurface: dto.work_surface,
           trade: dto.trade,
+          tradeCategoryId: tradeCategory?.id,
           workDate: new Date(dto.work_date),
           workerName: dto.worker_name,
           description: dto.description,
@@ -65,6 +72,15 @@ export class PhotosService {
     });
 
     const job = await this.aiQueue.add("analyze-photo", { photoId: photo.id }, { attempts: 3, backoff: { type: "exponential", delay: 5000 } });
+    await this.projects.recordAuditEvent({
+      companyId: project.companyId,
+      projectId: dto.project_id,
+      actorUserId: user.sub,
+      action: "CREATE",
+      resourceType: "PHOTO",
+      resourceId: photo.id,
+      detail: "사진 업로드"
+    });
     return { data: { ...toPhotoResponse(photo, this.config), analysis_job: { job_id: job.id, status: "QUEUED" } } };
   }
 
@@ -78,6 +94,7 @@ export class PhotosService {
       status: "ACTIVE",
       ...(query.room_id ? { roomId: query.room_id } : {}),
       ...(query.trade ? { trade: query.trade } : {}),
+      ...(query.trade_category_id ? { tradeCategoryId: query.trade_category_id } : {}),
       ...(query.work_surface ? { workSurface: query.work_surface } : {}),
       ...(query.date_from || query.date_to
         ? {
@@ -94,7 +111,7 @@ export class PhotosService {
       this.prisma.photo.count({ where }),
       this.prisma.photo.findMany({
         where,
-        include: { room: true, analyses: { orderBy: { createdAt: "desc" }, take: 1 } },
+        include: { room: true, tradeCategory: true, analyses: { orderBy: { createdAt: "desc" }, take: 1 } },
         orderBy: [{ workDate: "desc" }, { uploadedAt: "desc" }],
         skip: (page - 1) * pageSize,
         take: pageSize
@@ -112,7 +129,7 @@ export class PhotosService {
   async get(user: { sub: string; companyId: string }, photoId: string) {
     const photo = await this.prisma.photo.findUnique({
       where: { id: photoId },
-      include: { room: true, analyses: { orderBy: { createdAt: "desc" }, take: 1 } }
+      include: { room: true, tradeCategory: true, analyses: { orderBy: { createdAt: "desc" }, take: 1 } }
     });
     if (!photo) throw new NotFoundException("Photo not found.");
     await this.projects.assertProjectAccess(user.sub, user.companyId, photo.projectId);
@@ -172,7 +189,7 @@ export class PhotosService {
   }
 }
 
-export function toPhotoResponse(photo: Photo & { room?: unknown; analyses?: unknown[] }, config: ConfigService) {
+export function toPhotoResponse(photo: Photo & { room?: unknown; tradeCategory?: { id: string; code: string; label: string } | null; analyses?: unknown[] }, config: ConfigService) {
   const publicBase = config.get<string>("API_PUBLIC_URL", "http://localhost:4000");
   return {
     id: photo.id,
@@ -180,6 +197,10 @@ export function toPhotoResponse(photo: Photo & { room?: unknown; analyses?: unkn
     room_id: photo.roomId,
     work_surface: photo.workSurface,
     trade: photo.trade,
+    trade_category_id: photo.tradeCategoryId,
+    trade_category: photo.tradeCategory
+      ? { id: photo.tradeCategory.id, code: photo.tradeCategory.code, label: photo.tradeCategory.label }
+      : null,
     work_date: photo.workDate.toISOString().slice(0, 10),
     worker_name: photo.workerName,
     description: photo.description,

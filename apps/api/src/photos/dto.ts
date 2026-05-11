@@ -18,6 +18,10 @@ export class CommitPhotoDto {
   @IsEnum(Trade)
   trade!: Trade;
 
+  @IsOptional()
+  @IsUUID()
+  trade_category_id?: string;
+
   @IsDateString()
   work_date!: string;
 
@@ -47,6 +51,10 @@ export class PhotoQueryDto {
   @IsOptional()
   @IsEnum(Trade)
   trade?: Trade;
+
+  @IsOptional()
+  @IsUUID()
+  trade_category_id?: string;
 
   @IsOptional()
   @IsEnum(WorkSurface)
