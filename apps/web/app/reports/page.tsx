@@ -1,28 +1,32 @@
 "use client";
 
-import { CalendarDays, Download, Eye, FileText, Filter, KeyRound, Plus, Search } from "lucide-react";
+import { CalendarDays, Download, Eye, FileSpreadsheet, FileText, Filter, KeyRound, Plus, Search } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import {
+  API_BASE,
   apiJson,
   authHeaders,
-  GeneratedReport,
   canAccessAdminBoards,
+  GeneratedReport,
   isUpperManager,
   Project,
   readProjectId,
   readSession,
   Room,
   saveProjectId,
+  TradeCategory,
   User
 } from "../client";
+import { defaultSurfaceOptions, legacyTradeValue } from "../photo-options";
 
-const trades = ["", "WATERPROOF", "TILE", "PAINT", "ELECTRIC", "MEP", "WINDOW", "CONCRETE", "OTHER"];
-const surfaces = ["", "FLOOR", "WALL", "CEILING", "WINDOW", "DOOR", "PIPE", "ELECTRIC", "OTHER"];
+const legacyTrades = ["", "WATERPROOF", "TILE", "PAINT", "ELECTRIC", "MEP", "WINDOW", "CONCRETE", "OTHER"];
 
 type ProjectList = { data: Project[] };
 type RoomList = { data: Room[] };
 type ReportList = { data: GeneratedReport[] };
 type ReportResult = { data: GeneratedReport };
+type TradeCategoryList = { data: TradeCategory[] };
+type ExportFormat = "JSON" | "XLSX" | "DOCX";
 
 export default function ReportsPage() {
   const [token, setToken] = useState("");
@@ -30,6 +34,7 @@ export default function ReportsPage() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [projectId, setProjectId] = useState("");
   const [rooms, setRooms] = useState<Room[]>([]);
+  const [tradeCategories, setTradeCategories] = useState<TradeCategory[]>([]);
   const [reports, setReports] = useState<GeneratedReport[]>([]);
   const [selectedId, setSelectedId] = useState("");
   const [status, setStatus] = useState("로그인 후 프로젝트를 선택하세요.");
@@ -38,6 +43,7 @@ export default function ReportsPage() {
     room_id: "",
     work_surface: "",
     trade: "",
+    trade_category_id: "",
     date_from: "",
     date_to: "",
     worker_name: "",
@@ -65,7 +71,11 @@ export default function ReportsPage() {
     setProjectId(nextProjectId);
     if (nextProjectId) {
       saveProjectId(nextProjectId);
-      await Promise.all([loadRooms(nextToken, nextProjectId), loadReports(nextToken, nextProjectId)]);
+      await Promise.all([
+        loadRooms(nextToken, nextProjectId),
+        loadTradeCategories(nextToken, nextProjectId),
+        loadReports(nextToken, nextProjectId)
+      ]);
     }
   }
 
@@ -73,6 +83,14 @@ export default function ReportsPage() {
     if (!nextProjectId) return;
     const json = await apiJson<RoomList>(`/projects/${nextProjectId}/rooms`, { headers: authHeaders(nextToken) });
     setRooms(json.data);
+  }
+
+  async function loadTradeCategories(nextToken = token, nextProjectId = projectId) {
+    if (!nextProjectId) return;
+    const json = await apiJson<TradeCategoryList>(`/projects/${nextProjectId}/trade-categories`, {
+      headers: authHeaders(nextToken)
+    });
+    setTradeCategories(json.data);
   }
 
   async function loadReports(nextToken = token, nextProjectId = projectId) {
@@ -87,12 +105,39 @@ export default function ReportsPage() {
     setProjectId(nextProjectId);
     saveProjectId(nextProjectId);
     setSelectedId("");
-    setFilters((current) => ({ ...current, room_id: "" }));
-    void Promise.all([loadRooms(token, nextProjectId), loadReports(token, nextProjectId)]).catch((err) => setStatus(err.message));
+    setFilters((current) => ({ ...current, room_id: "", trade: "", trade_category_id: "" }));
+    void Promise.all([
+      loadRooms(token, nextProjectId),
+      loadTradeCategories(token, nextProjectId),
+      loadReports(token, nextProjectId)
+    ]).catch((err) => setStatus(err.message));
+  }
+
+  function changeTrade(value: string) {
+    if (tradeCategories.some((category) => category.id === value)) {
+      const category = tradeCategories.find((item) => item.id === value);
+      setFilters((current) => ({
+        ...current,
+        trade_category_id: value,
+        trade: legacyTradeValue(category?.code ?? "OTHER")
+      }));
+      return;
+    }
+    setFilters((current) => ({ ...current, trade_category_id: "", trade: value }));
   }
 
   function resetFilters() {
-    setFilters({ room_id: "", work_surface: "", trade: "", date_from: "", date_to: "", worker_name: "", title: "", memo: "" });
+    setFilters({
+      room_id: "",
+      work_surface: "",
+      trade: "",
+      trade_category_id: "",
+      date_from: "",
+      date_to: "",
+      worker_name: "",
+      title: "",
+      memo: ""
+    });
     setStatus("보고서 생성 필터를 초기화했습니다.");
   }
 
@@ -108,6 +153,7 @@ export default function ReportsPage() {
         room_id: filters.room_id || undefined,
         work_surface: filters.work_surface || undefined,
         trade: filters.trade || undefined,
+        trade_category_id: filters.trade_category_id || undefined,
         date_from: filters.date_from || undefined,
         date_to: filters.date_to || undefined,
         worker_name: filters.worker_name || undefined,
@@ -130,14 +176,26 @@ export default function ReportsPage() {
     }
   }
 
-  function downloadReport(report: GeneratedReport) {
-    const blob = new Blob([JSON.stringify(report.content, null, 2)], { type: "application/json;charset=utf-8" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `${report.title}.json`;
-    a.click();
-    URL.revokeObjectURL(url);
+  async function downloadReportFile(report: GeneratedReport, format: ExportFormat) {
+    if (format === "JSON") {
+      const blob = new Blob([JSON.stringify(report.content, null, 2)], { type: "application/json;charset=utf-8" });
+      downloadBlob(blob, `${report.title}.json`);
+      return;
+    }
+    const res = await fetch(`${API_BASE}/reports/${report.id}/export?format=${format}`, { headers: authHeaders(token) });
+    if (!res.ok) {
+      const json = await res.json().catch(() => ({}));
+      const message = json?.error?.message ?? json?.message ?? `API error ${res.status}`;
+      throw new Error(Array.isArray(message) ? message.join(", ") : message);
+    }
+    const disposition = res.headers.get("content-disposition");
+    const fallbackName = format === "XLSX" ? `${report.title}.xls` : `${report.title}.doc`;
+    const filename = filenameFromDisposition(disposition) ?? fallbackName;
+    downloadBlob(await res.blob(), filename);
+  }
+
+  function requestDownload(report: GeneratedReport, format: ExportFormat) {
+    void downloadReportFile(report, format).catch((err) => setStatus(err.message));
   }
 
   const canGenerate = isUpperManager(user);
@@ -147,6 +205,7 @@ export default function ReportsPage() {
     if (!keyword) return reports;
     return reports.filter((report) => report.title.toLowerCase().includes(keyword));
   }, [reports, filters.title]);
+  const selectedTradeValue = filters.trade_category_id || filters.trade;
 
   if (!user) {
     return (
@@ -185,7 +244,7 @@ export default function ReportsPage() {
       {!canGenerate ? (
         <section className="permission-banner">
           <KeyRound size={18} />
-          <span>보고서 생성은 상위관리자 권한이 필요합니다. 일반 사용자는 생성된 보고서 조회만 가능합니다.</span>
+          <span>보고서 생성은 상위관리자 권한이 필요합니다.</span>
         </section>
       ) : null}
 
@@ -199,20 +258,24 @@ export default function ReportsPage() {
         <label className="field compact">
           <span className="label">실</span>
           <select className="input" value={filters.room_id} onChange={(event) => setFilters({ ...filters, room_id: event.target.value })}>
-            <option value="">현장전체</option>
+            <option value="">전체</option>
             {rooms.map((room) => <option key={room.id} value={room.id}>{room.level_name ?? "-"} / {room.room_number ?? ""} {room.room_name}</option>)}
           </select>
         </label>
         <label className="field compact">
           <span className="label">공사면</span>
           <select className="input" value={filters.work_surface} onChange={(event) => setFilters({ ...filters, work_surface: event.target.value })}>
-            {surfaces.map((surface) => <option key={surface} value={surface}>{surface || "전체"}</option>)}
+            <option value="">전체</option>
+            {defaultSurfaceOptions.map((surface) => <option key={surface.value} value={surface.value}>{surface.label}</option>)}
           </select>
         </label>
         <label className="field compact">
           <span className="label">공종</span>
-          <select className="input" value={filters.trade} onChange={(event) => setFilters({ ...filters, trade: event.target.value })}>
-            {trades.map((trade) => <option key={trade} value={trade}>{trade || "전체"}</option>)}
+          <select className="input" value={selectedTradeValue} onChange={(event) => changeTrade(event.target.value)}>
+            <option value="">전체</option>
+            {tradeCategories.length > 0
+              ? tradeCategories.map((category) => <option key={category.id} value={category.id}>{category.label}</option>)
+              : legacyTrades.filter((trade) => trade).map((trade) => <option key={trade} value={trade}>{trade}</option>)}
           </select>
         </label>
         <label className="field compact">
@@ -236,10 +299,10 @@ export default function ReportsPage() {
 
       <section className="metric-grid five">
         <Metric icon={<FileText />} label="전체 보고서" value={String(reports.length)} sub="현재 프로젝트" tone="blue" />
-        <Metric icon={<Eye />} label="생성 완료" value={String(reports.filter((r) => r.status === "GENERATED").length)} sub="JSON 보고서" tone="green" />
-        <Metric icon={<CalendarDays />} label="이번 생성" value={selectedReport ? new Date(selectedReport.created_at).toLocaleDateString("ko-KR") : "-"} sub="최근 생성일" tone="orange" />
+        <Metric icon={<Eye />} label="생성 완료" value={String(reports.filter((r) => r.status === "GENERATED").length)} sub="저장된 보고서" tone="green" />
+        <Metric icon={<CalendarDays />} label="최근 생성" value={selectedReport ? new Date(selectedReport.created_at).toLocaleDateString("ko-KR") : "-"} sub="선택 보고서" tone="orange" />
         <Metric icon={<Download />} label="사진 근거" value={String(selectedReport?.photo_ids.length ?? 0)} sub="선택 보고서" tone="purple" />
-        <Metric icon={<FileText />} label="분석 모델" value={selectedReport?.model_provider ?? "-"} sub={selectedReport?.model_name ?? "-"} tone="sky" />
+        <Metric icon={<FileSpreadsheet />} label="내보내기" value="3" sub="JSON / Excel / Word" tone="sky" />
       </section>
 
       <section className="reports-layout">
@@ -271,8 +334,8 @@ export default function ReportsPage() {
                     <td>{report.photo_ids.length}</td>
                     <td><span className={report.status === "GENERATED" ? "badge green" : "badge red"}>{report.status}</span></td>
                     <td className="table-actions">
-                      <button className="icon-button" type="button" onClick={(event) => { event.stopPropagation(); setSelectedId(report.id); }}><Eye size={16} /></button>
-                      <button className="icon-button" type="button" onClick={(event) => { event.stopPropagation(); downloadReport(report); }}><Download size={16} /></button>
+                      <button className="icon-button" type="button" aria-label="미리보기" onClick={(event) => { event.stopPropagation(); setSelectedId(report.id); }}><Eye size={16} /></button>
+                      <button className="icon-button" type="button" aria-label="JSON 다운로드" onClick={(event) => { event.stopPropagation(); requestDownload(report, "JSON"); }}><Download size={16} /></button>
                     </td>
                   </tr>
                 ))}
@@ -318,7 +381,9 @@ export default function ReportsPage() {
               </div>
               {selectedReport.error_message ? <p className="muted">Gemini fallback: {selectedReport.error_message}</p> : null}
               <div className="report-actions">
-                <button className="button" type="button" onClick={() => downloadReport(selectedReport)}><Download size={16} />JSON 다운로드</button>
+                <button className="button" type="button" onClick={() => requestDownload(selectedReport, "JSON")}><Download size={16} />JSON</button>
+                <button className="button secondary" type="button" onClick={() => requestDownload(selectedReport, "XLSX")}><FileSpreadsheet size={16} />Excel</button>
+                <button className="button secondary" type="button" onClick={() => requestDownload(selectedReport, "DOCX")}><FileText size={16} />Word</button>
               </div>
             </>
           ) : (
@@ -328,6 +393,21 @@ export default function ReportsPage() {
       </section>
     </div>
   );
+}
+
+function downloadBlob(blob: Blob, filename: string) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+function filenameFromDisposition(disposition: string | null) {
+  if (!disposition) return null;
+  const match = /filename="?([^"]+)"?/i.exec(disposition);
+  return match?.[1] ?? null;
 }
 
 function Metric({ icon, label, value, sub, tone }: { icon: React.ReactNode; label: string; value: string; sub: string; tone: string }) {

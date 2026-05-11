@@ -1,4 +1,5 @@
-import { Body, Controller, Get, Param, Post, Query, UseGuards } from "@nestjs/common";
+import { Body, Controller, Get, Param, Post, Query, Res, UseGuards } from "@nestjs/common";
+import { Response } from "express";
 import { CurrentUser, JwtUser } from "../common/current-user";
 import { JwtAuthGuard } from "../common/jwt-auth.guard";
 import { GenerateReportDto, ReportQueryDto } from "./dto";
@@ -17,6 +18,14 @@ export class ReportsController {
   @Get(":reportId")
   get(@CurrentUser() user: JwtUser, @Param("reportId") reportId: string) {
     return this.reports.get(user, reportId);
+  }
+
+  @Get(":reportId/export")
+  async export(@CurrentUser() user: JwtUser, @Param("reportId") reportId: string, @Query("format") format: string | undefined, @Res() res: Response) {
+    const file = await this.reports.export(user, reportId, format);
+    res.setHeader("Content-Type", file.contentType);
+    res.setHeader("Content-Disposition", `attachment; filename="${encodeURIComponent(file.filename)}"`);
+    res.send(file.buffer);
   }
 
   @Post("generate")

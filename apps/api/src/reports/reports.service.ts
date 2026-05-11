@@ -91,6 +91,36 @@ export class ReportsService {
     return { data: toReportResponse(report) };
   }
 
+  async export(user: { sub: string; companyId: string }, reportId: string, format = "JSON") {
+    const report = await this.prisma.generatedReport.findUnique({
+      where: { id: reportId },
+      include: { project: true, createdBy: { select: { id: true, name: true, email: true, role: true } } }
+    });
+    if (!report) throw new NotFoundException("Report not found.");
+    await this.projects.assertProjectAccess(user.sub, user.companyId, report.projectId);
+    const response = toReportResponse(report);
+    const safeTitle = response.title.replace(/[\\/:*?"<>|]+/g, "_");
+    if (format.toUpperCase() === "XLSX") {
+      return {
+        filename: `${safeTitle}.xls`,
+        contentType: "application/vnd.ms-excel; charset=utf-8",
+        buffer: Buffer.from(renderExcelHtml(response.content as ReportContent), "utf8")
+      };
+    }
+    if (format.toUpperCase() === "DOCX") {
+      return {
+        filename: `${safeTitle}.doc`,
+        contentType: "application/msword; charset=utf-8",
+        buffer: Buffer.from(renderWordHtml(response.content as ReportContent), "utf8")
+      };
+    }
+    return {
+      filename: `${safeTitle}.json`,
+      contentType: "application/json; charset=utf-8",
+      buffer: Buffer.from(JSON.stringify(response.content, null, 2), "utf8")
+    };
+  }
+
   async generate(user: { sub: string; companyId: string; role: string; email?: string }, dto: GenerateReportDto) {
     await this.projects.assertProjectRole(user, dto.project_id, ["PROJECT_ADMIN", "BIM_MANAGER", "COMPANY_ADMIN"]);
 
@@ -118,6 +148,16 @@ export class ReportsService {
       include: { project: true, createdBy: { select: { id: true, name: true, email: true, role: true } } }
     });
 
+    await this.projects.recordAuditEvent({
+      companyId: user.companyId,
+      projectId: dto.project_id,
+      actorUserId: user.sub,
+      action: "CREATE",
+      resourceType: "REPORT",
+      resourceId: report.id,
+      detail: `${title} 보고서 생성`
+    });
+
     return { data: toReportResponse(report) };
   }
 
@@ -128,6 +168,7 @@ export class ReportsService {
       ...(dto.room_id ? { roomId: dto.room_id } : {}),
       ...(dto.work_surface ? { workSurface: dto.work_surface } : {}),
       ...(dto.trade ? { trade: dto.trade } : {}),
+      ...(dto.trade_category_id ? { tradeCategoryId: dto.trade_category_id } : {}),
       ...(dto.worker_name ? { workerName: { contains: dto.worker_name, mode: "insensitive" } } : {}),
       ...(dto.date_from || dto.date_to
         ? {
@@ -215,7 +256,7 @@ function buildTitle(dto: GenerateReportDto, photos: PhotoForReport[]) {
     dto.trade ?? null,
     dto.date_from || dto.date_to ? `${dto.date_from ?? "시작"}~${dto.date_to ?? "현재"}` : null,
     dto.worker_name ?? null
-  ].filter(Boolean);
+  ].filter((part): part is string => typeof part === "string" && part.length > 0);
   const generatedDate = new Date().toISOString().slice(0, 10);
   return `${parts.join("_") || "현장"}_분석보고서(${generatedDate})`;
 }
@@ -270,6 +311,7 @@ function reportFilters(dto: GenerateReportDto) {
     room_id: dto.room_id ?? null,
     work_surface: dto.work_surface ?? null,
     trade: dto.trade ?? null,
+    trade_category_id: dto.trade_category_id ?? null,
     date_from: dto.date_from ?? null,
     date_to: dto.date_to ?? null,
     worker_name: dto.worker_name ?? null
@@ -315,6 +357,55 @@ function normalizeReportContent(
     analysis_result: value.analysis_result || fallback.analysis_result,
     memo: value.memo ?? fallback.memo
   };
+}
+
+function renderExcelHtml(content: ReportContent) {
+  const rows = [
+    ["제목", content.title],
+    ["생성일", content.generated_at],
+    ["생성자", content.generated_by],
+    ["분석 결과", content.analysis_result],
+    ["메모", content.memo ?? ""]
+  ];
+  const photoRows = content.comparison_photos.map((photo) => [
+    photo.work_date,
+    photo.room,
+    photo.work_surface,
+    photo.trade,
+    photo.worker_name ?? "",
+    photo.description ?? "",
+    photo.ai_description ?? ""
+  ]);
+  return `<!doctype html><html><head><meta charset="utf-8"></head><body>
+    <table border="1">
+      <tbody>${rows.map((row) => `<tr><th>${escapeHtml(row[0])}</th><td>${escapeHtml(row[1])}</td></tr>`).join("")}</tbody>
+    </table>
+    <br />
+    <table border="1">
+      <thead><tr><th>작업일자</th><th>Room</th><th>공사면</th><th>공종</th><th>작업자</th><th>내용</th><th>AI 요약</th></tr></thead>
+      <tbody>${photoRows.map((row) => `<tr>${row.map((cell) => `<td>${escapeHtml(cell)}</td>`).join("")}</tr>`).join("")}</tbody>
+    </table>
+  </body></html>`;
+}
+
+function renderWordHtml(content: ReportContent) {
+  return `<!doctype html><html><head><meta charset="utf-8"><style>body{font-family:Malgun Gothic,Arial,sans-serif;} table{border-collapse:collapse;width:100%;} td,th{border:1px solid #999;padding:6px;}</style></head><body>
+    <h1>${escapeHtml(content.title)}</h1>
+    <p><strong>생성일:</strong> ${escapeHtml(content.generated_at)}</p>
+    <p><strong>생성자:</strong> ${escapeHtml(content.generated_by)}</p>
+    <h2>상황 분석</h2>
+    <p>${escapeHtml(content.analysis_result)}</p>
+    <h2>변화 과정</h2>
+    <ol>${content.progress_timeline.map((line) => `<li>${escapeHtml(line)}</li>`).join("")}</ol>
+    <h2>비교 사진 근거</h2>
+    <table><thead><tr><th>작업일자</th><th>Room</th><th>공사면</th><th>공종</th><th>작업자</th><th>내용</th></tr></thead>
+    <tbody>${content.comparison_photos.map((photo) => `<tr><td>${escapeHtml(photo.work_date)}</td><td>${escapeHtml(photo.room)}</td><td>${escapeHtml(photo.work_surface)}</td><td>${escapeHtml(photo.trade)}</td><td>${escapeHtml(photo.worker_name ?? "")}</td><td>${escapeHtml(photo.description ?? photo.ai_description ?? "")}</td></tr>`).join("")}</tbody></table>
+    ${content.memo ? `<h2>메모</h2><p>${escapeHtml(content.memo)}</p>` : ""}
+  </body></html>`;
+}
+
+function escapeHtml(value: string) {
+  return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 }
 
 function toReportResponse(report: Prisma.GeneratedReportGetPayload<{

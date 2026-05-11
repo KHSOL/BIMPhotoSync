@@ -3,6 +3,7 @@
 export type PhotoOption = {
   value: string;
   label: string;
+  isSystem?: boolean;
 };
 
 export const defaultTradeOptions: PhotoOption[] = [
@@ -31,43 +32,11 @@ export const defaultSurfaceOptions: PhotoOption[] = [
   { value: "OTHER", label: "기타" }
 ];
 
-export const customTradeStorageKey = "bps_custom_trade_labels";
-
-export function readCustomTradeOptions() {
-  if (typeof window === "undefined") return [];
-  const raw = window.localStorage.getItem(customTradeStorageKey);
-  if (!raw) return [];
-  const parsed: unknown = JSON.parse(raw);
-  if (!Array.isArray(parsed)) return [];
-  return parsed.filter(isPhotoOption);
-}
-
-export function saveCustomTradeOptions(options: PhotoOption[]) {
-  window.localStorage.setItem(customTradeStorageKey, JSON.stringify(options));
-}
-
 export function labelForOption(options: PhotoOption[], value: string) {
   return options.find((option) => option.value === value)?.label ?? value;
 }
 
-export function mergeCustomTradeOptions(customOptions: PhotoOption[]) {
-  return [...defaultTradeOptions, ...customOptions];
-}
-
-export function customTradeValue(label: string) {
-  return `CUSTOM:${label.trim()}`;
-}
-
-export function apiTradeValue(value: string) {
-  return value.startsWith("CUSTOM:") ? "OTHER" : value;
-}
-
-export function customTradeLabel(value: string) {
-  return value.startsWith("CUSTOM:") ? value.slice("CUSTOM:".length) : "";
-}
-
-function isPhotoOption(value: unknown): value is PhotoOption {
-  if (!value || typeof value !== "object") return false;
-  const candidate = value as Record<string, unknown>;
-  return typeof candidate.value === "string" && typeof candidate.label === "string";
+export function legacyTradeValue(value: string) {
+  const option = defaultTradeOptions.find((trade) => trade.value === value);
+  return option?.value ?? "OTHER";
 }

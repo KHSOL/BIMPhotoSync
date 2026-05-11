@@ -73,6 +73,7 @@ enum ReportStatus {
 
 enum ReportFormat {
   JSON
+  XLSX
   PDF
   DOCX
   HWP
@@ -88,6 +89,9 @@ model Company {
   name      String
   users     User[]
   projects  Project[]
+  tradeCategories TradeCategory[]
+  auditEvents AuditEvent[]
+  authEvents AuthEvent[]
   createdAt DateTime  @default(now()) @map("created_at")
   updatedAt DateTime  @updatedAt @map("updated_at")
 
@@ -102,10 +106,13 @@ model User {
   passwordHash String          @map("password_hash")
   name         String
   role         UserRole        @default(WORKER)
+  avatarObjectKey String?      @map("avatar_object_key")
   memberships  ProjectMember[]
   photos       Photo[]
   reviews      PhotoAiAnalysis[] @relation("AnalysisReviewer")
   reports      GeneratedReport[] @relation("ReportCreator")
+  auditEvents  AuditEvent[]    @relation("AuditActor")
+  authEvents   AuthEvent[]
   createdAt    DateTime        @default(now()) @map("created_at")
   updatedAt    DateTime        @updatedAt @map("updated_at")
 
@@ -130,6 +137,8 @@ model Project {
   uploads       PhotoUpload[]
   photos        Photo[]
   reports       GeneratedReport[]
+  tradeCategories TradeCategory[]
+  auditEvents   AuditEvent[]
   createdAt     DateTime        @default(now()) @map("created_at")
   updatedAt     DateTime        @updatedAt @map("updated_at")
 
@@ -148,6 +157,64 @@ model ProjectMember {
 
   @@unique([projectId, userId])
   @@map("project_members")
+}
+
+model TradeCategory {
+  id        String    @id @default(uuid()) @db.Uuid
+  companyId String    @map("company_id") @db.Uuid
+  projectId String?   @map("project_id") @db.Uuid
+  company   Company   @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  project   Project?  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  code      String
+  label     String
+  isSystem  Boolean   @default(false) @map("is_system")
+  isActive  Boolean   @default(true) @map("is_active")
+  photos    Photo[]
+  createdAt DateTime  @default(now()) @map("created_at")
+  updatedAt DateTime  @updatedAt @map("updated_at")
+
+  @@unique([companyId, projectId, code], map: "uq_trade_categories_scope_code")
+  @@index([companyId, projectId, isActive], map: "idx_trade_categories_scope_active")
+  @@map("trade_categories")
+}
+
+model AuditEvent {
+  id           String   @id @default(uuid()) @db.Uuid
+  companyId    String   @map("company_id") @db.Uuid
+  projectId    String?  @map("project_id") @db.Uuid
+  actorUserId  String?  @map("actor_user_id") @db.Uuid
+  action       String
+  resourceType String   @map("resource_type")
+  resourceId   String?  @map("resource_id")
+  detail       String?
+  metadata     Json?
+  ipAddress    String?  @map("ip_address")
+  company      Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  project      Project? @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  actor        User?    @relation("AuditActor", fields: [actorUserId], references: [id], onDelete: SetNull)
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  @@index([projectId, createdAt(sort: Desc)], map: "idx_audit_events_project_created")
+  @@index([companyId, createdAt(sort: Desc)], map: "idx_audit_events_company_created")
+  @@map("audit_events")
+}
+
+model AuthEvent {
+  id        String   @id @default(uuid()) @db.Uuid
+  companyId String?  @map("company_id") @db.Uuid
+  userId    String?  @map("user_id") @db.Uuid
+  email     String
+  eventType String   @map("event_type")
+  success   Boolean
+  ipAddress String?  @map("ip_address")
+  userAgent String?  @map("user_agent")
+  user      User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  company   Company? @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@index([companyId, createdAt(sort: Desc)], map: "idx_auth_events_company_created")
+  @@index([userId, createdAt(sort: Desc)], map: "idx_auth_events_user_created")
+  @@map("auth_events")
 }
 
 model RevitModel {
@@ -324,6 +391,7 @@ model Photo {
   uploadedById    String            @map("uploaded_by") @db.Uuid
   workSurface     WorkSurface       @map("work_surface")
   trade           Trade
+  tradeCategoryId String?           @map("trade_category_id") @db.Uuid
   workDate        DateTime          @map("work_date") @db.Date
   workerName      String?           @map("worker_name")
   description     String?
@@ -341,6 +409,7 @@ model Photo {
   project         Project           @relation(fields: [projectId], references: [id], onDelete: Cascade)
   room            Room              @relation(fields: [roomId], references: [id], onDelete: Cascade)
   uploadedBy      User              @relation(fields: [uploadedById], references: [id], onDelete: Restrict)
+  tradeCategory   TradeCategory?    @relation(fields: [tradeCategoryId], references: [id], onDelete: SetNull)
   analyses        PhotoAiAnalysis[]
 
   @@index([projectId, roomId, workDate(sort: Desc), uploadedAt(sort: Desc)], map: "idx_photos_project_room_workdate_desc")

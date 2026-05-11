@@ -1,7 +1,7 @@
 import { Body, Controller, Post, UseGuards } from "@nestjs/common";
 import { CurrentUser, JwtUser } from "../common/current-user";
 import { JwtAuthGuard } from "../common/jwt-auth.guard";
-import { PresignDrawingAssetDto, PresignPhotoDto } from "./dto";
+import { PresignAvatarDto, PresignDrawingAssetDto, PresignPhotoDto } from "./dto";
 import { UploadsService } from "./uploads.service";
 
 @Controller("uploads")
@@ -17,6 +17,11 @@ export class UploadsController {
   @Post("drawings/presign")
   presignDrawing(@CurrentUser() user: JwtUser, @Body() dto: PresignDrawingAssetDto) {
     return this.uploads.presignDrawingAsset(user, dto);
+  }
+
+  @Post("avatars/presign")
+  presignAvatar(@CurrentUser() user: JwtUser, @Body() dto: PresignAvatarDto) {
+    return this.uploads.presignAvatar(user, dto);
   }
 }
 

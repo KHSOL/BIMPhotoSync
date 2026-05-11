@@ -36,3 +36,12 @@ export class PresignDrawingAssetDto {
   checksum_sha256?: string;
 }
 
+export class PresignAvatarDto {
+  @IsMimeType()
+  mime_type!: string;
+
+  @IsInt()
+  @Min(1)
+  file_size!: number;
+}
+

@@ -1,37 +1,16 @@
 "use client";
 
-import {
-  AlertCircle,
-  Bot,
-  CheckCircle2,
-  ChevronRight,
-  CircleDashed,
-  ClipboardList,
-  ImagePlus,
-  KeyRound,
-  Search,
-  UploadCloud
-} from "lucide-react";
+import { AlertCircle, Bot, CheckCircle2, ChevronRight, CircleDashed, ClipboardList, ImagePlus, KeyRound, Search, UploadCloud } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
-import { apiJson, authHeaders, canAccessAdminBoards, Photo, Project, readProjectId, readSession, Room, saveProjectId, User } from "../client";
-import {
-  apiTradeValue,
-  customTradeLabel,
-  customTradeValue,
-  defaultSurfaceOptions,
-  defaultTradeOptions,
-  labelForOption,
-  mergeCustomTradeOptions,
-  readCustomTradeOptions,
-  saveCustomTradeOptions,
-  type PhotoOption
-} from "../photo-options";
+import { apiJson, authHeaders, canAccessAdminBoards, Photo, Project, readProjectId, readSession, Room, saveProjectId, TradeCategory, User } from "../client";
+import { defaultSurfaceOptions, defaultTradeOptions, labelForOption, legacyTradeValue, type PhotoOption } from "../photo-options";
 
 type PhotoTab = "list" | "upload";
-
 type ProjectList = { data: Project[] };
 type RoomList = { data: Room[] };
 type PhotoList = { data: Photo[]; total: number };
+type TradeCategoryList = { data: TradeCategory[] };
+type TradeCategoryResult = { data: TradeCategory };
 type PresignResult = { data: { upload_id: string; presigned_url: string; method: "PUT" } };
 type CommitResult = { data: Photo };
 
@@ -44,17 +23,18 @@ export default function PhotosPage() {
   const [roomId, setRoomId] = useState("");
   const [photos, setPhotos] = useState<Photo[]>([]);
   const [selectedId, setSelectedId] = useState("");
+  const [tradeCategories, setTradeCategories] = useState<TradeCategory[]>([]);
   const [filterTrade, setFilterTrade] = useState("");
   const [filterSurface, setFilterSurface] = useState("");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
   const [file, setFile] = useState<File | null>(null);
   const [activeTab, setActiveTab] = useState<PhotoTab>("list");
-  const [customTrades, setCustomTrades] = useState<PhotoOption[]>([]);
   const [newTradeLabel, setNewTradeLabel] = useState("");
   const [uploadMeta, setUploadMeta] = useState({
     work_surface: "FLOOR",
     trade: "WATERPROOF",
+    trade_category_id: "",
     work_date: new Date().toISOString().slice(0, 10),
     worker_name: "",
     description: ""
@@ -66,7 +46,6 @@ export default function PhotosPage() {
     if (!session) return;
     setToken(session.token);
     setUser(session.user);
-    setCustomTrades(readCustomTradeOptions());
     setUploadMeta((current) => ({ ...current, worker_name: session.user.name }));
     const params = new URLSearchParams(window.location.search);
     const storedProjectId = params.get("project_id") ?? readProjectId();
@@ -79,15 +58,21 @@ export default function PhotosPage() {
   async function loadProjects(nextToken = token, preferredProjectId = projectId, preferredRoomId = roomId) {
     const json = await apiJson<ProjectList>("/projects", { headers: authHeaders(nextToken) });
     setProjects(json.data);
-    const nextProjectId = json.data.some((project) => project.id === preferredProjectId)
-      ? preferredProjectId
-      : json.data[0]?.id ?? "";
+    const nextProjectId = json.data.some((project) => project.id === preferredProjectId) ? preferredProjectId : json.data[0]?.id ?? "";
     setProjectId(nextProjectId);
     if (nextProjectId) {
       saveProjectId(nextProjectId);
+      await loadTradeCategories(nextToken, nextProjectId);
       const nextRoomId = await loadRooms(nextToken, nextProjectId, preferredRoomId);
       await loadPhotos(nextToken, nextProjectId, nextRoomId);
     }
+  }
+
+  async function loadTradeCategories(nextToken = token, nextProjectId = projectId) {
+    if (!nextProjectId) return;
+    const json = await apiJson<TradeCategoryList>(`/projects/${nextProjectId}/trade-categories`, { headers: authHeaders(nextToken) });
+    setTradeCategories(json.data);
+    setUploadMeta((current) => ({ ...current, trade_category_id: current.trade_category_id || json.data[0]?.id || "" }));
   }
 
   async function loadRooms(nextToken = token, nextProjectId = projectId, preferredRoomId = roomId) {
@@ -103,12 +88,7 @@ export default function PhotosPage() {
     nextToken = token,
     nextProjectId = projectId,
     nextRoomId = roomId,
-    nextFilters = {
-      trade: filterTrade,
-      surface: filterSurface,
-      from: dateFrom,
-      to: dateTo
-    }
+    nextFilters = { trade: filterTrade, surface: filterSurface, from: dateFrom, to: dateTo }
   ) {
     if (!nextProjectId) {
       setStatus("프로젝트를 먼저 선택하세요.");
@@ -116,7 +96,10 @@ export default function PhotosPage() {
     }
     const params = new URLSearchParams({ project_id: nextProjectId });
     if (nextRoomId) params.set("room_id", nextRoomId);
-    if (nextFilters.trade) params.set("trade", apiTradeValue(nextFilters.trade));
+    if (nextFilters.trade) {
+      if (nextFilters.trade.startsWith("category:")) params.set("trade_category_id", nextFilters.trade.replace(/^category:/, ""));
+      else params.set("trade", nextFilters.trade);
+    }
     if (nextFilters.surface) params.set("work_surface", nextFilters.surface);
     if (nextFilters.from) params.set("date_from", nextFilters.from);
     if (nextFilters.to) params.set("date_to", nextFilters.to);
@@ -146,6 +129,7 @@ export default function PhotosPage() {
     setProjectId(nextProjectId);
     saveProjectId(nextProjectId);
     setRoomId("");
+    void loadTradeCategories(token, nextProjectId).catch((err) => setStatus(err.message));
     void loadRooms(token, nextProjectId).catch((err) => setStatus(err.message));
     void loadPhotos(token, nextProjectId, "").catch((err) => setStatus(err.message));
   }
@@ -175,16 +159,8 @@ export default function PhotosPage() {
       headers: { ...authHeaders(token), "Content-Type": "application/json" },
       body: JSON.stringify({ project_id: projectId, mime_type: mime, file_size: file.size })
     });
-    const putRes = await fetch(presign.data.presigned_url, {
-      method: presign.data.method,
-      headers: { "Content-Type": mime },
-      body: file
-    });
+    const putRes = await fetch(presign.data.presigned_url, { method: presign.data.method, headers: { "Content-Type": mime }, body: file });
     if (!putRes.ok) throw new Error(`Object upload failed: ${putRes.status}`);
-    const selectedCustomTrade = customTradeLabel(uploadMeta.trade);
-    const descriptionWithCustomTrade = selectedCustomTrade
-      ? `[공종: ${selectedCustomTrade}] ${uploadMeta.description}`.trim()
-      : uploadMeta.description;
     await apiJson<CommitResult>("/photos", {
       method: "POST",
       headers: { ...authHeaders(token), "Content-Type": "application/json" },
@@ -193,8 +169,8 @@ export default function PhotosPage() {
         room_id: roomId,
         upload_id: presign.data.upload_id,
         ...uploadMeta,
-        trade: apiTradeValue(uploadMeta.trade),
-        description: descriptionWithCustomTrade,
+        trade: legacyTradeValue(uploadMeta.trade),
+        trade_category_id: uploadMeta.trade_category_id || undefined,
         worker_name: uploadMeta.worker_name || user?.name || undefined
       })
     });
@@ -203,35 +179,34 @@ export default function PhotosPage() {
     await loadPhotos();
   }
 
-  const selectedPhoto = useMemo(
-    () => photos.find((photo) => photo.id === selectedId) ?? photos[0],
-    [photos, selectedId]
-  );
-  const selectedRoom = rooms.find((room) => room.id === roomId);
-  const tradeOptions = mergeCustomTradeOptions(customTrades);
-  const canManageFilters = canAccessAdminBoards(user);
-
-  function addCustomTrade() {
+  async function addTradeCategory() {
     const label = newTradeLabel.trim();
-    if (!label) return;
-    const option = { value: customTradeValue(label), label };
-    if (tradeOptions.some((trade) => trade.label === label || trade.value === option.value)) {
-      setNewTradeLabel("");
-      return;
-    }
-    const next = [...customTrades, option];
-    setCustomTrades(next);
-    saveCustomTradeOptions(next);
+    if (!label || !projectId) return;
+    const json = await apiJson<TradeCategoryResult>(`/projects/${projectId}/trade-categories`, {
+      method: "POST",
+      headers: { ...authHeaders(token), "Content-Type": "application/json" },
+      body: JSON.stringify({ label })
+    });
+    setTradeCategories((current) => [...current, json.data]);
     setNewTradeLabel("");
-    setStatus("공종 분류를 추가했습니다. 사용자 지정 공종은 API에는 기타(OTHER)로 저장되고 메모에 원 공종명이 함께 기록됩니다.");
+    setStatus("공종 분류를 추가했습니다.");
   }
 
-  function removeCustomTrade(value: string) {
-    const next = customTrades.filter((trade) => trade.value !== value);
-    setCustomTrades(next);
-    saveCustomTradeOptions(next);
-    if (uploadMeta.trade === value) setUploadMeta((current) => ({ ...current, trade: "OTHER" }));
+  async function removeTradeCategory(categoryId: string) {
+    await apiJson<TradeCategoryResult>(`/projects/${projectId}/trade-categories/${categoryId}`, { method: "DELETE", headers: authHeaders(token) });
+    setTradeCategories((current) => current.filter((trade) => trade.id !== categoryId));
+    if (uploadMeta.trade_category_id === categoryId) setUploadMeta((current) => ({ ...current, trade_category_id: "", trade: "OTHER" }));
   }
+
+  const selectedPhoto = useMemo(() => photos.find((photo) => photo.id === selectedId) ?? photos[0], [photos, selectedId]);
+  const selectedRoom = rooms.find((room) => room.id === roomId);
+  const tradeOptions: PhotoOption[] = tradeCategories.length
+    ? tradeCategories.map((category) => ({ value: `category:${category.id}`, label: category.label, isSystem: category.is_system }))
+    : defaultTradeOptions;
+  const uploadTradeOptions: PhotoOption[] = tradeCategories.length
+    ? tradeCategories.map((category) => ({ value: category.id, label: category.label, isSystem: category.is_system }))
+    : defaultTradeOptions;
+  const canManageFilters = canAccessAdminBoards(user);
 
   if (!token) {
     return (
@@ -239,9 +214,7 @@ export default function PhotosPage() {
         <KeyRound size={28} />
         <h1 className="panel-title">로그인이 필요합니다</h1>
         <p className="muted">사진 업로드와 조회는 회사/프로젝트 권한 안에서만 가능합니다.</p>
-        <a className="button" href="/login">
-          로그인으로 이동
-        </a>
+        <a className="button" href="/login">로그인으로 이동</a>
       </section>
     );
   }
@@ -253,337 +226,153 @@ export default function PhotosPage() {
         <ChevronRight size={14} />
         <span>{selectedRoom?.level_name ?? "Room"}</span>
         <ChevronRight size={14} />
-        <strong>
-          {selectedRoom ? `${selectedRoom.room_number ?? ""} ${selectedRoom.room_name}` : "사진 관리"}
-        </strong>
+        <strong>{selectedRoom ? `${selectedRoom.room_number ?? ""} ${selectedRoom.room_name}` : "사진 관리"}</strong>
       </div>
 
       <section className="panel">
         <div className="segmented photo-tabs">
-          <button className={activeTab === "list" ? "active" : ""} type="button" onClick={() => setActiveTab("list")}>
-            사진 조회
-          </button>
-          <button className={activeTab === "upload" ? "active" : ""} type="button" onClick={() => setActiveTab("upload")}>
-            사진 업로드
-          </button>
+          <button className={activeTab === "list" ? "active" : ""} type="button" onClick={() => setActiveTab("list")}>사진 조회</button>
+          <button className={activeTab === "upload" ? "active" : ""} type="button" onClick={() => setActiveTab("upload")}>사진 업로드</button>
         </div>
         <div className="toolbar photo-toolbar">
           <Field label="프로젝트명">
             <select className="input" value={projectId} onChange={(event) => changeProject(event.target.value)}>
-              {projects.map((project) => (
-                <option key={project.id} value={project.id}>
-                  {project.name} / {project.code}
-                </option>
-              ))}
+              {projects.map((project) => <option key={project.id} value={project.id}>{project.name} / {project.code}</option>)}
             </select>
           </Field>
           <Field label="실">
             <select className="input" value={roomId} onChange={(event) => changeRoom(event.target.value)}>
               <option value="">전체 Room</option>
-              {rooms.map((room) => (
-                <option key={room.id} value={room.id}>
-                  {room.level_name ?? "-"} / {room.room_number ?? ""} {room.room_name}
-                </option>
-              ))}
+              {rooms.map((room) => <option key={room.id} value={room.id}>{room.level_name ?? "-"} / {room.room_number ?? ""} {room.room_name}</option>)}
             </select>
           </Field>
           <Field label="공종">
             <select className="input" value={filterTrade} onChange={(event) => setFilterTrade(event.target.value)}>
               <option value="">전체</option>
-              {tradeOptions.map((trade) => (
-                <option key={trade.value} value={trade.value}>{trade.label}</option>
-              ))}
+              {tradeOptions.map((trade) => <option key={trade.value} value={trade.value}>{trade.label}</option>)}
             </select>
           </Field>
           <Field label="공사면">
             <select className="input" value={filterSurface} onChange={(event) => setFilterSurface(event.target.value)}>
               <option value="">전체</option>
-              {defaultSurfaceOptions.map((surface) => (
-                <option key={surface.value} value={surface.value}>{surface.label}</option>
-              ))}
+              {defaultSurfaceOptions.map((surface) => <option key={surface.value} value={surface.value}>{surface.label}</option>)}
             </select>
           </Field>
-          <Field label="시작일">
-            <input className="input" type="date" value={dateFrom} onChange={(event) => setDateFrom(event.target.value)} />
-          </Field>
-          <Field label="종료일">
-            <input className="input" type="date" value={dateTo} onChange={(event) => setDateTo(event.target.value)} />
-          </Field>
-          <button className="button" onClick={() => loadPhotos().catch((err) => setStatus(err.message))} type="button">
-            <Search size={16} /> 조회
-          </button>
-          <button className="filter-button" onClick={resetFilters} type="button">
-            전체보기
-          </button>
+          <Field label="시작일"><input className="input" type="date" value={dateFrom} onChange={(event) => setDateFrom(event.target.value)} /></Field>
+          <Field label="종료일"><input className="input" type="date" value={dateTo} onChange={(event) => setDateTo(event.target.value)} /></Field>
+          <button className="button" onClick={() => loadPhotos().catch((err) => setStatus(err.message))} type="button"><Search size={16} /> 조회</button>
+          <button className="filter-button" onClick={resetFilters} type="button">전체보기</button>
         </div>
       </section>
 
-      {activeTab === "list" ? <div className="dashboard-grid">
-        <section className="panel">
-          <div className="panel-header">
-            <div>
-              <h1 className="panel-title">사진 조회</h1>
-              <div className="muted">{photos.length} Photos</div>
-            </div>
-            <span className="badge blue">Room 기준</span>
-          </div>
-          {photos.length === 0 ? (
-            <div className="empty">
-              <div>
-                <ImagePlus size={28} />
-                <p>아직 사진이 없습니다.</p>
-                <p className="muted">아래 업로드 패널에서 Room에 사진을 연결하세요.</p>
+      {activeTab === "list" ? (
+        <div className="dashboard-grid">
+          <section className="panel">
+            <div className="panel-header"><div><h1 className="panel-title">사진 조회</h1><div className="muted">{photos.length} Photos</div></div><span className="badge blue">Room 기준</span></div>
+            {photos.length === 0 ? (
+              <div className="empty"><div><ImagePlus size={28} /><p>아직 사진이 없습니다.</p><p className="muted">업로드 탭에서 Room에 사진을 연결하세요.</p></div></div>
+            ) : (
+              <div className="photo-grid">
+                {photos.map((photo) => (
+                  <button className={`photo-tile ${photo.id === selectedPhoto?.id ? "active" : ""}`} key={photo.id} onClick={() => setSelectedId(photo.id)} type="button">
+                    {photo.preview_url ? <img src={photo.preview_url} alt={photo.description ?? "현장 사진"} /> : <div className="photo-fallback" />}
+                  </button>
+                ))}
               </div>
-            </div>
-          ) : (
-            <div className="photo-grid">
-              {photos.map((photo) => (
-                <button
-                  className={`photo-tile ${photo.id === selectedPhoto?.id ? "active" : ""}`}
-                  key={photo.id}
-                  onClick={() => setSelectedId(photo.id)}
-                  type="button"
-                >
-                  {photo.preview_url ? <img src={photo.preview_url} alt={photo.description ?? "현장 사진"} /> : <div className="photo-fallback" />}
-                </button>
-              ))}
-            </div>
-          )}
-        </section>
+            )}
+          </section>
 
-        <section className="panel">
-          <div className="panel-header">
-            <h2 className="panel-title">선택 사진 상세</h2>
-            <span className="badge orange">{selectedPhoto?.progress_status ?? "EMPTY"}</span>
-          </div>
-          {selectedPhoto ? (
-            <>
-              <div className="detail-layout">
-                <div className="detail-photo">
-                  {selectedPhoto.preview_url ? (
-                    <img src={selectedPhoto.preview_url} alt={selectedPhoto.description ?? "선택 사진"} />
-                  ) : (
-                    <div className="photo-fallback" />
-                  )}
+          <section className="panel">
+            <div className="panel-header"><h2 className="panel-title">선택 사진 상세</h2><span className="badge orange">{selectedPhoto?.progress_status ?? "EMPTY"}</span></div>
+            {selectedPhoto ? (
+              <>
+                <div className="detail-layout">
+                  <div className="detail-photo">{selectedPhoto.preview_url ? <img src={selectedPhoto.preview_url} alt={selectedPhoto.description ?? "선택 사진"} /> : <div className="photo-fallback" />}</div>
+                  <dl className="meta-list">
+                    <dt>작업일자</dt><dd>{selectedPhoto.work_date}</dd>
+                    <dt>공종</dt><dd>{selectedPhoto.trade_category?.label ?? labelForOption(defaultTradeOptions, selectedPhoto.trade)}</dd>
+                    <dt>공사면</dt><dd>{labelForOption(defaultSurfaceOptions, selectedPhoto.work_surface)}</dd>
+                    <dt>작업자</dt><dd>{selectedPhoto.worker_name ?? "-"}</dd>
+                    <dt>위치</dt><dd>{selectedPhoto.room?.level_name ?? "-"} &gt; {selectedPhoto.room?.room_number ?? ""} {selectedPhoto.room?.room_name ?? selectedPhoto.room_id}</dd>
+                  </dl>
                 </div>
-                <dl className="meta-list">
-                  <dt>작업일자</dt>
-                  <dd>{selectedPhoto.work_date}</dd>
-                  <dt>공종</dt>
-                  <dd>{labelForOption(tradeOptions, selectedPhoto.trade)}</dd>
-                  <dt>공사면</dt>
-                  <dd>{labelForOption(defaultSurfaceOptions, selectedPhoto.work_surface)}</dd>
-                  <dt>작업자</dt>
-                  <dd>{selectedPhoto.worker_name ?? "-"}</dd>
-                  <dt>위치</dt>
-                  <dd>
-                    {selectedPhoto.room?.level_name ?? "-"} &gt; {selectedPhoto.room?.room_number ?? ""}{" "}
-                    {selectedPhoto.room?.room_name ?? selectedPhoto.room_id}
-                  </dd>
-                </dl>
-              </div>
-              <div className="callout">
-                <div className="callout-title">
-                  <Bot size={18} color="#2563eb" /> AI Summary
-                </div>
-                <p className="muted" style={{ margin: 0 }}>
-                  {selectedPhoto.ai_description ?? selectedPhoto.latest_analysis?.summary ?? "분석 대기 중입니다."}
-                </p>
-              </div>
-              <div className="callout">
-                <div className="callout-title">작업 내용</div>
-                <p className="muted" style={{ margin: 0 }}>
-                  {selectedPhoto.description ?? "-"}
-                </p>
-              </div>
-            </>
-          ) : (
-            <div className="empty">사진을 선택하세요.</div>
-          )}
+                <div className="callout"><div className="callout-title"><Bot size={18} color="#2563eb" /> AI Summary</div><p className="muted" style={{ margin: 0 }}>{selectedPhoto.ai_description ?? selectedPhoto.latest_analysis?.summary ?? "분석 대기 중입니다."}</p></div>
+                <div className="callout"><div className="callout-title">작업 내용</div><p className="muted" style={{ margin: 0 }}>{selectedPhoto.description ?? "-"}</p></div>
+              </>
+            ) : <div className="empty">사진을 선택하세요.</div>}
+          </section>
+
+          <aside className="panel">
+            <div className="panel-header"><h2 className="panel-title">Room Status</h2></div>
+            <div className="status-card"><span className="muted">선택 Room</span><strong>{selectedRoom ? `${selectedRoom.room_number ?? ""} ${selectedRoom.room_name}` : "전체 Room"}</strong><code>{selectedRoom?.bim_photo_room_id ?? "BIM_PHOTO_ROOM_ID"}</code></div>
+            <div style={{ height: 12 }} />
+            <div className="status-card"><span className="muted">사진 처리</span><div className="badge-row"><span className="badge green">R2 업로드</span><span className="badge blue">AI 큐</span><span className="badge orange">관리자 검토</span></div></div>
+            <p className="muted">{status}</p>
+          </aside>
+        </div>
+      ) : null}
+
+      {activeTab === "upload" ? (
+        <section className="panel">
+          <div className="panel-header"><div><h2 className="panel-title">사진 업로드</h2><p className="muted">프로젝트, 실, 공사면, 공종, 작업일자, 작업자, 내용을 함께 저장합니다.</p></div><UploadCloud size={18} color="#2563eb" /></div>
+          <div className="upload-grid">
+            <Field label="실">
+              <select className="input" value={roomId} onChange={(event) => setRoomId(event.target.value)}>
+                <option value="">Room 선택</option>
+                {rooms.map((room) => <option key={room.id} value={room.id}>{room.level_name ?? "-"} / {room.room_number ?? ""} {room.room_name}</option>)}
+              </select>
+            </Field>
+            <Field label="공사면">
+              <select className="input" value={uploadMeta.work_surface} onChange={(event) => setUploadMeta({ ...uploadMeta, work_surface: event.target.value })}>
+                {defaultSurfaceOptions.map((surface) => <option key={surface.value} value={surface.value}>{surface.label}</option>)}
+              </select>
+            </Field>
+            <Field label="공종">
+              <select className="input" value={uploadMeta.trade_category_id || uploadMeta.trade} onChange={(event) => {
+                const category = tradeCategories.find((trade) => trade.id === event.target.value);
+                setUploadMeta({ ...uploadMeta, trade_category_id: category?.id ?? "", trade: category?.code ?? event.target.value });
+              }}>
+                {uploadTradeOptions.map((trade) => <option key={trade.value} value={trade.value}>{trade.label}</option>)}
+              </select>
+            </Field>
+            <Field label="작업일자"><input className="input" type="date" value={uploadMeta.work_date} onChange={(event) => setUploadMeta({ ...uploadMeta, work_date: event.target.value })} /></Field>
+            <Field label="작업자"><input className="input" value={uploadMeta.worker_name} onChange={(event) => setUploadMeta({ ...uploadMeta, worker_name: event.target.value })} /></Field>
+            <Field label="사진"><input className="input file-input" type="file" accept="image/*" onChange={(event) => setFile(event.target.files?.[0] ?? null)} /></Field>
+            <label className="field upload-note"><span className="label">내용</span><textarea className="input textarea" value={uploadMeta.description} onChange={(event) => setUploadMeta({ ...uploadMeta, description: event.target.value })} /></label>
+            <button className="button upload-button" onClick={() => uploadPhoto().catch((err) => setStatus(err.message))} type="button"><UploadCloud size={16} /> 업로드</button>
+          </div>
         </section>
-
-        <aside className="panel">
-          <div className="panel-header">
-            <h2 className="panel-title">Room Status</h2>
-          </div>
-          <div className="status-card">
-            <span className="muted">선택 Room</span>
-            <strong>
-              {selectedRoom ? `${selectedRoom.room_number ?? ""} ${selectedRoom.room_name}` : "전체 Room"}
-            </strong>
-            <code>{selectedRoom?.bim_photo_room_id ?? "BIM_PHOTO_ROOM_ID"}</code>
-          </div>
-          <div style={{ height: 12 }} />
-          <div className="status-card">
-            <span className="muted">사진 처리</span>
-            <div className="badge-row">
-              <span className="badge green">R2 업로드</span>
-              <span className="badge blue">AI 큐</span>
-              <span className="badge orange">관리자 검토</span>
-            </div>
-          </div>
-          <p className="muted">{status}</p>
-        </aside>
-      </div> : null}
-
-      {activeTab === "upload" ? <section className="panel">
-        <div className="panel-header">
-          <div>
-            <h2 className="panel-title">사진 업로드</h2>
-            <p className="muted">프로젝트, 실, 공사면, 공종, 작업일자, 작업자, 내용을 함께 저장합니다.</p>
-          </div>
-          <UploadCloud size={18} color="#2563eb" />
-        </div>
-        <div className="upload-grid">
-          <Field label="실">
-            <select className="input" value={roomId} onChange={(event) => setRoomId(event.target.value)}>
-              <option value="">Room 선택</option>
-              {rooms.map((room) => (
-                <option key={room.id} value={room.id}>
-                  {room.level_name ?? "-"} / {room.room_number ?? ""} {room.room_name}
-                </option>
-              ))}
-            </select>
-          </Field>
-          <Field label="공사면">
-            <select
-              className="input"
-              value={uploadMeta.work_surface}
-              onChange={(event) => setUploadMeta({ ...uploadMeta, work_surface: event.target.value })}
-            >
-              {defaultSurfaceOptions.map((surface) => (
-                <option key={surface.value} value={surface.value}>{surface.label}</option>
-              ))}
-            </select>
-          </Field>
-          <Field label="공종">
-            <select
-              className="input"
-              value={uploadMeta.trade}
-              onChange={(event) => setUploadMeta({ ...uploadMeta, trade: event.target.value })}
-            >
-              {tradeOptions.map((trade) => (
-                <option key={trade.value} value={trade.value}>{trade.label}</option>
-              ))}
-            </select>
-          </Field>
-          <Field label="작업일자">
-            <input
-              className="input"
-              type="date"
-              value={uploadMeta.work_date}
-              onChange={(event) => setUploadMeta({ ...uploadMeta, work_date: event.target.value })}
-            />
-          </Field>
-          <Field label="작업자">
-            <input
-              className="input"
-              value={uploadMeta.worker_name}
-              onChange={(event) => setUploadMeta({ ...uploadMeta, worker_name: event.target.value })}
-            />
-          </Field>
-          <Field label="사진">
-            <input className="input file-input" type="file" accept="image/*" onChange={(event) => setFile(event.target.files?.[0] ?? null)} />
-          </Field>
-          <label className="field upload-note">
-            <span className="label">내용</span>
-            <textarea
-              className="input textarea"
-              value={uploadMeta.description}
-              onChange={(event) => setUploadMeta({ ...uploadMeta, description: event.target.value })}
-            />
-          </label>
-          <button className="button upload-button" onClick={() => uploadPhoto().catch((err) => setStatus(err.message))} type="button">
-            <UploadCloud size={16} /> 업로드
-          </button>
-        </div>
-      </section> : null}
+      ) : null}
 
       {canManageFilters ? (
         <section className="panel filter-manager-panel">
-          <div className="panel-header">
-            <div>
-              <h2 className="panel-title">공종 분류 관리</h2>
-              <p className="muted">관리자는 현장 표시용 공종을 추가하거나 삭제할 수 있습니다.</p>
-            </div>
-          </div>
+          <div className="panel-header"><div><h2 className="panel-title">공종 분류 관리</h2><p className="muted">관리자는 프로젝트 공종을 추가하거나 비활성화할 수 있습니다.</p></div></div>
           <div className="filter-manager-grid">
-            <label className="field">
-              <span className="label">추가할 공종명</span>
-              <input className="input" value={newTradeLabel} onChange={(event) => setNewTradeLabel(event.target.value)} placeholder="예: 석고보드" />
-            </label>
-            <button className="button" type="button" onClick={addCustomTrade}>공종 추가</button>
+            <label className="field"><span className="label">추가할 공종명</span><input className="input" value={newTradeLabel} onChange={(event) => setNewTradeLabel(event.target.value)} placeholder="예: 석고보드" /></label>
+            <button className="button" type="button" onClick={() => addTradeCategory().catch((err) => setStatus(err.message))}>공종 추가</button>
           </div>
           <div className="filter-chip-row">
-            {customTrades.length === 0 ? <span className="muted">추가된 사용자 지정 공종이 없습니다.</span> : null}
-            {customTrades.map((trade) => (
-              <button className="filter-chip" key={trade.value} type="button" onClick={() => removeCustomTrade(trade.value)}>
-                {trade.label} 삭제
-              </button>
+            {tradeCategories.filter((trade) => !trade.is_system).length === 0 ? <span className="muted">추가된 사용자 지정 공종이 없습니다.</span> : null}
+            {tradeCategories.filter((trade) => !trade.is_system).map((trade) => (
+              <button className="filter-chip" key={trade.id} type="button" onClick={() => removeTradeCategory(trade.id).catch((err) => setStatus(err.message))}>{trade.label} 삭제</button>
             ))}
           </div>
         </section>
       ) : null}
 
       <div className="bottom-grid">
-        <section className="panel">
-          <div className="panel-header">
-            <h2 className="panel-title">Upload Pipeline</h2>
-            <UploadCloud size={18} color="#2563eb" />
-          </div>
-          <div className="queue-list">
-            <QueueItem icon={<CheckCircle2 size={16} color="#22c55e" />} name="Presigned URL" value="100%" />
-            <QueueItem icon={<CircleDashed size={16} color="#2563eb" />} name="Object Storage" value="100%" />
-            <QueueItem icon={<AlertCircle size={16} color="#f59e0b" />} name="AI Review" value="45%" />
-          </div>
-        </section>
-
-        <section className="panel">
-          <div className="panel-header">
-            <h2 className="panel-title">AI Analysis Status</h2>
-            <Bot size={18} color="#2563eb" />
-          </div>
-          <div className="badge-row">
-            <span className="badge green">저장 완료</span>
-            <span className="badge blue">분석 큐 등록</span>
-            <span className="badge orange">검토 대기</span>
-          </div>
-          <p className="muted">업로드 후 worker가 사진을 분석하고 분석 요약을 내용란과 AI Summary에 저장합니다.</p>
-        </section>
-
-        <section className="panel">
-          <div className="panel-header">
-            <h2 className="panel-title">Revit Link</h2>
-            <ClipboardList size={18} color="#2563eb" />
-          </div>
-          <p className="muted">Revit Add-in은 Room 선택 시 BIM_PHOTO_ROOM_ID로 같은 사진 조회 API를 호출합니다.</p>
-          <div className="progress">
-            <span style={{ "--value": "100%" } as React.CSSProperties} />
-          </div>
-        </section>
+        <section className="panel"><div className="panel-header"><h2 className="panel-title">Upload Pipeline</h2><UploadCloud size={18} color="#2563eb" /></div><div className="queue-list"><QueueItem icon={<CheckCircle2 size={16} color="#22c55e" />} name="Presigned URL" value="100%" /><QueueItem icon={<CircleDashed size={16} color="#2563eb" />} name="Object Storage" value="100%" /><QueueItem icon={<AlertCircle size={16} color="#f59e0b" />} name="AI Review" value="45%" /></div></section>
+        <section className="panel"><div className="panel-header"><h2 className="panel-title">AI Analysis Status</h2><Bot size={18} color="#2563eb" /></div><div className="badge-row"><span className="badge green">저장 완료</span><span className="badge blue">분석 큐 등록</span><span className="badge orange">검토 대기</span></div><p className="muted">업로드 후 worker가 사진을 분석하고 분석 요약을 내용란과 AI Summary에 저장합니다.</p></section>
+        <section className="panel"><div className="panel-header"><h2 className="panel-title">Revit Link</h2><ClipboardList size={18} color="#2563eb" /></div><p className="muted">Revit Add-in은 Room 선택 시 BIM_PHOTO_ROOM_ID로 같은 사진 조회 API를 호출합니다.</p><div className="progress"><span style={{ "--value": "100%" } as React.CSSProperties} /></div></section>
       </div>
     </>
   );
 }
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <label className="field">
-      <span className="label">{label}</span>
-      {children}
-    </label>
-  );
+  return <label className="field"><span className="label">{label}</span>{children}</label>;
 }
 
 function QueueItem({ icon, name, value }: { icon: React.ReactNode; name: string; value: string }) {
-  return (
-    <div className="queue-item">
-      {icon}
-      <span>{name}</span>
-      <strong>{value}</strong>
-      <div style={{ gridColumn: "2 / 4" }} className="progress">
-        <span style={{ "--value": value } as React.CSSProperties} />
-      </div>
-    </div>
-  );
+  return <div className="queue-item">{icon}<span>{name}</span><strong>{value}</strong><div style={{ gridColumn: "2 / 4" }} className="progress"><span style={{ "--value": value } as React.CSSProperties} /></div></div>;
 }
