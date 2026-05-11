@@ -49,11 +49,12 @@ a {
 }
 
 .shell {
-  min-height: 100vh;
+  height: 100vh;
   display: grid;
   grid-template-columns: 248px minmax(0, 1fr);
   align-items: stretch;
   background: var(--gray-50);
+  overflow: hidden;
 }
 
 .sidebar {
@@ -201,7 +202,8 @@ a {
   align-content: start;
   gap: 16px;
   min-width: 0;
-  overflow-x: hidden;
+  height: 100vh;
+  overflow: auto;
 }
 
 .breadcrumb {
@@ -1314,6 +1316,22 @@ a {
   gap: 18px;
 }
 
+.mypage-account-page {
+  max-width: min(100%, 920px);
+  margin-inline: 0;
+}
+
+.mypage-account-layout {
+  display: grid;
+  grid-template-columns: minmax(320px, 560px);
+  align-items: start;
+}
+
+.mypage-account-card {
+  display: grid;
+  gap: 14px;
+}
+
 .info-list {
   display: grid;
   gap: 12px;
@@ -1463,6 +1481,74 @@ a {
   line-height: 15px;
   text-align: center;
   overflow-wrap: anywhere;
+}
+
+.level-bar-list {
+  min-height: 224px;
+  display: grid;
+  align-content: start;
+  gap: 12px;
+  padding: 8px 2px 2px;
+}
+
+.level-bar-row {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(112px, 0.46fr) minmax(120px, 1fr) 52px;
+  align-items: center;
+  gap: 12px;
+}
+
+.level-bar-label {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.level-bar-label strong {
+  min-width: 0;
+  color: var(--gray-700);
+  font-size: 13px;
+  line-height: 18px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.level-bar-label small {
+  color: var(--gray-500);
+  font-size: 11px;
+  line-height: 15px;
+}
+
+.level-bar-track {
+  height: 12px;
+  border-radius: 999px;
+  background: var(--blue-50);
+  overflow: hidden;
+}
+
+.level-bar-track span {
+  display: block;
+  width: var(--value);
+  min-width: 8px;
+  max-width: 100%;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #0862f0, #2d7cff);
+}
+
+.level-bar-row em {
+  justify-self: end;
+  min-width: 42px;
+  border-radius: 999px;
+  background: var(--blue-50);
+  color: var(--blue-600);
+  padding: 4px 8px;
+  text-align: center;
+  font-size: 12px;
+  font-style: normal;
+  font-weight: 800;
 }
 
 .donut-card {
@@ -3044,7 +3130,10 @@ video {
 
 @media (max-width: 720px) {
   .shell {
+    height: auto;
+    min-height: 100vh;
     grid-template-columns: 1fr;
+    overflow: visible;
   }
 
   .sidebar {
@@ -3104,6 +3193,8 @@ video {
   }
 
   .content {
+    height: auto;
+    overflow: visible;
     padding: 12px;
   }
 
@@ -3144,6 +3235,16 @@ video {
 }
 
 @media (max-width: 520px) {
+  .level-bar-row {
+    grid-template-columns: 1fr 48px;
+    gap: 8px;
+  }
+
+  .level-bar-track {
+    grid-column: 1 / -1;
+    grid-row: 2;
+  }
+
   .auth-page {
     padding: 0;
   }
