@@ -156,15 +156,20 @@ export default function DashboardPage() {
 
         <article className="panel ref-card">
           <PanelTitle title="층별 Room 분포" href="/rooms" />
-          <div className="bar-chart">
+          <div className="level-bar-list">
             {summary.level_distribution.length > 0 ? (
               summary.level_distribution.map((row) => {
                 const percent = percentOf(row.count, summary.totals.rooms);
                 return (
-                  <div className="bar-column" key={row.level_name}>
-                    <strong>{percent}%</strong>
-                    <span style={{ "--value": `${percent}%` } as React.CSSProperties} />
-                    <small>{row.level_name}</small>
+                  <div className="level-bar-row" key={row.level_name}>
+                    <div className="level-bar-label">
+                      <strong>{row.level_name}</strong>
+                      <small>{row.count.toLocaleString()} Rooms</small>
+                    </div>
+                    <div className="level-bar-track" aria-label={`${row.level_name} ${percent}%`}>
+                      <span style={{ "--value": `${percent}%` } as React.CSSProperties} />
+                    </div>
+                    <em>{percent}%</em>
                   </div>
                 );
               })

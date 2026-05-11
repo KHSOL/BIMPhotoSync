@@ -43,7 +43,7 @@ export default function MyPage() {
     };
     saveSession(token, nextUser);
     setUser(nextUser);
-    setStatus("내 정보를 새로고침했습니다.");
+    setStatus("계정 정보를 새로고침했습니다.");
   }
 
   async function changeAvatar(file: File | null) {
@@ -79,11 +79,11 @@ export default function MyPage() {
   }
 
   return (
-    <div className="reference-page">
+    <div className="reference-page mypage-account-page">
       <header className="page-heading-row">
         <div>
           <h1 className="page-title">My Page</h1>
-          <p className="muted">계정, 회사, 권한, 설치 안내를 확인합니다.</p>
+          <p className="muted">계정 정보만 확인하고 프로필 사진을 변경합니다.</p>
         </div>
         <button className="filter-button" type="button" onClick={() => refreshMe().catch((error) => setStatus(error.message))}>
           <RefreshCw size={16} />
@@ -91,8 +91,8 @@ export default function MyPage() {
         </button>
       </header>
 
-      <section className="mypage-grid">
-        <article className="panel">
+      <section className="mypage-account-layout">
+        <article className="panel mypage-account-card">
           <div className="panel-header">
             <h2 className="panel-title">계정 정보</h2>
             <UserRound size={20} />
@@ -104,7 +104,15 @@ export default function MyPage() {
             <label className="filter-button">
               <ImagePlus size={16} />
               프로필 사진 변경
-              <input type="file" accept="image/*" onChange={(event) => changeAvatar(event.target.files?.[0] ?? null).catch((error) => setStatus(error instanceof Error ? error.message : "프로필 사진 저장 실패"))} />
+              <input
+                type="file"
+                accept="image/*"
+                onChange={(event) =>
+                  changeAvatar(event.target.files?.[0] ?? null).catch((error) =>
+                    setStatus(error instanceof Error ? error.message : "프로필 사진 저장 실패")
+                  )
+                }
+              />
             </label>
           </div>
           <dl className="info-list">
@@ -114,21 +122,6 @@ export default function MyPage() {
             <div><dt>회사</dt><dd><Building2 size={15} /> {user.company_name ?? user.company_id}</dd></div>
           </dl>
           {status ? <p className="muted">{status}</p> : null}
-        </article>
-
-        <article className="panel">
-          <div className="panel-header"><h2 className="panel-title">Revit Add-in 사용</h2><span className="badge blue">Windows / Revit 2025</span></div>
-          <div className="revit-import-steps">
-            <span>1. Revit에서 BIM Photo Sync 탭을 엽니다.</span>
-            <span>2. Connect Project에서 이 계정으로 로그인합니다.</span>
-            <span>3. 프로젝트를 선택하거나 새 프로젝트를 생성합니다.</span>
-            <span>4. Sync Rooms와 Sync Floor Plan을 실행합니다.</span>
-          </div>
-        </article>
-
-        <article className="panel">
-          <div className="panel-header"><h2 className="panel-title">모바일 앱 사용</h2><span className="badge green">iOS / Android</span></div>
-          <p className="muted">설치형 테스트는 EAS internal build로 배포합니다. 현장 사용자는 모바일 앱에서 프로젝트와 Room을 선택하고 사진을 업로드합니다.</p>
         </article>
       </section>
     </div>
