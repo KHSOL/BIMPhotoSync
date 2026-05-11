@@ -31,14 +31,6 @@ const logRows = [
   ["2026-03-07 13:22:55", "이관리 (Manager)", "A현장 신축공사", "수정", "공종 설정 (타일)", "기준 공정률 변경", "211.234.45.67"]
 ];
 
-const recentLogins = [
-  ["LM", "이관리 (Manager)", "2026-03-07 14:28:11", "성공"],
-  ["JK", "김작업 (Worker)", "2026-03-07 14:21:33", "성공"],
-  ["BM", "박BIM (BIM Manager)", "2026-03-07 13:55:18", "성공"],
-  ["PA", "프로젝트 관리자", "2026-03-07 13:30:12", "성공"],
-  ["TV", "test.user (Viewer)", "2026-03-07 12:45:02", "실패"]
-];
-
 export default function AuditPage() {
   const [hasSession, setHasSession] = useState(false);
   const [user, setUser] = useState<User | null>(null);
@@ -255,17 +247,13 @@ export default function AuditPage() {
           <section className="panel ref-card">
             <div className="ref-panel-title">
               <h2>최근 로그인 활동</h2>
-              <a href="/audit">전체 보기 <ChevronRight size={14} /></a>
             </div>
-            <div className="login-activity-list">
-              {recentLogins.map(([avatar, name, time, state]) => (
-                <div className="login-activity-row" key={`${name}-${time}`}>
-                  <span>{avatar}</span>
-                  <strong>{name}</strong>
-                  <time>{time}</time>
-                  <em className={state === "성공" ? "success" : "fail"}>{state}</em>
-                </div>
-              ))}
+            <div className="empty compact-empty">
+              <div>
+                <LockKeyhole size={24} />
+                <p>로그인 이력은 아직 실제 이벤트 저장소와 연결되지 않았습니다.</p>
+                <p className="muted">샘플 날짜는 제거했으며, 추후 auth event 테이블을 추가하면 이 영역에 실제 이력을 표시합니다.</p>
+              </div>
             </div>
           </section>
         </aside>

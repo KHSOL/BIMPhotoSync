@@ -649,6 +649,11 @@ a {
   background: var(--gray-50);
 }
 
+.empty.compact-empty {
+  min-height: 132px;
+  padding: 16px;
+}
+
 .empty-state {
   min-height: 320px;
   display: grid;
