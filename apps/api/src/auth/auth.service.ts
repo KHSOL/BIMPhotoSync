@@ -32,13 +32,21 @@ export class AuthService {
   async register(dto: RegisterDto, meta?: { ipAddress?: string | null; userAgent?: string | null }) {
     const existing = await this.prisma.user.findUnique({ where: { email: dto.email.toLowerCase() } });
     if (existing) throw new BadRequestException("Email already registered.");
+    const companyName = dto.company_name?.trim();
+    if (!dto.company_id && !companyName) throw new BadRequestException("Company is required.");
 
     const passwordHash = await bcrypt.hash(dto.password, 12);
     const user = await this.prisma.$transaction(async (tx) => {
-      const existingCompany = await tx.company.findFirst({
-        where: { name: { equals: dto.company_name, mode: "insensitive" } }
-      });
-      const company = existingCompany ?? (await tx.company.create({ data: { name: dto.company_name } }));
+      const selectedCompany = dto.company_id ? await tx.company.findUnique({ where: { id: dto.company_id } }) : null;
+      if (dto.company_id && !selectedCompany) throw new BadRequestException("Selected company not found.");
+      const existingCompany =
+        selectedCompany ??
+        (companyName
+          ? await tx.company.findFirst({
+              where: { name: { equals: companyName, mode: "insensitive" } }
+            })
+          : null);
+      const company = existingCompany ?? (await tx.company.create({ data: { name: companyName ?? "" } }));
       const requestedRole = existingCompany ? UserRole.WORKER : (dto.role ?? UserRole.COMPANY_ADMIN);
       return tx.user.create({
         data: {
@@ -61,6 +69,15 @@ export class AuthService {
       meta
     });
     return this.authResponse(user);
+  }
+
+  async companies() {
+    const companies = await this.prisma.company.findMany({
+      select: { id: true, name: true },
+      orderBy: { name: "asc" },
+      take: 100
+    });
+    return { data: companies };
   }
 
   async login(dto: LoginDto, meta?: { ipAddress?: string | null; userAgent?: string | null }) {

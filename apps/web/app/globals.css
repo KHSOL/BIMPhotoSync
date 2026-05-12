@@ -975,6 +975,18 @@ a {
   font-size: 16px;
 }
 
+.auth-inline-select {
+  width: 100%;
+  min-width: 0;
+  height: 56px;
+  border: 0;
+  outline: 0;
+  color: #111827;
+  background: transparent;
+  padding: 0 40px 0 0;
+  font-size: 16px;
+}
+
 .auth-field-box input::placeholder {
   color: #9ca3af;
 }
