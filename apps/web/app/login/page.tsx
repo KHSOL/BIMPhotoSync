@@ -12,18 +12,28 @@ import {
   User
 } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { FormEvent, ReactNode } from "react";
 import { apiJson, saveSession, type User as SessionUser } from "../client";
 
 type AuthMode = "login" | "register";
 type RegisterRole = "WORKER" | "COMPANY_ADMIN";
+type CompanyMode = "existing" | "new";
 
 type AuthResult = {
   data: {
     access_token: string;
     user: SessionUser;
   };
+};
+
+type CompanyOption = {
+  id: string;
+  name: string;
+};
+
+type CompanyListResult = {
+  data: CompanyOption[];
 };
 
 export default function LoginPage() {
@@ -33,7 +43,10 @@ export default function LoginPage() {
   const [password, setPassword] = useState("");
   const [passwordConfirm, setPasswordConfirm] = useState("");
   const [name, setName] = useState("");
+  const [companyMode, setCompanyMode] = useState<CompanyMode>("existing");
   const [companyName, setCompanyName] = useState("");
+  const [companyId, setCompanyId] = useState("");
+  const [companies, setCompanies] = useState<CompanyOption[]>([]);
   const [registerRole, setRegisterRole] = useState<RegisterRole>("WORKER");
   const [showPassword, setShowPassword] = useState(false);
   const [status, setStatus] = useState("");
@@ -42,6 +55,23 @@ export default function LoginPage() {
   const isRegister = mode === "register";
   const passwordReady = useMemo(() => password.length >= 8, [password]);
 
+  useEffect(() => {
+    if (!isRegister) return;
+    void loadCompanies();
+  }, [isRegister]);
+
+  async function loadCompanies() {
+    try {
+      const json = await apiJson<CompanyListResult>("/auth/companies");
+      setCompanies(json.data);
+      setCompanyId((current) => current || json.data[0]?.id || "");
+      if (json.data.length === 0) setCompanyMode("new");
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : "회사 목록을 불러오지 못했습니다.");
+      setCompanyMode("new");
+    }
+  }
+
   function switchMode(nextMode: AuthMode) {
     setMode(nextMode);
     setStatus("");
@@ -49,13 +79,30 @@ export default function LoginPage() {
     setPasswordConfirm("");
   }
 
+  function switchCompanyMode(nextMode: CompanyMode) {
+    setCompanyMode(nextMode);
+    setStatus("");
+    if (nextMode === "existing") {
+      setRegisterRole("WORKER");
+      setCompanyId((current) => current || companies[0]?.id || "");
+    }
+  }
+
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setStatus("");
 
     if (isRegister) {
-      if (!companyName.trim() || !name.trim()) {
-        setStatus("회사명과 이름을 입력해주세요.");
+      if (!name.trim()) {
+        setStatus("이름을 입력해주세요.");
+        return;
+      }
+      if (companyMode === "existing" && !companyId) {
+        setStatus("소속 회사를 선택해주세요.");
+        return;
+      }
+      if (companyMode === "new" && !companyName.trim()) {
+        setStatus("신규 회사명을 입력해주세요.");
         return;
       }
       if (!passwordReady) {
@@ -75,8 +122,9 @@ export default function LoginPage() {
             email: email.trim(),
             password,
             name: name.trim(),
-            company_name: companyName.trim(),
-            role: registerRole
+            company_id: companyMode === "existing" ? companyId : undefined,
+            company_name: companyMode === "new" ? companyName.trim() : undefined,
+            role: companyMode === "new" ? registerRole : "WORKER"
           }
         : { email: email.trim(), password };
       const json = await apiJson<AuthResult>(isRegister ? "/auth/register" : "/auth/login", {
@@ -114,7 +162,7 @@ export default function LoginPage() {
               <h1>{isRegister ? "회원가입" : "로그인"}</h1>
               <p>
                 {isRegister
-                  ? "회사 단위로 현장 사진과 Room 데이터를 안전하게 분리해 관리합니다."
+                  ? "소속 회사를 선택하거나 신규 회사를 등록해 현장 사진과 Room 데이터를 분리 관리합니다."
                   : "BIM Photo Sync에 접속하여 현장 사진과 Room 정보를 확인하세요."}
               </p>
             </div>
@@ -122,15 +170,60 @@ export default function LoginPage() {
             <form className="auth-form-v2" onSubmit={submit}>
               {isRegister ? (
                 <>
-                  <AuthField icon={<Building2 size={19} />} label="회사명">
-                    <input
-                      autoComplete="organization"
-                      value={companyName}
-                      onChange={(event) => setCompanyName(event.target.value)}
-                      placeholder="회사명을 입력하세요"
-                      required
-                    />
-                  </AuthField>
+                  <div className="auth-field-v2">
+                    <span className="auth-field-label">회사</span>
+                    <div className="auth-role-grid">
+                      <button
+                        className={companyMode === "existing" ? "auth-role-card active" : "auth-role-card"}
+                        type="button"
+                        onClick={() => switchCompanyMode("existing")}
+                        disabled={companies.length === 0}
+                      >
+                        <Building2 size={18} />
+                        <span>
+                          <strong>기존 회사</strong>
+                          <small>등록된 회사에 소속으로 가입</small>
+                        </span>
+                      </button>
+                      <button
+                        className={companyMode === "new" ? "auth-role-card active" : "auth-role-card"}
+                        type="button"
+                        onClick={() => switchCompanyMode("new")}
+                      >
+                        <ShieldCheck size={18} />
+                        <span>
+                          <strong>신규 회사</strong>
+                          <small>새 회사 공간 생성</small>
+                        </span>
+                      </button>
+                    </div>
+                  </div>
+
+                  {companyMode === "existing" ? (
+                    <AuthField icon={<Building2 size={19} />} label="소속 회사 선택">
+                      <select
+                        className="auth-inline-select"
+                        value={companyId}
+                        onChange={(event) => setCompanyId(event.target.value)}
+                        required
+                      >
+                        {companies.map((company) => (
+                          <option key={company.id} value={company.id}>{company.name}</option>
+                        ))}
+                      </select>
+                    </AuthField>
+                  ) : (
+                    <AuthField icon={<Building2 size={19} />} label="신규 회사명">
+                      <input
+                        autoComplete="organization"
+                        value={companyName}
+                        onChange={(event) => setCompanyName(event.target.value)}
+                        placeholder="회사명을 입력하세요"
+                        required
+                      />
+                    </AuthField>
+                  )}
+
                   <AuthField icon={<User size={19} />} label="이름">
                     <input
                       autoComplete="name"
@@ -141,33 +234,40 @@ export default function LoginPage() {
                     />
                   </AuthField>
 
-                  <div className="auth-field-v2">
-                    <span className="auth-field-label">가입 유형</span>
-                    <div className="auth-role-grid">
-                      <button
-                        className={registerRole === "WORKER" ? "auth-role-card active" : "auth-role-card"}
-                        type="button"
-                        onClick={() => setRegisterRole("WORKER")}
-                      >
-                        <User size={18} />
-                        <span>
-                          <strong>일반</strong>
-                          <small>사진 업로드와 조회</small>
-                        </span>
-                      </button>
-                      <button
-                        className={registerRole === "COMPANY_ADMIN" ? "auth-role-card active" : "auth-role-card"}
-                        type="button"
-                        onClick={() => setRegisterRole("COMPANY_ADMIN")}
-                      >
-                        <ShieldCheck size={18} />
-                        <span>
-                          <strong>상위 관리자</strong>
-                          <small>Revit 연동과 보고서 생성</small>
-                        </span>
-                      </button>
+                  {companyMode === "new" ? (
+                    <div className="auth-field-v2">
+                      <span className="auth-field-label">가입 유형</span>
+                      <div className="auth-role-grid">
+                        <button
+                          className={registerRole === "WORKER" ? "auth-role-card active" : "auth-role-card"}
+                          type="button"
+                          onClick={() => setRegisterRole("WORKER")}
+                        >
+                          <User size={18} />
+                          <span>
+                            <strong>일반</strong>
+                            <small>사진 업로드와 조회</small>
+                          </span>
+                        </button>
+                        <button
+                          className={registerRole === "COMPANY_ADMIN" ? "auth-role-card active" : "auth-role-card"}
+                          type="button"
+                          onClick={() => setRegisterRole("COMPANY_ADMIN")}
+                        >
+                          <ShieldCheck size={18} />
+                          <span>
+                            <strong>상위 관리자</strong>
+                            <small>Revit 연동과 보고서 생성</small>
+                          </span>
+                        </button>
+                      </div>
                     </div>
-                  </div>
+                  ) : (
+                    <div className="auth-rule ready">
+                      <CheckCircle2 size={18} />
+                      <span>기존 회사 가입자는 일반 사용자 권한으로 생성됩니다.</span>
+                    </div>
+                  )}
                 </>
               ) : null}
 

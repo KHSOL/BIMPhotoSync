@@ -19,6 +19,11 @@ export class AuthController {
     return this.auth.login(dto, requestMeta(req));
   }
 
+  @Get("companies")
+  companies() {
+    return this.auth.companies();
+  }
+
   @Get("me")
   @UseGuards(JwtAuthGuard)
   me(@CurrentUser() user: JwtUser) {

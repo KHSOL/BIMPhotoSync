@@ -58,6 +58,33 @@ export default function AuditPage() {
     void loadProjectAudit(token, nextProjectId).catch((error) => setStatus(error instanceof Error ? error.message : "프로젝트 감사 정보 조회 실패"));
   }
 
+  function exportMembersToExcel() {
+    const projectName = projects.find((project) => project.id === projectId)?.name ?? "프로젝트";
+    if (members.length === 0) {
+      setStatus("내보낼 프로젝트 참여자가 없습니다.");
+      return;
+    }
+    const rows = members.map((member) => [
+      member.user.name,
+      member.user.email,
+      member.user.company_name ?? "-",
+      new Date(member.created_at).toLocaleString("ko-KR")
+    ]);
+    const html = `<!doctype html><html><head><meta charset="utf-8"></head><body>
+      <table border="1">
+        <tbody>
+          <tr><th colspan="4">프로젝트명</th></tr>
+          <tr><td colspan="4">${escapeHtml(projectName)}</td></tr>
+          <tr><td colspan="4"></td></tr>
+          <tr><th>참여자 이름</th><th>이메일</th><th>회사</th><th>참여일</th></tr>
+          ${rows.map((row) => `<tr>${row.map((cell) => `<td>${escapeHtml(cell)}</td>`).join("")}</tr>`).join("")}
+        </tbody>
+      </table>
+    </body></html>`;
+    downloadBlob(new Blob(["\ufeff", html], { type: "application/vnd.ms-excel;charset=utf-8" }), `${safeFilename(projectName)}_참여자목록.xls`);
+    setStatus(`${members.length}명의 프로젝트 참여자를 엑셀 파일로 내보냈습니다.`);
+  }
+
   const selectedMember = members.find((member) => member.id === selectedMemberId) ?? members[0];
   const filteredEvents = useMemo(() => {
     const userId = selectedMember?.user.id;
@@ -94,7 +121,7 @@ export default function AuditPage() {
           <h1 className="page-title">Audit</h1>
           <p className="muted">프로젝트 참여자, 활동 로그, 최근 로그인 이벤트를 실제 API 데이터로 조회합니다.</p>
         </div>
-        <button className="filter-button" type="button"><Download size={16} />내보내기</button>
+        <button className="filter-button" type="button" onClick={exportMembersToExcel}><Download size={16} />엑셀로 내보내기</button>
       </header>
 
       <section className="filter-row audit-filter-row">
@@ -207,4 +234,21 @@ function Metric({ icon, label, value, sub, tone }: { icon: React.ReactNode; labe
       <div><span>{label}</span><strong>{value}</strong><small>{sub}</small></div>
     </article>
   );
+}
+
+function downloadBlob(blob: Blob, filename: string) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+function safeFilename(value: string) {
+  return value.replace(/[\\/:*?"<>|]+/g, "_").trim() || "프로젝트";
+}
+
+function escapeHtml(value: string) {
+  return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 }
