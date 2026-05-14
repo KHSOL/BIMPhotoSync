@@ -420,6 +420,8 @@ UI는 `designsystem.png`의 운영형 대시보드 방향을 따릅니다.
 | Layout | 8px spacing grid, compact operational density |
 | Components | 카드 radius 8px 이하, 마케팅 페이지보다 업무 도구 밀도 우선 |
 
+반응형 레이아웃은 모든 운영 페이지에서 viewport 기준 가로 스크롤이 생기지 않도록 관리합니다. 페이지/패널/grid/table 컨테이너는 `min-width: 0`과 `max-width: 100%`를 기본으로 두고, 화면이 좁아질 때는 고정 최소폭 대신 auto-fit grid, 말줄임, compact table cell padding을 사용합니다. 모바일 폭에서는 사이드바 내비게이션도 가로 스크롤 대신 줄바꿈 가능한 아이콘 행으로 전환합니다.
+
 ## OG 이미지
 
 웹 OG 이미지는 `apps/web/public/OGimg.png`를 사용합니다. Next.js metadata는 `/OGimg.png`를 `1200x630` PNG로 선언하고, `NEXT_PUBLIC_SITE_URL`, `VERCEL_PROJECT_PRODUCTION_URL`, `VERCEL_URL` 순서로 `metadataBase`를 계산합니다. 파일은 링크 미리보기 표준 비율인 `1200x630`으로 맞추고, 원본 그래픽을 contain 방식으로 배치해 카카오톡, Slack, GitHub, X/Twitter 등에서 중앙 크롭되어도 핵심 텍스트와 제품 화면이 잘리지 않도록 관리합니다. 루트의 `OGimg.png`는 README 미리보기와 원본 관리용 동일 이미지입니다.

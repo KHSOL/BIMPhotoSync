@@ -3595,3 +3595,329 @@ video {
     grid-column: 1 / -1;
   }
 }
+
+/* Viewport-safe responsive pass: keep every page inside the visible width. */
+html,
+body,
+#__next {
+  max-width: 100%;
+  overflow-x: clip;
+}
+
+body {
+  min-width: 0;
+}
+
+:where(.shell, .layout, .content, .reference-page, .viewer-page, .auth-page) {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  overflow-x: clip;
+}
+
+.shell {
+  max-width: 100vw;
+}
+
+.content {
+  overflow-x: clip;
+  overflow-y: auto;
+}
+
+:where(
+  .content,
+  .panel,
+  .ref-card,
+  .dashboard-grid,
+  .bottom-grid,
+  .dashboard-panels,
+  .project-grid,
+  .project-admin-layout,
+  .admin-grid,
+  .mypage-grid,
+  .member-audit-grid,
+  .rooms-layout,
+  .reports-layout,
+  .audit-layout,
+  .viewer-layout,
+  .viewer-side,
+  .viewer-tree,
+  .filter-row,
+  .filter-panel,
+  .viewer-toolbar,
+  .audit-filter-row,
+  .rooms-filter-row,
+  .toolbar,
+  .photo-toolbar,
+  .room-toolbar,
+  .upload-grid,
+  .status-summary-grid,
+  .metric-grid,
+  .photo-grid,
+  .room-card-grid,
+  .strip-photos,
+  .project-row,
+  .recent-photo-row,
+  .report-row,
+  .login-activity-row,
+  .job-queue-grid,
+  .status-summary-card,
+  .auth-card-v2,
+  .auth-form-side,
+  .auth-form-wrap
+) > * {
+  min-width: 0;
+}
+
+:where(.panel-header, .page-heading-row, .header-actions, .ref-panel-title, .pagination-row, .room-detail-head, .report-detail-head) {
+  min-width: 0;
+  max-width: 100%;
+}
+
+:where(.page-title, .panel-title, .section-title, .ref-panel-title h2, .room-detail-head h2, .report-detail-head h2) {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+:where(
+  .project-row strong,
+  .project-row small,
+  .project-row em,
+  .room-card strong,
+  .room-card span,
+  .metric-card span,
+  .metric-card small,
+  .recent-photo-row strong,
+  .recent-photo-row span,
+  .recent-photo-row time,
+  .report-row strong,
+  .report-row span,
+  .login-activity-row strong,
+  .login-activity-row span,
+  .login-activity-row time,
+  .member-row strong,
+  .member-row span,
+  .tree-group button span,
+  .strip-photo strong,
+  .strip-photo span
+) {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+:where(.button, .filter-button, .input-button, .danger-button, .small-button, .page-pill, .auth-submit) {
+  max-width: 100%;
+  min-width: 0;
+  overflow: hidden;
+}
+
+:where(.button, .filter-button, .input-button, .danger-button, .small-button, .auth-submit) > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.room-table-wrap {
+  max-width: 100%;
+  overflow-x: clip;
+}
+
+.room-table {
+  table-layout: fixed;
+}
+
+.ref-table {
+  min-width: 0;
+  width: 100%;
+}
+
+.ref-table th,
+.ref-table td {
+  min-width: 0;
+  max-width: 1px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ref-table td:first-child {
+  display: table-cell;
+}
+
+.table-actions {
+  min-width: 0;
+  flex-wrap: wrap;
+  row-gap: 6px;
+}
+
+.filter-row,
+.filter-panel,
+.audit-filter-row,
+.rooms-filter-row,
+.viewer-toolbar,
+.toolbar,
+.photo-toolbar,
+.room-toolbar,
+.upload-grid {
+  width: 100%;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 176px), 1fr));
+}
+
+.dashboard-grid {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr));
+}
+
+.bottom-grid,
+.dashboard-panels,
+.dashboard-panels.bottom,
+.project-grid,
+.admin-grid,
+.mypage-grid,
+.member-audit-grid {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr));
+}
+
+.project-admin-layout {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 340px), 1fr));
+}
+
+.rooms-layout,
+.reports-layout,
+.audit-layout {
+  grid-template-columns: minmax(0, 1fr) minmax(min(100%, 320px), 0.42fr);
+}
+
+.viewer-layout {
+  grid-template-columns: minmax(150px, 0.22fr) minmax(0, 1fr) minmax(220px, 0.32fr);
+}
+
+.project-row {
+  grid-template-columns: auto minmax(0, 1fr) auto;
+}
+
+.project-row-actions {
+  grid-column: 2 / -1;
+  justify-content: flex-start;
+  min-width: 0;
+  flex-wrap: wrap;
+}
+
+.photo-tabs,
+.dashboard-project-filter {
+  width: 100%;
+  min-width: 0;
+  max-width: 360px;
+}
+
+@media (max-width: 1180px) {
+  .rooms-layout,
+  .reports-layout,
+  .audit-layout,
+  .viewer-layout {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 720px) {
+  .shell {
+    overflow-x: clip;
+  }
+
+  .sidebar {
+    flex-wrap: wrap;
+    overflow-x: clip;
+  }
+
+  .sidebar-brand {
+    flex: 0 0 44px;
+    width: 44px;
+    min-width: 44px;
+  }
+
+  .sidebar-nav {
+    flex: 1 1 min(100%, 260px);
+    flex-wrap: wrap;
+    overflow-x: clip;
+  }
+
+  .sidebar-nav a,
+  .sidebar-auth-button {
+    width: 44px;
+    min-width: 44px;
+    height: 44px;
+  }
+
+  .sidebar-footer {
+    margin-left: 0;
+    flex: 0 1 auto;
+    flex-wrap: wrap;
+  }
+
+  .content {
+    width: 100%;
+    overflow-x: clip;
+  }
+
+  .room-table {
+    font-size: 12px;
+  }
+
+  .room-table th,
+  .room-table td {
+    padding: 9px 6px;
+  }
+
+  .filter-row,
+  .filter-panel,
+  .audit-filter-row,
+  .rooms-filter-row,
+  .viewer-toolbar,
+  .toolbar,
+  .photo-toolbar,
+  .room-toolbar,
+  .upload-grid,
+  .bottom-grid,
+  .dashboard-panels,
+  .dashboard-panels.bottom,
+  .project-grid,
+  .admin-grid,
+  .mypage-grid,
+  .member-audit-grid,
+  .project-admin-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .status-summary-card,
+  .recent-photo-row,
+  .report-row,
+  .login-activity-row,
+  .job-queue-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 520px) {
+  .panel,
+  .ref-card {
+    padding: 12px;
+  }
+
+  .room-table {
+    font-size: 11px;
+  }
+
+  .room-table th,
+  .room-table td {
+    padding: 8px 4px;
+  }
+
+  .badge,
+  .page-pill,
+  .small-button {
+    padding-inline: 7px;
+  }
+}
