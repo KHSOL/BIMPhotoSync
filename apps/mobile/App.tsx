@@ -81,7 +81,7 @@ export default function App() {
   const [rooms, setRooms] = useState<Room[]>([]);
   const [roomId, setRoomId] = useState("");
   const [images, setImages] = useState<ImagePicker.ImagePickerAsset[]>([]);
-  const [status, setStatus] = useState("로그인 후 현장 사진을 실에 연결하세요.");
+  const [status, setStatus] = useState("로그인 후 현장 사진을 방에 연결하세요.");
   const [uploading, setUploading] = useState(false);
   const [meta, setMeta] = useState({
     work_surface: "FLOOR",
@@ -165,7 +165,7 @@ export default function App() {
     });
     setRooms(json.data);
     setRoomId(json.data[0]?.id ?? "");
-    setStatus(`${json.data.length}개 실을 불러왔습니다.`);
+    setStatus(`${json.data.length}개 방을 불러왔습니다.`);
   }
 
   async function takePhoto() {
@@ -197,7 +197,7 @@ export default function App() {
 
   async function upload() {
     if (!token || !projectId || !roomId || images.length === 0) {
-      Alert.alert("필수값 확인", "로그인, 프로젝트, 실, 사진을 모두 선택하세요.");
+      Alert.alert("필수값 확인", "로그인, 프로젝트, 방, 사진을 모두 선택하세요.");
       return;
     }
 
@@ -234,7 +234,7 @@ export default function App() {
 
       setImages([]);
       setStatus("사진 업로드가 완료됐고 AI 분석 큐에 등록됐습니다.");
-      Alert.alert("업로드 완료", "사진이 실에 연결됐습니다.");
+      Alert.alert("업로드 완료", "사진이 방에 연결됐습니다.");
     } finally {
       setUploading(false);
     }
@@ -247,7 +247,7 @@ export default function App() {
         <View style={styles.header}>
           <View>
             <Text style={styles.logo}>BIM Photo Sync</Text>
-            <Text style={styles.subtitle}>실 기준 현장 사진 업로드</Text>
+            <Text style={styles.subtitle}>방 기준 현장 사진 업로드</Text>
           </View>
           <Text style={styles.userBadge}>{user ? roleLabel(user.role) : "방문자"}</Text>
         </View>
@@ -314,7 +314,7 @@ export default function App() {
         </Section>
 
         <Section title="사진 정보">
-          <Text style={styles.label}>실</Text>
+          <Text style={styles.label}>방</Text>
           <View style={styles.chipGrid}>
             {rooms.map((room) => (
               <Pressable key={room.id} style={[styles.chip, roomId === room.id && styles.chipActive]} onPress={() => setRoomId(room.id)}>
@@ -325,7 +325,7 @@ export default function App() {
               </Pressable>
             ))}
           </View>
-          {selectedRoom ? <Text style={styles.caption}>선택 실: {selectedRoom.room_name}</Text> : null}
+          {selectedRoom ? <Text style={styles.caption}>선택 방: {selectedRoom.room_name}</Text> : null}
           <Selector label="공사면" value={meta.work_surface} values={surfaces} onChange={(work_surface) => setMeta({ ...meta, work_surface })} />
           <Selector label="공종" value={meta.trade} values={trades} onChange={(trade) => setMeta({ ...meta, trade })} />
           <Input label="작업일자" value={meta.work_date} onChangeText={(work_date) => setMeta({ ...meta, work_date })} />

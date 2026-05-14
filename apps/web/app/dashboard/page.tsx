@@ -134,7 +134,7 @@ export default function DashboardPage() {
       </header>
 
       <section className="metric-grid six">
-        <Metric icon={<Home />} label="실" value={summary.totals.rooms} sub="동기화된 실" tone="blue" />
+        <Metric icon={<Home />} label="방" value={summary.totals.rooms} sub="동기화된 방" tone="blue" />
         <Metric icon={<Camera />} label="사진" value={summary.totals.photos} sub="업로드 사진" tone="sky" />
         <Metric icon={<CheckCircle2 />} label="AI 분석 완료" value={summary.totals.analyzed_photos} sub="분석 내용 저장" tone="green" />
         <Metric icon={<AlertCircle />} label="이슈 사진" value={summary.totals.issue_photos} sub="차단 상태" tone="red" />
@@ -155,7 +155,7 @@ export default function DashboardPage() {
         </article>
 
         <article className="panel ref-card">
-          <PanelTitle title="층별 실 분포" href="/rooms" />
+          <PanelTitle title="층별 방 분포" href="/rooms" />
           <div className="level-bar-list">
             {summary.level_distribution.length > 0 ? (
               summary.level_distribution.map((row) => {
@@ -164,7 +164,7 @@ export default function DashboardPage() {
                   <div className="level-bar-row" key={row.level_name}>
                     <div className="level-bar-label">
                       <strong>{row.level_name}</strong>
-                      <small>{row.count.toLocaleString()}개 실</small>
+                      <small>{row.count.toLocaleString()}개 방</small>
                     </div>
                     <div className="level-bar-track" aria-label={`${row.level_name} ${percent}%`}>
                       <span style={{ "--value": `${percent}%` } as React.CSSProperties} />
@@ -174,7 +174,7 @@ export default function DashboardPage() {
                 );
               })
             ) : (
-              <p className="muted">아직 동기화된 실이 없습니다.</p>
+              <p className="muted">아직 동기화된 방이 없습니다.</p>
             )}
           </div>
         </article>

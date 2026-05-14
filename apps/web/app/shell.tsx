@@ -8,7 +8,7 @@ import { canAccessAdminBoards, clearSession, isSuperAdmin, readSession, userInit
 const navItems = [
   { href: "/dashboard", label: "대시보드", icon: Home },
   { href: "/projects", label: "프로젝트", icon: Building2 },
-  { href: "/rooms", label: "실 목록", icon: MapPinned },
+  { href: "/rooms", label: "방 목록", icon: MapPinned },
   { href: "/photos", label: "사진", icon: Images },
   { href: "/reports", label: "보고서", icon: FileText, managerOnly: true },
   { href: "/viewer", label: "평면도", icon: Layers },
