@@ -162,8 +162,8 @@ export default function LoginPage() {
               <h1>{isRegister ? "회원가입" : "로그인"}</h1>
               <p>
                 {isRegister
-                  ? "소속 회사를 선택하거나 신규 회사를 등록해 현장 사진과 실 데이터를 분리 관리합니다."
-                  : "BIM Photo Sync에 접속하여 현장 사진과 실 정보를 확인하세요."}
+                  ? "소속 회사를 선택하거나 신규 회사를 등록해 현장 사진과 방 데이터를 분리 관리합니다."
+                  : "BIM Photo Sync에 접속하여 현장 사진과 방 정보를 확인하세요."}
               </p>
             </div>
 

@@ -66,7 +66,7 @@ export default function DrawingViewer({ mode }: { mode: DrawingViewerMode }) {
   const [status, setStatus] = useState(
     mode === "floorPlans"
       ? "동기화된 평면도 구역을 불러오는 중입니다."
-      : "동기화된 시트와 실 구역을 불러오는 중입니다."
+      : "동기화된 시트와 방 구역을 불러오는 중입니다."
   );
 
   const isFloorPlanMode = mode === "floorPlans";
@@ -213,7 +213,7 @@ export default function DrawingViewer({ mode }: { mode: DrawingViewerMode }) {
       const roomCount = floorPlanJson.data.reduce((sum, plan) => sum + plan.rooms.length, 0);
       setStatus(
         floorPlanJson.data.length > 0
-          ? `${floorPlanJson.data.length}개 평면도와 ${roomCount}개 실 구역을 불러왔습니다.`
+          ? `${floorPlanJson.data.length}개 평면도와 ${roomCount}개 방 구역을 불러왔습니다.`
           : "동기화된 평면도가 없습니다."
       );
       return;
@@ -221,7 +221,7 @@ export default function DrawingViewer({ mode }: { mode: DrawingViewerMode }) {
 
     setStatus(
       sheetJson.data.length > 0
-        ? `${sheetJson.data.length}개 시트와 ${sheetJson.data.reduce((sum, sheet) => sum + sheet.overlays.length, 0)}개 실 구역을 불러왔습니다.`
+        ? `${sheetJson.data.length}개 시트와 ${sheetJson.data.reduce((sum, sheet) => sum + sheet.overlays.length, 0)}개 방 구역을 불러왔습니다.`
         : "동기화된 Revit 시트가 없습니다."
     );
   }
@@ -387,8 +387,8 @@ export default function DrawingViewer({ mode }: { mode: DrawingViewerMode }) {
         <aside className="viewer-side">
           <section className="panel ref-card selected-room-card">
             <div className="room-detail-head">
-              <h2>선택된 실</h2>
-              <button className="icon-button" type="button" onClick={() => setSelectedRoomId("")} aria-label="실 선택 해제">
+              <h2>선택된 방</h2>
+              <button className="icon-button" type="button" onClick={() => setSelectedRoomId("")} aria-label="방 선택 해제">
                 <X size={18} />
               </button>
             </div>
@@ -406,7 +406,7 @@ export default function DrawingViewer({ mode }: { mode: DrawingViewerMode }) {
                   <dd>{selectedPlanRoom?.level_name ?? selectedOverlay?.room?.level_name ?? selectedPlan?.level_name ?? "-"}</dd>
                   <dt>면적</dt>
                   <dd>{selectedRoomArea !== null ? `${selectedRoomArea} m²` : "-"}</dd>
-                  <dt>실 ID</dt>
+                  <dt>방 ID</dt>
                   <dd>
                     <code>{selectedRoom.bim_photo_room_id}</code>
                   </dd>
@@ -420,7 +420,7 @@ export default function DrawingViewer({ mode }: { mode: DrawingViewerMode }) {
                     사진 업로드 <ChevronRight size={15} />
                   </a>
                   <a className="button secondary" href={selectedPhotosHref}>
-                    실 사진 보기
+                    방 사진 보기
                   </a>
                 </div>
               </>
@@ -433,7 +433,7 @@ export default function DrawingViewer({ mode }: { mode: DrawingViewerMode }) {
             <dl className="detail-definition">
               <dt>{isFloorPlanMode ? "평면도" : "시트"}</dt>
               <dd>{isFloorPlanMode ? selectedPlan?.view_name ?? "-" : selectedSheet ? `${selectedSheet.sheet_number} · ${selectedSheet.sheet_name}` : "-"}</dd>
-              <dt>실 구역</dt>
+              <dt>방 구역</dt>
               <dd>{isFloorPlanMode ? selectedPlan?.rooms.length ?? 0 : selectedSheet?.overlays.length ?? 0}</dd>
               <dt>프로젝트</dt>
               <dd>{projects.find((project) => project.id === projectId)?.name ?? "-"}</dd>
@@ -454,7 +454,7 @@ export default function DrawingViewer({ mode }: { mode: DrawingViewerMode }) {
       <section className="panel ref-card viewer-photo-strip">
         <div className="ref-panel-title">
           <h2>
-            {selectedRoom ? formatRoomTitle(selectedRoom) : "실"} 관련 사진 <span className="count-badge">{photos.length}</span>
+            {selectedRoom ? formatRoomTitle(selectedRoom) : "방"} 관련 사진 <span className="count-badge">{photos.length}</span>
           </h2>
           <a href={selectedPhotosHref}>
             모든 사진 보기 <ChevronRight size={14} />
@@ -463,14 +463,14 @@ export default function DrawingViewer({ mode }: { mode: DrawingViewerMode }) {
         <div className="strip-photos">
           {photos.slice(0, 6).map((photo, index) => (
             <article className={index === 0 ? "strip-photo active" : "strip-photo"} key={photo.id}>
-              {photo.preview_url ? <img src={photo.preview_url} alt={photo.description ?? "실 사진"} /> : <div className="photo-fallback" />}
+              {photo.preview_url ? <img src={photo.preview_url} alt={photo.description ?? "방 사진"} /> : <div className="photo-fallback" />}
               <strong>{photo.work_date}</strong>
               <span>
                 {labelForOption(defaultSurfaceOptions, photo.work_surface)} · {labelForOption(defaultTradeOptions, photo.trade)}
               </span>
             </article>
           ))}
-          {photos.length === 0 ? <p className="muted">이 실에 등록된 사진이 없습니다.</p> : null}
+          {photos.length === 0 ? <p className="muted">이 방에 등록된 사진이 없습니다.</p> : null}
           <a className="more-photo" href={selectedPhotosHref}>
             <Camera size={25} />
             더보기
@@ -511,14 +511,14 @@ function SheetViewer({
             <span>시트 PDF를 불러오는 중이거나 PDF 내보내기가 없는 시트입니다.</span>
           </div>
         )}
-        <svg className="sheet-overlay-svg" viewBox="0 0 1 1" preserveAspectRatio="none" aria-label="실 오버레이">
+        <svg className="sheet-overlay-svg" viewBox="0 0 1 1" preserveAspectRatio="none" aria-label="방 오버레이">
           {sheet.overlays.map((overlay) => (
             <SheetRoomShape key={overlay.id} overlay={overlay} selected={overlay.bim_photo_room_id === selectedRoomId} onSelect={onSelect} />
           ))}
         </svg>
         <div className="sheet-room-hint">
           <MousePointer2 size={15} />
-          <span>{selectedOverlay ? formatRoomTitle(selectedOverlay) : "도면 위 파란 실 영역을 선택하세요."}</span>
+          <span>{selectedOverlay ? formatRoomTitle(selectedOverlay) : "도면 위 파란 방 영역을 선택하세요."}</span>
         </div>
       </div>
     </div>
@@ -766,5 +766,5 @@ function formatRoomTitle(room: FloorPlanRoom | RevitRoomOverlay) {
 
 function formatBimRoomFallback(bimPhotoRoomId: string) {
   const id = bimPhotoRoomId.startsWith("rm_") ? bimPhotoRoomId.slice(3) : bimPhotoRoomId;
-  return `실 ${id.slice(0, 8)}`;
+  return `방 ${id.slice(0, 8)}`;
 }

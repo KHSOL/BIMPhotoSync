@@ -4,7 +4,6 @@ import {
   Building2,
   FolderPlus,
   KeyRound,
-  Link2,
   RefreshCw,
   ShieldCheck,
   X
@@ -148,13 +147,7 @@ export default function ProjectsPage() {
     setActiveProjectId(project.id);
     saveProjectId(project.id);
     setGeneratedKey("");
-    setStatus(`${project.name} 프로젝트를 실 목록, 사진, 평면도의 작업 기준으로 설정했습니다.`);
-  }
-
-  function showRevitImportGuide() {
-    setStatus(
-      "Revit 2025에서 BIM Photo Sync 탭의 프로젝트 연결을 실행하고, 웹에서 생성한 프로젝트를 선택한 뒤 실과 평면도를 동기화하세요."
-    );
+    setStatus(`${project.name} 프로젝트를 방 목록, 사진, 평면도의 작업 기준으로 설정했습니다.`);
   }
 
   if (!token) {
@@ -184,7 +177,7 @@ export default function ProjectsPage() {
             <div>
               <p className="eyebrow-text">회사 프로젝트</p>
               <h1 className="page-title">우리 회사 프로젝트 목록</h1>
-              <p className="muted">실 목록, 사진, 평면도, Revit Add-in은 작업 프로젝트 기준으로 동작합니다.</p>
+              <p className="muted">방 목록, 사진, 평면도, Revit Add-in은 작업 프로젝트 기준으로 동작합니다.</p>
             </div>
             <button
               aria-label="프로젝트 새로고침"
@@ -240,7 +233,7 @@ export default function ProjectsPage() {
               <div className="panel-header">
                 <div>
                   <h2 className="panel-title">새 프로젝트 생성</h2>
-                  <p className="muted">프로젝트를 먼저 만든 뒤 Revit Add-in에서 같은 프로젝트를 선택해 실과 시트를 동기화합니다.</p>
+                  <p className="muted">프로젝트를 먼저 만든 뒤 Revit Add-in에서 같은 프로젝트를 선택해 방과 시트를 동기화합니다.</p>
                 </div>
                 <span className="badge blue">관리자</span>
               </div>
@@ -293,11 +286,8 @@ export default function ProjectsPage() {
                 <span>1. Revit 2025에서 모델을 엽니다.</span>
                 <span>2. BIM Photo Sync 탭에서 프로젝트 연결을 실행합니다.</span>
                 <span>3. 웹에서 만든 프로젝트를 선택합니다.</span>
-                <span>4. 실과 평면도를 동기화합니다.</span>
+                <span>4. 방과 평면도를 동기화합니다.</span>
               </div>
-              <button className="button project-wide-button" onClick={showRevitImportGuide} type="button">
-                <Link2 size={16} /> Revit 연결 안내
-              </button>
             </div>
           </div>
         ) : (

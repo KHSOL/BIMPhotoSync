@@ -25,7 +25,7 @@ export default function RoomsPage() {
   const [selectedRoomId, setSelectedRoomId] = useState("");
   const [query, setQuery] = useState("");
   const [page, setPage] = useState(1);
-  const [status, setStatus] = useState("실 목록을 불러오는 중입니다.");
+  const [status, setStatus] = useState("방 목록을 불러오는 중입니다.");
 
   useEffect(() => {
     const session = readSession();
@@ -62,7 +62,7 @@ export default function RoomsPage() {
     setRooms(json.data);
     setPage(1);
     setSelectedRoomId((current) => (json.data.some((room) => room.id === current) ? current : json.data[0]?.id ?? ""));
-    setStatus(`${json.data.length}개 실을 불러왔습니다.`);
+    setStatus(`${json.data.length}개 방을 불러왔습니다.`);
   }
 
   function changeProject(nextProjectId: string) {
@@ -101,10 +101,10 @@ export default function RoomsPage() {
   const selectedPhotosHref = selectedRoom ? `/photos?project_id=${projectId}&room_id=${selectedRoom.id}` : "/photos";
   const mappedRooms = rooms.filter((room) => room.bim_photo_room_id).length;
   const roomSummary = [
-    ["전체 실", String(rooms.length), "조회됨", "blue"],
+    ["전체 방", String(rooms.length), "조회됨", "blue"],
     ["BIM ID 연결", String(mappedRooms), `${rooms.length ? Math.round((mappedRooms / rooms.length) * 100) : 0}%`, "green"],
     ["현재 표시", String(visibleRooms.length), `${page} / ${pageCount}`, "orange"],
-    ["선택 실", selectedRoom?.room_number ?? "-", selectedRoom?.level_name ?? "-", "red"]
+    ["선택 방", selectedRoom?.room_number ?? "-", selectedRoom?.level_name ?? "-", "red"]
   ];
 
   if (!token) {
@@ -112,7 +112,7 @@ export default function RoomsPage() {
       <section className="panel empty-state">
         <KeyRound size={28} />
         <h1 className="panel-title">로그인이 필요합니다</h1>
-        <p className="muted">실 목록은 회사/프로젝트 권한 안에서만 조회됩니다.</p>
+        <p className="muted">방 목록은 회사/프로젝트 권한 안에서만 조회됩니다.</p>
         <a className="button" href="/login">
           로그인으로 이동
         </a>
@@ -124,8 +124,8 @@ export default function RoomsPage() {
     <div className="reference-page">
       <header className="page-heading-row">
         <div>
-          <h1 className="page-title">실 목록</h1>
-          <p className="muted">프로젝트의 실을 확인하고 사진과 도면으로 이동합니다.</p>
+          <h1 className="page-title">방 목록</h1>
+          <p className="muted">프로젝트의 방을 확인하고 사진과 도면으로 이동합니다.</p>
         </div>
         <div className="header-actions">
           <button className="filter-button" type="button" onClick={exportRoomsCsv} disabled={rooms.length === 0}>
@@ -152,7 +152,7 @@ export default function RoomsPage() {
         </select>
         <label className="search-box">
           <Search size={17} />
-          <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="실 이름 / 번호 / 층 검색" />
+          <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="방 이름 / 번호 / 층 검색" />
         </label>
         <button className="filter-button" type="button" onClick={() => loadRooms().catch((err) => setStatus(err.message))}>
           <Filter size={16} /> 필터
@@ -164,7 +164,7 @@ export default function RoomsPage() {
 
       <section className="rooms-layout">
         <article className="panel ref-card room-table-card">
-          <h2 className="section-title">전체 {rooms.length}개 실</h2>
+          <h2 className="section-title">전체 {rooms.length}개 방</h2>
           <div className="status-summary-grid">
             {roomSummary.map(([label, value, percent, tone]) => (
               <div className="status-summary-card" key={label}>
@@ -181,8 +181,8 @@ export default function RoomsPage() {
               <thead>
                 <tr>
                   <th>선택</th>
-                  <th>실 번호</th>
-                  <th>실 이름</th>
+                  <th>방 번호</th>
+                  <th>방 이름</th>
                   <th>층</th>
                   <th>공정 진행률</th>
                   <th>상태</th>
@@ -220,7 +220,7 @@ export default function RoomsPage() {
               <div className="empty">
                 <div>
                   <Building2 size={28} />
-                  <p>표시할 실이 없습니다.</p>
+                  <p>표시할 방이 없습니다.</p>
                   <p className="muted">{status}</p>
                 </div>
               </div>
@@ -244,10 +244,10 @@ export default function RoomsPage() {
         <aside className="panel ref-card room-detail-panel">
           <div className="room-detail-head">
             <div>
-              <h2>{selectedRoom ? `${selectedRoom.room_number ?? ""} ${selectedRoom.room_name}` : "실 선택"}</h2>
+              <h2>{selectedRoom ? `${selectedRoom.room_number ?? ""} ${selectedRoom.room_name}` : "방 선택"}</h2>
               <span className="badge blue">연동됨</span>
             </div>
-            <button className="icon-button" type="button" onClick={() => setSelectedRoomId("")} aria-label="실 선택 해제"><X size={18} /></button>
+            <button className="icon-button" type="button" onClick={() => setSelectedRoomId("")} aria-label="방 선택 해제"><X size={18} /></button>
           </div>
           <div className="tab-row">
             <button className="active" type="button">개요</button>
@@ -261,8 +261,8 @@ export default function RoomsPage() {
           </div>
           <dl className="detail-definition">
             <dt>층</dt><dd>{selectedRoom?.level_name ?? "-"}</dd>
-            <dt>실 번호</dt><dd>{selectedRoom?.room_number ?? "-"}</dd>
-            <dt>실 이름</dt><dd>{selectedRoom?.room_name ?? "-"}</dd>
+            <dt>방 번호</dt><dd>{selectedRoom?.room_number ?? "-"}</dd>
+            <dt>방 이름</dt><dd>{selectedRoom?.room_name ?? "-"}</dd>
             <dt>Revit 요소</dt><dd>{selectedRoom?.revit_element_id ?? "-"}</dd>
             <dt>BIM_PHOTO_ROOM_ID</dt><dd><code>{selectedRoom?.bim_photo_room_id ?? "-"}</code></dd>
           </dl>

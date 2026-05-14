@@ -234,7 +234,7 @@ export default function ReportsPage() {
       <header className="page-heading-row">
         <div>
           <h1 className="page-title">보고서</h1>
-          <p className="muted">사진 분석 결과를 프로젝트, 실, 공사면, 공종, 작업일자, 작성자 기준으로 보고서화합니다.</p>
+          <p className="muted">사진 분석 결과를 프로젝트, 방, 공사면, 공종, 작업일자, 작성자 기준으로 보고서화합니다.</p>
         </div>
         <button className="button" type="button" disabled={!canGenerate || generating} onClick={generateReport}>
           <Plus size={16} /> {generating ? "생성 중" : "보고서 생성"}
@@ -256,7 +256,7 @@ export default function ReportsPage() {
           </select>
         </label>
         <label className="field compact">
-          <span className="label">실</span>
+          <span className="label">방</span>
           <select className="input" value={filters.room_id} onChange={(event) => setFilters({ ...filters, room_id: event.target.value })}>
             <option value="">전체</option>
             {rooms.map((room) => <option key={room.id} value={room.id}>{room.level_name ?? "-"} / {room.room_number ?? ""} {room.room_name}</option>)}

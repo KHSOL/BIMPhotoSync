@@ -256,6 +256,6 @@ function resourceTypeLabel(resourceType: string) {
   if (resourceType === "PHOTO") return "사진";
   if (resourceType === "REPORT") return "보고서";
   if (resourceType === "PROJECT") return "프로젝트";
-  if (resourceType === "ROOM") return "실";
+  if (resourceType === "ROOM") return "방";
   return resourceType;
 }

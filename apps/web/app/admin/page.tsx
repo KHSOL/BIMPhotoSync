@@ -81,7 +81,7 @@ export default function AdminPage() {
       <section className="panel empty-state">
         <KeyRound size={28} />
         <h1 className="panel-title">최고관리자 전용 화면입니다</h1>
-        <p className="muted">회사 관리자는 프로젝트, 실 목록, 평면도에서 본인 회사 프로젝트를 관리합니다.</p>
+        <p className="muted">회사 관리자는 프로젝트, 방 목록, 평면도에서 본인 회사 프로젝트를 관리합니다.</p>
       </section>
     );
   }
@@ -91,7 +91,7 @@ export default function AdminPage() {
       <header className="page-heading-row">
         <div>
           <h1 className="page-title">전체 관리</h1>
-          <p className="page-subtitle">회사, 프로젝트, 실, 사진, Revit 연결 상태를 전체 조회합니다.</p>
+          <p className="page-subtitle">회사, 프로젝트, 방, 사진, Revit 연결 상태를 전체 조회합니다.</p>
         </div>
         <button className="filter-button" type="button" onClick={() => loadOverview().catch((err) => setStatus(err.message))}>
           <RefreshCw size={16} />
@@ -103,7 +103,7 @@ export default function AdminPage() {
         <Metric icon={<Building2 size={21} />} label="회사" value={totals?.companies ?? 0} />
         <Metric icon={<FolderKanban size={21} />} label="프로젝트" value={totals?.projects ?? 0} />
         <Metric icon={<Users size={21} />} label="사용자" value={totals?.users ?? 0} />
-        <Metric icon={<Building2 size={21} />} label="실" value={totals?.rooms ?? 0} />
+        <Metric icon={<Building2 size={21} />} label="방" value={totals?.rooms ?? 0} />
         <Metric icon={<Camera size={21} />} label="사진" value={totals?.photos ?? 0} />
         <Metric icon={<Building2 size={21} />} label="Revit 모델" value={totals?.revit_models ?? 0} />
       </section>
@@ -122,7 +122,7 @@ export default function AdminPage() {
                   {company.projects.map((project) => (
                     <div key={project.id}>
                       <strong>{project.name}</strong>
-                      <span>{project.code} · 실 {project.room_count}개 · 사진 {project.photo_count}개 · Revit {project.revit_model_count}/{project.floor_plan_count}</span>
+                      <span>{project.code} · 방 {project.room_count}개 · 사진 {project.photo_count}개 · Revit {project.revit_model_count}/{project.floor_plan_count}</span>
                     </div>
                   ))}
                 </div>
