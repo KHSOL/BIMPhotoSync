@@ -3363,7 +3363,7 @@ video {
 
 .project-admin-layout {
   display: grid;
-  grid-template-columns: minmax(460px, 1.1fr) minmax(520px, 1fr);
+  grid-template-columns: minmax(0, 1fr);
   gap: 16px;
   align-items: start;
 }
@@ -3405,7 +3405,7 @@ video {
   min-height: 82px;
   border-radius: 10px;
   padding: 13px 14px;
-  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  grid-template-columns: auto minmax(0, 1fr) auto;
 }
 
 .project-row strong {
@@ -3421,11 +3421,9 @@ video {
   white-space: nowrap;
 }
 
-.project-row-actions {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 6px;
+.project-row:focus-visible {
+  outline: 3px solid var(--blue-100);
+  outline-offset: 2px;
 }
 
 .small-button {
@@ -3521,6 +3519,51 @@ video {
   width: 100%;
 }
 
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: grid;
+  place-items: center;
+  padding: 18px;
+  background: rgba(15, 23, 42, 0.42);
+}
+
+.confirm-modal {
+  position: relative;
+  width: min(100%, 420px);
+  border: 1px solid var(--gray-200);
+  border-radius: 12px;
+  background: #fff;
+  box-shadow: 0 24px 80px rgba(15, 23, 42, 0.22);
+  color: var(--ink);
+  display: grid;
+  gap: 16px;
+  padding: 22px;
+}
+
+.modal-close {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  width: 36px;
+  height: 36px;
+  border: 1px solid var(--gray-200);
+  border-radius: 8px;
+  background: #fff;
+  color: var(--gray-600);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.modal-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
 @media (max-height: 760px) and (min-width: 721px) {
   .sidebar-brand span {
     font-size: 16px;
@@ -3542,17 +3585,8 @@ video {
 }
 
 @media (max-width: 1380px) {
-  .project-admin-layout {
-    grid-template-columns: minmax(390px, 0.9fr) minmax(0, 1fr);
-  }
-
   .project-row {
     grid-template-columns: auto minmax(0, 1fr) auto;
-  }
-
-  .project-row-actions {
-    grid-column: 2 / -1;
-    justify-content: flex-start;
   }
 }
 
@@ -3590,8 +3624,7 @@ video {
     grid-template-columns: auto minmax(0, 1fr);
   }
 
-  .project-row em,
-  .project-row-actions {
+  .project-row em {
     grid-column: 1 / -1;
   }
 }
@@ -3782,7 +3815,7 @@ body {
 }
 
 .project-admin-layout {
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 340px), 1fr));
+  grid-template-columns: minmax(0, 1fr);
 }
 
 .rooms-layout,
@@ -3797,13 +3830,6 @@ body {
 
 .project-row {
   grid-template-columns: auto minmax(0, 1fr) auto;
-}
-
-.project-row-actions {
-  grid-column: 2 / -1;
-  justify-content: flex-start;
-  min-width: 0;
-  flex-wrap: wrap;
 }
 
 .photo-tabs,
@@ -3939,16 +3965,6 @@ body {
   box-shadow: inset 0 0 0 2px var(--blue-500);
 }
 
-.project-row-actions {
-  grid-column: 1 / -1;
-  padding-left: 30px;
-}
-
-.project-row-actions .small-button {
-  flex: 1 1 108px;
-  max-width: 150px;
-}
-
 .trade-progress {
   grid-template-columns: minmax(72px, 0.65fr) minmax(0, 1fr) minmax(42px, auto) minmax(24px, auto);
   min-width: 0;
@@ -3999,14 +4015,6 @@ body {
 }
 
 @media (max-width: 720px) {
-  .project-row-actions {
-    padding-left: 0;
-  }
-
-  .project-row-actions .small-button {
-    max-width: none;
-  }
-
   .trade-progress,
   .level-bar-row {
     grid-template-columns: minmax(0, 0.72fr) minmax(0, 1fr) auto;

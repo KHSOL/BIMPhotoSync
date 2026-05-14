@@ -12,9 +12,15 @@ export class CreateProjectDto {
 
 export class JoinProjectDto {
   @IsString()
-  @IsNotEmpty()
-  project_code!: string;
+  @IsOptional()
+  project_code?: string;
 
+  @IsString()
+  @IsNotEmpty()
+  access_key!: string;
+}
+
+export class PreviewProjectAccessKeyDto {
   @IsString()
   @IsNotEmpty()
   access_key!: string;
@@ -25,4 +31,3 @@ export class CreateTradeCategoryDto {
   @IsNotEmpty()
   label!: string;
 }
-

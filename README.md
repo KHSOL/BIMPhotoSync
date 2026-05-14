@@ -261,7 +261,7 @@ revit-addin/uninstall.ps1
 | Domain | Routes |
 | --- | --- |
 | Auth | `GET /auth/companies`, `POST /auth/register`, `POST /auth/login`, `GET /auth/me`, `PATCH /auth/me/avatar`, `GET /auth/users/:userId/avatar` |
-| Projects | `GET /projects`, `POST /projects`, `POST /projects/join`, `POST /projects/:projectId/access-key` |
+| Projects | `GET /projects`, `POST /projects`, `POST /projects/access-key/preview`, `POST /projects/join`, `POST /projects/:projectId/access-key` |
 | Project Members | `GET /projects/:projectId/members` |
 | Dashboard | `GET /dashboard/summary?project_id=` |
 | Rooms | `GET /projects/:projectId/rooms`, `POST /projects/:projectId/rooms`, `PATCH /rooms/:roomId` |

@@ -2,7 +2,7 @@ import { ForbiddenException, Injectable, NotFoundException } from "@nestjs/commo
 import * as bcrypt from "bcryptjs";
 import { randomBytes } from "crypto";
 import { PrismaService } from "../prisma/prisma.service";
-import { CreateProjectDto, CreateTradeCategoryDto, JoinProjectDto } from "./dto";
+import { CreateProjectDto, CreateTradeCategoryDto, JoinProjectDto, PreviewProjectAccessKeyDto } from "./dto";
 
 type ProjectActor = { sub: string; companyId: string; role: string };
 
@@ -43,13 +43,8 @@ export class ProjectsService {
   }
 
   async join(user: ProjectActor, dto: JoinProjectDto) {
-    const project = await this.prisma.project.findFirst({
-      where: { companyId: user.companyId, code: dto.project_code },
-      include: { members: { where: { userId: user.sub } } }
-    });
-    if (!project || !project.accessKeyHash) throw new NotFoundException("Project not found.");
-    const ok = await bcrypt.compare(dto.access_key, project.accessKeyHash);
-    if (!ok) throw new ForbiddenException("Invalid project access key.");
+    const project = await this.findProjectByAccessKey(user, dto.access_key, dto.project_code);
+    if (!project) throw new NotFoundException("Project not found.");
 
     const member =
       project.members[0] ??
@@ -58,6 +53,12 @@ export class ProjectsService {
       }));
 
     return { data: { ...toProjectResponse(project), member_role: member.role } };
+  }
+
+  async previewAccessKey(user: ProjectActor, dto: PreviewProjectAccessKeyDto) {
+    const project = await this.findProjectByAccessKey(user, dto.access_key);
+    if (!project) throw new NotFoundException("Project not found.");
+    return { data: toProjectResponse(project) };
   }
 
   async createAccessKey(user: ProjectActor, projectId: string) {
@@ -233,6 +234,28 @@ export class ProjectsService {
     }
     return project;
   }
+
+  private async findProjectByAccessKey(user: ProjectActor, accessKey: string, projectCode?: string) {
+    const trimmedKey = accessKey.trim();
+    const trimmedCode = projectCode?.trim();
+    if (!trimmedKey) return null;
+
+    const candidates = await this.prisma.project.findMany({
+      where: {
+        accessKeyHash: { not: null },
+        ...(user.role === "SUPER_ADMIN" ? {} : { companyId: user.companyId }),
+        ...(trimmedCode ? { code: trimmedCode } : {})
+      },
+      include: { members: { where: { userId: user.sub } } },
+      orderBy: { createdAt: "desc" }
+    });
+
+    for (const candidate of candidates) {
+      if (candidate.accessKeyHash && (await bcrypt.compare(trimmedKey, candidate.accessKeyHash))) return candidate;
+    }
+
+    return null;
+  }
 }
 
 const systemTrades = [
@@ -329,4 +352,3 @@ function toProjectResponse(project: {
     created_at: project.createdAt
   };
 }
-

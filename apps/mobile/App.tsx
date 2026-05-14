@@ -77,7 +77,6 @@ export default function App() {
   const [user, setUser] = useState<User | null>(null);
   const [projects, setProjects] = useState<Project[]>([]);
   const [projectId, setProjectId] = useState("");
-  const [joinCode, setJoinCode] = useState("");
   const [joinKey, setJoinKey] = useState("");
   const [rooms, setRooms] = useState<Room[]>([]);
   const [roomId, setRoomId] = useState("");
@@ -120,12 +119,37 @@ export default function App() {
     if (nextProjectId) await loadRooms(nextToken, nextProjectId);
   }
 
-  async function joinProject() {
+  async function previewJoinProject() {
+    const accessKey = joinKey.trim();
+    if (!accessKey) {
+      Alert.alert("오류", "프로젝트 접근키를 입력하세요.");
+      return;
+    }
+
+    const json = await apiJson<{ data: Project }>("/projects/access-key/preview", {
+      method: "POST",
+      headers: { ...authHeaders(token), "Content-Type": "application/json" },
+      body: JSON.stringify({ access_key: accessKey })
+    });
+
+    Alert.alert("프로젝트 참여", `${json.data.name}\n이 프로젝트에 참여하시겠습니까?`, [
+      { text: "취소", style: "cancel" },
+      {
+        text: "참여하기",
+        onPress: () => {
+          joinProject(accessKey).catch((err) => Alert.alert("오류", err.message));
+        }
+      }
+    ]);
+  }
+
+  async function joinProject(accessKey = joinKey.trim()) {
     const json = await apiJson<{ data: Project }>("/projects/join", {
       method: "POST",
       headers: { ...authHeaders(token), "Content-Type": "application/json" },
-      body: JSON.stringify({ project_code: joinCode, access_key: joinKey })
+      body: JSON.stringify({ access_key: accessKey })
     });
+    setJoinKey("");
     setProjectId(json.data.id);
     setStatus(`${json.data.name} 프로젝트에 참여했습니다.`);
     await loadProjects();
@@ -272,10 +296,9 @@ export default function App() {
               </Pressable>
             ))}
           </View>
-          <Input label="프로젝트 코드" value={joinCode} onChangeText={setJoinCode} autoCapitalize="none" />
           <Input label="접근키" value={joinKey} onChangeText={setJoinKey} autoCapitalize="none" />
-          <Pressable style={styles.secondaryButton} onPress={() => joinProject().catch((err) => Alert.alert("오류", err.message))}>
-            <Text style={styles.secondaryButtonText}>접근키로 참여</Text>
+          <Pressable style={styles.secondaryButton} onPress={() => previewJoinProject().catch((err) => Alert.alert("오류", err.message))}>
+            <Text style={styles.secondaryButtonText}>프로젝트 확인</Text>
           </Pressable>
         </Section>
 

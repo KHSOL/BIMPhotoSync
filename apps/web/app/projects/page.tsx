@@ -2,13 +2,12 @@
 
 import {
   Building2,
-  Eye,
   FolderPlus,
-  Image as ImageIcon,
   KeyRound,
   Link2,
   RefreshCw,
-  ShieldCheck
+  ShieldCheck,
+  X
 } from "lucide-react";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { apiJson, authHeaders, isUpperManager, Project, readProjectId, readSession, saveProjectId, User } from "../client";
@@ -23,8 +22,8 @@ export default function ProjectsPage() {
   const [user, setUser] = useState<User | null>(null);
   const [projects, setProjects] = useState<Project[]>([]);
   const [activeProjectId, setActiveProjectId] = useState("");
-  const [joinCode, setJoinCode] = useState("");
   const [joinKey, setJoinKey] = useState("");
+  const [pendingJoinProject, setPendingJoinProject] = useState<Project | null>(null);
   const [newProjectName, setNewProjectName] = useState("");
   const [newProjectCode, setNewProjectCode] = useState("");
   const [generatedKey, setGeneratedKey] = useState("");
@@ -89,23 +88,39 @@ export default function ProjectsPage() {
     await loadProjects(token, json.data.id);
   }
 
-  async function joinProject() {
-    const trimmedCode = joinCode.trim();
+  async function previewJoinProject() {
     const trimmedKey = joinKey.trim();
 
-    if (!trimmedCode || !trimmedKey) {
-      setStatus("프로젝트 코드와 접근키를 입력하세요.");
+    if (!trimmedKey) {
+      setStatus("프로젝트 접근키를 입력하세요.");
+      return;
+    }
+
+    const json = await apiJson<ProjectResult>("/projects/access-key/preview", {
+      method: "POST",
+      headers: { ...authHeaders(token), "Content-Type": "application/json" },
+      body: JSON.stringify({ access_key: trimmedKey })
+    });
+
+    setPendingJoinProject(json.data);
+    setStatus(`${json.data.name} 프로젝트를 확인했습니다.`);
+  }
+
+  async function joinProject() {
+    const trimmedKey = joinKey.trim();
+    if (!trimmedKey || !pendingJoinProject) {
+      setStatus("프로젝트 접근키를 다시 확인하세요.");
       return;
     }
 
     const json = await apiJson<ProjectResult>("/projects/join", {
       method: "POST",
       headers: { ...authHeaders(token), "Content-Type": "application/json" },
-      body: JSON.stringify({ project_code: trimmedCode, access_key: trimmedKey })
+      body: JSON.stringify({ access_key: trimmedKey })
     });
 
-    setJoinCode("");
     setJoinKey("");
+    setPendingJoinProject(null);
     setGeneratedKey("");
     saveProjectId(json.data.id);
     setActiveProjectId(json.data.id);
@@ -190,24 +205,25 @@ export default function ProjectsPage() {
               </div>
             ) : (
               projects.map((project) => (
-                <article className={`project-row ${project.id === activeProjectId ? "active" : ""}`} key={project.id}>
+                <article
+                  className={`project-row ${project.id === activeProjectId ? "active" : ""}`}
+                  key={project.id}
+                  onClick={() => setWorkProject(project)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter" || event.key === " ") {
+                      event.preventDefault();
+                      setWorkProject(project);
+                    }
+                  }}
+                  role="button"
+                  tabIndex={0}
+                >
                   <Building2 size={18} />
                   <span>
                     <strong>{project.name}</strong>
                     <small>{project.code}</small>
                   </span>
                   <em>{project.id === activeProjectId ? "작업 프로젝트" : project.member_role ?? user?.role}</em>
-                  <div className="project-row-actions">
-                    <button className="small-button" onClick={() => setWorkProject(project)} type="button">
-                      작업 설정
-                    </button>
-                    <a className="small-button ghost" href="/rooms" onClick={() => setWorkProject(project)}>
-                      Rooms
-                    </a>
-                    <a className="small-button ghost" href="/viewer" onClick={() => setWorkProject(project)}>
-                      Floor Plan
-                    </a>
-                  </div>
                 </article>
               ))
             )}
@@ -215,14 +231,6 @@ export default function ProjectsPage() {
 
           <div className="project-status-row">
             <p className="muted">{status}</p>
-            <div className="actions project-actions">
-              <a className="button" href="/rooms">
-                <Eye size={16} /> Room 매핑 보기
-              </a>
-              <a className="button secondary" href="/photos">
-                <ImageIcon size={16} /> 사진 업로드
-              </a>
-            </div>
           </div>
         </div>
 
@@ -262,6 +270,20 @@ export default function ProjectsPage() {
             <div className="project-manager-card panel">
               <div className="panel-header">
                 <div>
+                  <h2 className="panel-title">프로젝트 접근키</h2>
+                  <p className="muted">{activeProject ? `${activeProject.name} (${activeProject.code}) 기준` : "작업 프로젝트를 먼저 설정하세요."}</p>
+                </div>
+                <ShieldCheck size={19} />
+              </div>
+              <button className="button project-wide-button" onClick={() => createAccessKey().catch((err) => setStatus(err.message))} type="button">
+                <KeyRound size={16} /> 접근키 생성
+              </button>
+              {generatedKey ? <code className="key-box">{generatedKey}</code> : null}
+            </div>
+
+            <div className="project-manager-card panel">
+              <div className="panel-header">
+                <div>
                   <h2 className="panel-title">Revit 연결</h2>
                   <p className="muted">{activeProject ? `${activeProject.name} (${activeProject.code}) 기준` : "작업 프로젝트를 먼저 설정하세요."}</p>
                 </div>
@@ -277,20 +299,6 @@ export default function ProjectsPage() {
                 <Link2 size={16} /> Revit 연결 안내
               </button>
             </div>
-
-            <div className="project-manager-card panel">
-              <div className="panel-header">
-                <div>
-                  <h2 className="panel-title">프로젝트 접근키</h2>
-                  <p className="muted">{activeProject ? `${activeProject.name} (${activeProject.code})` : "작업 프로젝트를 먼저 설정하세요."}</p>
-                </div>
-                <ShieldCheck size={19} />
-              </div>
-              <button className="button project-wide-button" onClick={() => createAccessKey().catch((err) => setStatus(err.message))} type="button">
-                <KeyRound size={16} /> 접근키 생성
-              </button>
-              {generatedKey ? <code className="key-box">{generatedKey}</code> : null}
-            </div>
           </div>
         ) : (
           <div className="project-admin-stack">
@@ -298,25 +306,44 @@ export default function ProjectsPage() {
               <div className="panel-header">
                 <div>
                   <h2 className="panel-title">접근키로 프로젝트 참여</h2>
-                  <p className="muted">관리자가 발급한 프로젝트 코드와 접근키를 입력하면 사진 업로드와 조회 범위에 참여할 수 있습니다.</p>
+                  <p className="muted">관리자가 발급한 접근키를 입력하면 프로젝트를 확인한 뒤 참여할 수 있습니다.</p>
                 </div>
                 <span className="badge green">일반 사용자</span>
               </div>
-              <div className="project-form-grid">
-                <Field label="Project Code">
-                  <input className="input" onChange={(event) => setJoinCode(event.target.value)} value={joinCode} />
-                </Field>
-                <Field label="Access Key">
-                  <input className="input" onChange={(event) => setJoinKey(event.target.value)} value={joinKey} />
-                </Field>
-              </div>
-              <button className="button project-wide-button" onClick={() => joinProject().catch((err) => setStatus(err.message))} type="button">
-                <KeyRound size={16} /> 프로젝트 참여
+              <Field label="Access Key">
+                <input className="input" onChange={(event) => setJoinKey(event.target.value)} value={joinKey} />
+              </Field>
+              <button className="button project-wide-button" onClick={() => previewJoinProject().catch((err) => setStatus(err.message))} type="button">
+                <KeyRound size={16} /> 프로젝트 확인
               </button>
             </div>
           </div>
         )}
       </div>
+
+      {pendingJoinProject ? (
+        <div className="modal-backdrop">
+          <section aria-labelledby="join-project-title" aria-modal="true" className="confirm-modal" role="dialog">
+            <button aria-label="닫기" className="modal-close" onClick={() => setPendingJoinProject(null)} type="button">
+              <X size={18} />
+            </button>
+            <span className="badge green">프로젝트 확인</span>
+            <div>
+              <h2 className="panel-title" id="join-project-title">{pendingJoinProject.name}</h2>
+              <p className="muted">{pendingJoinProject.code}</p>
+            </div>
+            <p>이 프로젝트에 참여하시겠습니까?</p>
+            <div className="modal-actions">
+              <button className="button secondary" onClick={() => setPendingJoinProject(null)} type="button">
+                취소
+              </button>
+              <button className="button" onClick={() => joinProject().catch((err) => setStatus(err.message))} type="button">
+                참여하기
+              </button>
+            </div>
+          </section>
+        </div>
+      ) : null}
     </section>
   );
 }

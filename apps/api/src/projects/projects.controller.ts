@@ -1,7 +1,7 @@
 import { Body, Controller, Delete, Get, Param, Post, Query, UseGuards } from "@nestjs/common";
 import { CurrentUser, JwtUser } from "../common/current-user";
 import { JwtAuthGuard } from "../common/jwt-auth.guard";
-import { CreateProjectDto, CreateTradeCategoryDto, JoinProjectDto } from "./dto";
+import { CreateProjectDto, CreateTradeCategoryDto, JoinProjectDto, PreviewProjectAccessKeyDto } from "./dto";
 import { ProjectsService } from "./projects.service";
 
 @Controller("projects")
@@ -22,6 +22,11 @@ export class ProjectsController {
   @Post("join")
   join(@CurrentUser() user: JwtUser, @Body() dto: JoinProjectDto) {
     return this.projects.join(user, dto);
+  }
+
+  @Post("access-key/preview")
+  previewAccessKey(@CurrentUser() user: JwtUser, @Body() dto: PreviewProjectAccessKeyDto) {
+    return this.projects.previewAccessKey(user, dto);
   }
 
   @Post(":projectId/access-key")
@@ -59,4 +64,3 @@ export class ProjectsController {
     return this.projects.authEvents(user, projectId, limit ? Number(limit) : undefined);
   }
 }
-
