@@ -6,16 +6,16 @@ import { useEffect, useState } from "react";
 import { canAccessAdminBoards, clearSession, isSuperAdmin, readSession, userInitials, type User } from "./client";
 
 const navItems = [
-  { href: "/dashboard", label: "Dashboard", icon: Home },
-  { href: "/projects", label: "Projects", icon: Building2 },
-  { href: "/rooms", label: "Rooms", icon: MapPinned },
-  { href: "/photos", label: "Photos", icon: Images },
-  { href: "/reports", label: "Reports", icon: FileText, managerOnly: true },
-  { href: "/viewer", label: "Floor Plan", icon: Layers },
-  { href: "/sheets", label: "Sheets", icon: FileText },
-  { href: "/audit", label: "Audit", icon: ShieldCheck, managerOnly: true },
-  { href: "/mypage", label: "My Page", icon: Settings },
-  { href: "/admin", label: "Admin", icon: ShieldCheck, superOnly: true }
+  { href: "/dashboard", label: "대시보드", icon: Home },
+  { href: "/projects", label: "프로젝트", icon: Building2 },
+  { href: "/rooms", label: "실 목록", icon: MapPinned },
+  { href: "/photos", label: "사진", icon: Images },
+  { href: "/reports", label: "보고서", icon: FileText, managerOnly: true },
+  { href: "/viewer", label: "평면도", icon: Layers },
+  { href: "/sheets", label: "시트", icon: FileText },
+  { href: "/audit", label: "감사", icon: ShieldCheck, managerOnly: true },
+  { href: "/mypage", label: "내 정보", icon: Settings },
+  { href: "/admin", label: "전체 관리", icon: ShieldCheck, superOnly: true }
 ];
 
 export default function Shell({ children }: { children: React.ReactNode }) {
@@ -44,12 +44,12 @@ export default function Shell({ children }: { children: React.ReactNode }) {
   return (
     <div className="shell">
       <aside className="sidebar">
-        <a className="sidebar-brand" href="/dashboard" aria-label="BIM Photo Sync Home">
+        <a className="sidebar-brand" href="/dashboard" aria-label="BIM Photo Sync 홈">
           <img src="/auth/app-logo-mark.png" alt="" />
           <span>BIM Photo Sync</span>
         </a>
 
-        <nav className="sidebar-nav" aria-label="Main navigation">
+        <nav className="sidebar-nav" aria-label="주요 내비게이션">
           {navItems
             .filter((item) => !item.superOnly || isSuperAdmin(user))
             .filter((item) => !item.managerOnly || canAccessAdminBoards(user))
@@ -74,17 +74,17 @@ export default function Shell({ children }: { children: React.ReactNode }) {
                 </span>
                 <strong>{user.name}</strong>
                 <span>{roleLabel(user.role)}</span>
-                <span>{user.company_name ?? "Company not loaded"}</span>
+                <span>{user.company_name ?? "회사 정보 없음"}</span>
               </div>
-              <button className="sidebar-auth-button" type="button" onClick={logout} aria-label="로그아웃" title="Logout">
+              <button className="sidebar-auth-button" type="button" onClick={logout} aria-label="로그아웃" title="로그아웃">
                 <LogOut size={19} />
-                <span>Logout</span>
+                <span>로그아웃</span>
               </button>
             </>
           ) : (
-            <a className="sidebar-auth-button" href="/login" aria-label="로그인" title="Login">
+            <a className="sidebar-auth-button" href="/login" aria-label="로그인" title="로그인">
               <LogIn size={19} />
-              <span>Login</span>
+              <span>로그인</span>
             </a>
           )}
         </div>

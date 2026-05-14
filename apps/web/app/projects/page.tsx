@@ -148,12 +148,12 @@ export default function ProjectsPage() {
     setActiveProjectId(project.id);
     saveProjectId(project.id);
     setGeneratedKey("");
-    setStatus(`${project.name} 프로젝트를 Rooms, Photos, Floor Plan의 작업 기준으로 설정했습니다.`);
+    setStatus(`${project.name} 프로젝트를 실 목록, 사진, 평면도의 작업 기준으로 설정했습니다.`);
   }
 
   function showRevitImportGuide() {
     setStatus(
-      "Revit 2025에서 BIM Photo Sync > Connect Project를 실행하고, 웹에서 생성한 프로젝트를 선택한 뒤 Sync Rooms / Sync Floor Plan을 실행하세요."
+      "Revit 2025에서 BIM Photo Sync 탭의 프로젝트 연결을 실행하고, 웹에서 생성한 프로젝트를 선택한 뒤 실과 평면도를 동기화하세요."
     );
   }
 
@@ -173,9 +173,9 @@ export default function ProjectsPage() {
   return (
     <section className="project-page">
       <div className="breadcrumb">
-        <span>{user?.company_name ?? "Company"}</span>
+        <span>{user?.company_name ?? "회사"}</span>
         <span>/</span>
-        <strong>Projects</strong>
+        <strong>프로젝트</strong>
       </div>
 
       <div className="project-admin-layout">
@@ -184,7 +184,7 @@ export default function ProjectsPage() {
             <div>
               <p className="eyebrow-text">회사 프로젝트</p>
               <h1 className="page-title">우리 회사 프로젝트 목록</h1>
-              <p className="muted">Room, 사진, Floor Plan, Revit Add-in은 작업 프로젝트 기준으로 동작합니다.</p>
+              <p className="muted">실 목록, 사진, 평면도, Revit Add-in은 작업 프로젝트 기준으로 동작합니다.</p>
             </div>
             <button
               aria-label="프로젝트 새로고침"
@@ -223,7 +223,7 @@ export default function ProjectsPage() {
                     <strong>{project.name}</strong>
                     <small>{project.code}</small>
                   </span>
-                  <em>{project.id === activeProjectId ? "작업 프로젝트" : project.member_role ?? user?.role}</em>
+                  <em>{project.id === activeProjectId ? "작업 프로젝트" : roleLabel(project.member_role ?? user?.role ?? "")}</em>
                 </article>
               ))
             )}
@@ -240,12 +240,12 @@ export default function ProjectsPage() {
               <div className="panel-header">
                 <div>
                   <h2 className="panel-title">새 프로젝트 생성</h2>
-                  <p className="muted">프로젝트를 먼저 만든 뒤 Revit Add-in에서 같은 프로젝트를 선택해 Rooms/Sheet를 동기화합니다.</p>
+                  <p className="muted">프로젝트를 먼저 만든 뒤 Revit Add-in에서 같은 프로젝트를 선택해 실과 시트를 동기화합니다.</p>
                 </div>
                 <span className="badge blue">관리자</span>
               </div>
               <div className="project-form-grid">
-                <Field label="Project Name">
+                <Field label="프로젝트명">
                   <input
                     className="input"
                     onChange={(event) => setNewProjectName(event.target.value)}
@@ -253,7 +253,7 @@ export default function ProjectsPage() {
                     value={newProjectName}
                   />
                 </Field>
-                <Field label="Project Code">
+                <Field label="프로젝트 코드">
                   <input
                     className="input"
                     onChange={(event) => setNewProjectCode(event.target.value)}
@@ -291,9 +291,9 @@ export default function ProjectsPage() {
               </div>
               <div className="revit-import-steps compact">
                 <span>1. Revit 2025에서 모델을 엽니다.</span>
-                <span>2. BIM Photo Sync 탭에서 Connect Project를 실행합니다.</span>
+                <span>2. BIM Photo Sync 탭에서 프로젝트 연결을 실행합니다.</span>
                 <span>3. 웹에서 만든 프로젝트를 선택합니다.</span>
-                <span>4. Sync Rooms / Sync Floor Plan을 실행합니다.</span>
+                <span>4. 실과 평면도를 동기화합니다.</span>
               </div>
               <button className="button project-wide-button" onClick={showRevitImportGuide} type="button">
                 <Link2 size={16} /> Revit 연결 안내
@@ -310,7 +310,7 @@ export default function ProjectsPage() {
                 </div>
                 <span className="badge green">일반 사용자</span>
               </div>
-              <Field label="Access Key">
+              <Field label="접근키">
                 <input className="input" onChange={(event) => setJoinKey(event.target.value)} value={joinKey} />
               </Field>
               <button className="button project-wide-button" onClick={() => previewJoinProject().catch((err) => setStatus(err.message))} type="button">
@@ -355,4 +355,14 @@ function Field({ label, children }: { label: string; children: ReactNode }) {
       {children}
     </label>
   );
+}
+
+function roleLabel(role: string) {
+  if (role === "SUPER_ADMIN") return "최고관리자";
+  if (role === "COMPANY_ADMIN") return "회사 관리자";
+  if (role === "PROJECT_ADMIN") return "프로젝트 관리자";
+  if (role === "BIM_MANAGER") return "BIM 관리자";
+  if (role === "MANAGER") return "관리자";
+  if (role === "VIEWER") return "조회자";
+  return "현장 작업자";
 }

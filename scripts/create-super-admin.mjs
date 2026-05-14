@@ -5,16 +5,16 @@ const prisma = new PrismaClient();
 
 const email = process.env.SUPER_ADMIN_EMAIL;
 const password = process.env.SUPER_ADMIN_PASSWORD;
-const name = process.env.SUPER_ADMIN_NAME ?? "BIM Photo Sync Super Admin";
-const companyName = process.env.SUPER_ADMIN_COMPANY ?? "BIM Photo Sync HQ";
+const name = process.env.SUPER_ADMIN_NAME ?? "최반장";
+const companyName = process.env.SUPER_ADMIN_COMPANY ?? "BIM Photo Sync 본사";
 
 if (!email || !password) {
-  console.error("SUPER_ADMIN_EMAIL and SUPER_ADMIN_PASSWORD are required.");
+  console.error("SUPER_ADMIN_EMAIL과 SUPER_ADMIN_PASSWORD가 필요합니다.");
   process.exit(1);
 }
 
 if (password.length < 8) {
-  console.error("SUPER_ADMIN_PASSWORD must be at least 8 characters.");
+  console.error("SUPER_ADMIN_PASSWORD는 8자 이상이어야 합니다.");
   process.exit(1);
 }
 
@@ -36,5 +36,5 @@ await prisma.user.upsert({
   }
 });
 
-console.log(`SUPER_ADMIN ready: ${email.toLowerCase()}`);
+console.log(`최고관리자 준비 완료: ${email.toLowerCase()}`);
 await prisma.$disconnect();

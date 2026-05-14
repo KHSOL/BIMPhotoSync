@@ -82,7 +82,7 @@ export default function MyPage() {
     <div className="reference-page mypage-account-page">
       <header className="page-heading-row">
         <div>
-          <h1 className="page-title">My Page</h1>
+          <h1 className="page-title">내 정보</h1>
           <p className="muted">계정 정보만 확인하고 프로필 사진을 변경합니다.</p>
         </div>
         <button className="filter-button" type="button" onClick={() => refreshMe().catch((error) => setStatus(error.message))}>

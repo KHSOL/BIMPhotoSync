@@ -12,27 +12,25 @@ import {
   X
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
-import { apiJson, authHeaders, isUpperManager, Project, readProjectId, readSession, Room, saveProjectId, User } from "../client";
+import { apiJson, authHeaders, Project, readProjectId, readSession, Room, saveProjectId } from "../client";
 
 type ProjectList = { data: Project[] };
 type RoomList = { data: Room[] };
 
 export default function RoomsPage() {
   const [token, setToken] = useState("");
-  const [user, setUser] = useState<User | null>(null);
   const [projects, setProjects] = useState<Project[]>([]);
   const [projectId, setProjectId] = useState("");
   const [rooms, setRooms] = useState<Room[]>([]);
   const [selectedRoomId, setSelectedRoomId] = useState("");
   const [query, setQuery] = useState("");
   const [page, setPage] = useState(1);
-  const [status, setStatus] = useState("Revit Add-in에서 Sync Rooms를 실행하면 Room 매핑이 표시됩니다.");
+  const [status, setStatus] = useState("실 목록을 불러오는 중입니다.");
 
   useEffect(() => {
     const session = readSession();
     if (!session) return;
     setToken(session.token);
-    setUser(session.user);
     const storedProjectId = readProjectId();
     setProjectId(storedProjectId);
     void loadProjects(session.token, storedProjectId).catch((err) => setStatus(err.message));
@@ -64,7 +62,7 @@ export default function RoomsPage() {
     setRooms(json.data);
     setPage(1);
     setSelectedRoomId((current) => (json.data.some((room) => room.id === current) ? current : json.data[0]?.id ?? ""));
-    setStatus(`${json.data.length}개 Room을 불러왔습니다.`);
+    setStatus(`${json.data.length}개 실을 불러왔습니다.`);
   }
 
   function changeProject(nextProjectId: string) {
@@ -100,14 +98,13 @@ export default function RoomsPage() {
   const visibleRooms = useMemo(() => rooms.slice((page - 1) * pageSize, page * pageSize), [page, rooms]);
   const selectedRoom = rooms.find((room) => room.id === selectedRoomId) ?? visibleRooms[0] ?? rooms[0];
   const selectedProject = projects.find((project) => project.id === projectId);
-  const canManageBim = isUpperManager(user);
   const selectedPhotosHref = selectedRoom ? `/photos?project_id=${projectId}&room_id=${selectedRoom.id}` : "/photos";
   const mappedRooms = rooms.filter((room) => room.bim_photo_room_id).length;
   const roomSummary = [
-    ["전체 Room", String(rooms.length), "조회됨", "blue"],
+    ["전체 실", String(rooms.length), "조회됨", "blue"],
     ["BIM ID 연결", String(mappedRooms), `${rooms.length ? Math.round((mappedRooms / rooms.length) * 100) : 0}%`, "green"],
     ["현재 표시", String(visibleRooms.length), `${page} / ${pageCount}`, "orange"],
-    ["선택 Room", selectedRoom?.room_number ?? "-", selectedRoom?.level_name ?? "-", "red"]
+    ["선택 실", selectedRoom?.room_number ?? "-", selectedRoom?.level_name ?? "-", "red"]
   ];
 
   if (!token) {
@@ -115,7 +112,7 @@ export default function RoomsPage() {
       <section className="panel empty-state">
         <KeyRound size={28} />
         <h1 className="panel-title">로그인이 필요합니다</h1>
-        <p className="muted">Room 매핑은 회사/프로젝트 권한 안에서만 조회됩니다.</p>
+        <p className="muted">실 목록은 회사/프로젝트 권한 안에서만 조회됩니다.</p>
         <a className="button" href="/login">
           로그인으로 이동
         </a>
@@ -127,8 +124,8 @@ export default function RoomsPage() {
     <div className="reference-page">
       <header className="page-heading-row">
         <div>
-          <h1 className="page-title">Rooms</h1>
-          <p className="muted">프로젝트의 Rooms를 확인하고 사진/도면 흐름으로 이동합니다.</p>
+          <h1 className="page-title">실 목록</h1>
+          <p className="muted">프로젝트의 실을 확인하고 사진과 도면으로 이동합니다.</p>
         </div>
         <div className="header-actions">
           <button className="filter-button" type="button" onClick={exportRoomsCsv} disabled={rooms.length === 0}>
@@ -140,17 +137,10 @@ export default function RoomsPage() {
             새로고침
           </button>
           <a className="button secondary" href="/viewer">
-            Floor Plan
+            평면도
           </a>
         </div>
       </header>
-
-      {canManageBim ? (
-        <section className="permission-banner">
-          <Building2 size={18} />
-          <span>Room 동기화는 Revit Add-in의 BIM Photo Sync 탭에서 Connect 후 Sync Rooms로 실행합니다. 웹은 동기화된 Room과 도면을 즉시 조회합니다.</span>
-        </section>
-      ) : null}
 
       <section className="filter-row rooms-filter-row">
         <select className="input" value={projectId} onChange={(event) => changeProject(event.target.value)}>
@@ -162,7 +152,7 @@ export default function RoomsPage() {
         </select>
         <label className="search-box">
           <Search size={17} />
-          <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Room 이름 / 번호 / 층 검색" />
+          <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="실 이름 / 번호 / 층 검색" />
         </label>
         <button className="filter-button" type="button" onClick={() => loadRooms().catch((err) => setStatus(err.message))}>
           <Filter size={16} /> 필터
@@ -174,7 +164,7 @@ export default function RoomsPage() {
 
       <section className="rooms-layout">
         <article className="panel ref-card room-table-card">
-          <h2 className="section-title">전체 {rooms.length}개 Rooms</h2>
+          <h2 className="section-title">전체 {rooms.length}개 실</h2>
           <div className="status-summary-grid">
             {roomSummary.map(([label, value, percent, tone]) => (
               <div className="status-summary-card" key={label}>
@@ -191,8 +181,8 @@ export default function RoomsPage() {
               <thead>
                 <tr>
                   <th>선택</th>
-                  <th>Room 번호</th>
-                  <th>Room 이름</th>
+                  <th>실 번호</th>
+                  <th>실 이름</th>
                   <th>층</th>
                   <th>공정 진행률</th>
                   <th>상태</th>
@@ -230,7 +220,7 @@ export default function RoomsPage() {
               <div className="empty">
                 <div>
                   <Building2 size={28} />
-                  <p>표시할 Room이 없습니다.</p>
+                  <p>표시할 실이 없습니다.</p>
                   <p className="muted">{status}</p>
                 </div>
               </div>
@@ -254,15 +244,15 @@ export default function RoomsPage() {
         <aside className="panel ref-card room-detail-panel">
           <div className="room-detail-head">
             <div>
-              <h2>{selectedRoom ? `${selectedRoom.room_number ?? ""} ${selectedRoom.room_name}` : "Room 선택"}</h2>
+              <h2>{selectedRoom ? `${selectedRoom.room_number ?? ""} ${selectedRoom.room_name}` : "실 선택"}</h2>
               <span className="badge blue">연동됨</span>
             </div>
-            <button className="icon-button" type="button" onClick={() => setSelectedRoomId("")} aria-label="Room 선택 해제"><X size={18} /></button>
+            <button className="icon-button" type="button" onClick={() => setSelectedRoomId("")} aria-label="실 선택 해제"><X size={18} /></button>
           </div>
           <div className="tab-row">
             <button className="active" type="button">개요</button>
             <a href={selectedPhotosHref}>사진</a>
-            <a href="/viewer">Floor Plan</a>
+            <a href="/viewer">평면도</a>
           </div>
           <div className="mini-plan">
             <div className="plan-room selected"><span /></div>
@@ -271,14 +261,14 @@ export default function RoomsPage() {
           </div>
           <dl className="detail-definition">
             <dt>층</dt><dd>{selectedRoom?.level_name ?? "-"}</dd>
-            <dt>Room 번호</dt><dd>{selectedRoom?.room_number ?? "-"}</dd>
-            <dt>Room 이름</dt><dd>{selectedRoom?.room_name ?? "-"}</dd>
-            <dt>Revit Element</dt><dd>{selectedRoom?.revit_element_id ?? "-"}</dd>
+            <dt>실 번호</dt><dd>{selectedRoom?.room_number ?? "-"}</dd>
+            <dt>실 이름</dt><dd>{selectedRoom?.room_name ?? "-"}</dd>
+            <dt>Revit 요소</dt><dd>{selectedRoom?.revit_element_id ?? "-"}</dd>
             <dt>BIM_PHOTO_ROOM_ID</dt><dd><code>{selectedRoom?.bim_photo_room_id ?? "-"}</code></dd>
           </dl>
           <div className="room-actions">
             <a className="filter-button" href={selectedPhotosHref}>사진 보기</a>
-            <a className="button" href="/viewer">Floor Plan에서 보기</a>
+            <a className="button" href="/viewer">평면도에서 보기</a>
           </div>
           <p className="muted">{selectedProject?.name ?? "프로젝트"} / {status}</p>
         </aside>

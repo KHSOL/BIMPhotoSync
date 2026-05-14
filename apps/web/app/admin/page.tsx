@@ -3,6 +3,7 @@
 import { Building2, Camera, FolderKanban, KeyRound, RefreshCw, Users } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { apiJson, authHeaders, isSuperAdmin, readSession, User } from "../client";
+import { defaultSurfaceOptions, defaultTradeOptions, labelForOption } from "../photo-options";
 
 type AdminOverview = {
   data: {
@@ -45,7 +46,7 @@ export default function AdminPage() {
   const [token, setToken] = useState("");
   const [user, setUser] = useState<User | null>(null);
   const [overview, setOverview] = useState<AdminOverview["data"] | null>(null);
-  const [status, setStatus] = useState("SUPER_ADMIN 권한으로 전체 운영 현황을 조회합니다.");
+  const [status, setStatus] = useState("최고관리자 권한으로 전체 운영 현황을 조회합니다.");
 
   useEffect(() => {
     const session = readSession();
@@ -79,8 +80,8 @@ export default function AdminPage() {
     return (
       <section className="panel empty-state">
         <KeyRound size={28} />
-        <h1 className="panel-title">SUPER_ADMIN 전용 화면입니다</h1>
-        <p className="muted">회사 관리자는 Projects, Rooms, Floor Plan에서 본인 회사 프로젝트를 관리합니다.</p>
+        <h1 className="panel-title">최고관리자 전용 화면입니다</h1>
+        <p className="muted">회사 관리자는 프로젝트, 실 목록, 평면도에서 본인 회사 프로젝트를 관리합니다.</p>
       </section>
     );
   }
@@ -89,8 +90,8 @@ export default function AdminPage() {
     <div className="reference-page">
       <header className="page-heading-row">
         <div>
-          <h1 className="page-title">Admin</h1>
-          <p className="page-subtitle">회사, 프로젝트, Room, 사진, Revit 연결 상태를 전체 조회합니다.</p>
+          <h1 className="page-title">전체 관리</h1>
+          <p className="page-subtitle">회사, 프로젝트, 실, 사진, Revit 연결 상태를 전체 조회합니다.</p>
         </div>
         <button className="filter-button" type="button" onClick={() => loadOverview().catch((err) => setStatus(err.message))}>
           <RefreshCw size={16} />
@@ -102,7 +103,7 @@ export default function AdminPage() {
         <Metric icon={<Building2 size={21} />} label="회사" value={totals?.companies ?? 0} />
         <Metric icon={<FolderKanban size={21} />} label="프로젝트" value={totals?.projects ?? 0} />
         <Metric icon={<Users size={21} />} label="사용자" value={totals?.users ?? 0} />
-        <Metric icon={<Building2 size={21} />} label="Room" value={totals?.rooms ?? 0} />
+        <Metric icon={<Building2 size={21} />} label="실" value={totals?.rooms ?? 0} />
         <Metric icon={<Camera size={21} />} label="사진" value={totals?.photos ?? 0} />
         <Metric icon={<Building2 size={21} />} label="Revit 모델" value={totals?.revit_models ?? 0} />
       </section>
@@ -115,13 +116,13 @@ export default function AdminPage() {
               <div className="admin-company" key={company.id}>
                 <div>
                   <strong>{company.name}</strong>
-                  <span>{company.user_count} users · {company.project_count} projects</span>
+                  <span>사용자 {company.user_count}명 · 프로젝트 {company.project_count}개</span>
                 </div>
                 <div className="admin-project-list">
                   {company.projects.map((project) => (
                     <div key={project.id}>
                       <strong>{project.name}</strong>
-                      <span>{project.code} · Rooms {project.room_count} · Photos {project.photo_count} · Revit {project.revit_model_count}/{project.floor_plan_count}</span>
+                      <span>{project.code} · 실 {project.room_count}개 · 사진 {project.photo_count}개 · Revit {project.revit_model_count}/{project.floor_plan_count}</span>
                     </div>
                   ))}
                 </div>
@@ -136,7 +137,7 @@ export default function AdminPage() {
             {(overview?.recent_photos ?? []).map((photo) => (
               <div key={photo.id}>
                 <strong>{photo.project.company.name} / {photo.project.name}</strong>
-                <span>{photo.room.room_number ?? ""} {photo.room.room_name} · {photo.trade} · {photo.work_surface}</span>
+                <span>{photo.room.room_number ?? ""} {photo.room.room_name} · {labelForOption(defaultTradeOptions, photo.trade)} · {labelForOption(defaultSurfaceOptions, photo.work_surface)}</span>
                 <small>{photo.uploaded_by.name} · {new Date(photo.uploaded_at).toLocaleString("ko-KR")}</small>
               </div>
             ))}

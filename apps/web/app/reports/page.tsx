@@ -17,7 +17,7 @@ import {
   TradeCategory,
   User
 } from "../client";
-import { defaultSurfaceOptions, legacyTradeValue } from "../photo-options";
+import { defaultSurfaceOptions, defaultTradeOptions, labelForOption, legacyTradeValue } from "../photo-options";
 
 const legacyTrades = ["", "WATERPROOF", "TILE", "PAINT", "ELECTRIC", "MEP", "WINDOW", "CONCRETE", "OTHER"];
 
@@ -223,8 +223,8 @@ export default function ReportsPage() {
       <section className="panel empty-state">
         <KeyRound size={28} />
         <h1 className="panel-title">관리자 권한이 필요합니다</h1>
-        <p className="muted">Reports 보드는 관리자 계정에서만 표시됩니다.</p>
-        <a className="button" href="/dashboard">Dashboard로 이동</a>
+        <p className="muted">보고서 보드는 관리자 계정에서만 표시됩니다.</p>
+        <a className="button" href="/dashboard">대시보드로 이동</a>
       </section>
     );
   }
@@ -233,7 +233,7 @@ export default function ReportsPage() {
     <div className="reference-page">
       <header className="page-heading-row">
         <div>
-          <h1 className="page-title">Reports</h1>
+          <h1 className="page-title">보고서</h1>
           <p className="muted">사진 분석 결과를 프로젝트, 실, 공사면, 공종, 작업일자, 작성자 기준으로 보고서화합니다.</p>
         </div>
         <button className="button" type="button" disabled={!canGenerate || generating} onClick={generateReport}>
@@ -275,7 +275,7 @@ export default function ReportsPage() {
             <option value="">전체</option>
             {tradeCategories.length > 0
               ? tradeCategories.map((category) => <option key={category.id} value={category.id}>{category.label}</option>)
-              : legacyTrades.filter((trade) => trade).map((trade) => <option key={trade} value={trade}>{trade}</option>)}
+              : legacyTrades.filter((trade) => trade).map((trade) => <option key={trade} value={trade}>{labelForOption(defaultTradeOptions, trade)}</option>)}
           </select>
         </label>
         <label className="field compact">
@@ -302,7 +302,7 @@ export default function ReportsPage() {
         <Metric icon={<Eye />} label="생성 완료" value={String(reports.filter((r) => r.status === "GENERATED").length)} sub="저장된 보고서" tone="green" />
         <Metric icon={<CalendarDays />} label="최근 생성" value={selectedReport ? new Date(selectedReport.created_at).toLocaleDateString("ko-KR") : "-"} sub="선택 보고서" tone="orange" />
         <Metric icon={<Download />} label="사진 근거" value={String(selectedReport?.photo_ids.length ?? 0)} sub="선택 보고서" tone="purple" />
-        <Metric icon={<FileSpreadsheet />} label="내보내기" value="3" sub="JSON / Excel / Word" tone="sky" />
+        <Metric icon={<FileSpreadsheet />} label="내보내기" value="3" sub="JSON / 엑셀 / 워드" tone="sky" />
       </section>
 
       <section className="reports-layout">
@@ -332,7 +332,7 @@ export default function ReportsPage() {
                     <td>{report.created_by.name}</td>
                     <td>{new Date(report.created_at).toLocaleString("ko-KR")}</td>
                     <td>{report.photo_ids.length}</td>
-                    <td><span className={report.status === "GENERATED" ? "badge green" : "badge red"}>{report.status}</span></td>
+                    <td><span className={report.status === "GENERATED" ? "badge green" : "badge red"}>{reportStatusLabel(report.status)}</span></td>
                     <td className="table-actions">
                       <button className="icon-button" type="button" aria-label="미리보기" onClick={(event) => { event.stopPropagation(); setSelectedId(report.id); }}><Eye size={16} /></button>
                       <button className="icon-button" type="button" aria-label="JSON 다운로드" onClick={(event) => { event.stopPropagation(); requestDownload(report, "JSON"); }}><Download size={16} /></button>
@@ -351,12 +351,12 @@ export default function ReportsPage() {
             <>
               <div className="report-detail-head">
                 <h2>{selectedReport.title}</h2>
-                <span className="badge green">{selectedReport.status}</span>
+                <span className="badge green">{reportStatusLabel(selectedReport.status)}</span>
               </div>
               <div className="report-preview">
                 <div className="report-cover">
                   <strong>BIM PHOTO SYNC</strong>
-                  <span>REPORT</span>
+                  <span>보고서</span>
                   <div className="cover-photo"><div className="photo-fallback" /></div>
                 </div>
                 <dl className="detail-definition">
@@ -379,11 +379,11 @@ export default function ReportsPage() {
                   <span className="badge" key={photo.photo_id}>{photo.work_date} / {photo.room}</span>
                 ))}
               </div>
-              {selectedReport.error_message ? <p className="muted">Gemini fallback: {selectedReport.error_message}</p> : null}
+              {selectedReport.error_message ? <p className="muted">Gemini 대체 결과: {selectedReport.error_message}</p> : null}
               <div className="report-actions">
                 <button className="button" type="button" onClick={() => requestDownload(selectedReport, "JSON")}><Download size={16} />JSON</button>
-                <button className="button secondary" type="button" onClick={() => requestDownload(selectedReport, "XLSX")}><FileSpreadsheet size={16} />Excel</button>
-                <button className="button secondary" type="button" onClick={() => requestDownload(selectedReport, "DOCX")}><FileText size={16} />Word</button>
+                <button className="button secondary" type="button" onClick={() => requestDownload(selectedReport, "XLSX")}><FileSpreadsheet size={16} />엑셀</button>
+                <button className="button secondary" type="button" onClick={() => requestDownload(selectedReport, "DOCX")}><FileText size={16} />워드</button>
               </div>
             </>
           ) : (
@@ -408,6 +408,12 @@ function filenameFromDisposition(disposition: string | null) {
   if (!disposition) return null;
   const match = /filename="?([^"]+)"?/i.exec(disposition);
   return match?.[1] ?? null;
+}
+
+function reportStatusLabel(status: string) {
+  if (status === "GENERATED") return "생성 완료";
+  if (status === "FAILED") return "생성 실패";
+  return status;
 }
 
 function Metric({ icon, label, value, sub, tone }: { icon: React.ReactNode; label: string; value: string; sub: string; tone: string }) {

@@ -12,11 +12,11 @@ const siteUrl =
 
 export const metadata: Metadata = {
   title: "BIM Photo Sync",
-  description: "Room-centered construction photo operations",
+  description: "실 기준 현장 사진 관리",
   metadataBase: new URL(siteUrl),
   openGraph: {
     title: "BIM Photo Sync",
-    description: "Room-centered construction photo operations",
+    description: "실 기준 현장 사진 관리",
     type: "website",
     images: [
       {
@@ -31,7 +31,7 @@ export const metadata: Metadata = {
   twitter: {
     card: "summary_large_image",
     title: "BIM Photo Sync",
-    description: "Room-centered construction photo operations",
+    description: "실 기준 현장 사진 관리",
     images: ["/OGimg.png"]
   }
 };

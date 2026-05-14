@@ -1,6 +1,6 @@
 "use client";
 
-import { AlertCircle, Bot, CheckCircle2, ChevronRight, CircleDashed, ClipboardList, ImagePlus, KeyRound, Search, UploadCloud } from "lucide-react";
+import { AlertCircle, Bot, CheckCircle2, ChevronRight, CircleDashed, ImagePlus, KeyRound, Search, Trash2, UploadCloud } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { apiJson, authHeaders, canAccessAdminBoards, Photo, Project, readProjectId, readSession, Room, saveProjectId, TradeCategory, User } from "../client";
 import { defaultSurfaceOptions, defaultTradeOptions, labelForOption, legacyTradeValue, type PhotoOption } from "../photo-options";
@@ -39,7 +39,7 @@ export default function PhotosPage() {
     worker_name: "",
     description: ""
   });
-  const [status, setStatus] = useState("로그인 후 프로젝트와 Room을 선택하세요.");
+  const [status, setStatus] = useState("로그인 후 프로젝트와 실을 선택하세요.");
 
   useEffect(() => {
     const session = readSession();
@@ -131,7 +131,11 @@ export default function PhotosPage() {
     setRoomId("");
     void loadTradeCategories(token, nextProjectId).catch((err) => setStatus(err.message));
     void loadRooms(token, nextProjectId).catch((err) => setStatus(err.message));
-    void loadPhotos(token, nextProjectId, "").catch((err) => setStatus(err.message));
+    if (activeTab === "list") {
+      void loadPhotos(token, nextProjectId, "").catch((err) => setStatus(err.message));
+    } else {
+      setStatus("업로드할 프로젝트를 변경했습니다.");
+    }
   }
 
   function changeRoom(nextRoomId: string) {
@@ -150,7 +154,7 @@ export default function PhotosPage() {
 
   async function uploadPhoto() {
     if (!file || !projectId || !roomId) {
-      setStatus("사진, 프로젝트, Room을 모두 선택하세요.");
+      setStatus("사진, 프로젝트, 실을 모두 선택하세요.");
       return;
     }
     const mime = file.type || "image/jpeg";
@@ -160,7 +164,7 @@ export default function PhotosPage() {
       body: JSON.stringify({ project_id: projectId, mime_type: mime, file_size: file.size })
     });
     const putRes = await fetch(presign.data.presigned_url, { method: presign.data.method, headers: { "Content-Type": mime }, body: file });
-    if (!putRes.ok) throw new Error(`Object upload failed: ${putRes.status}`);
+    if (!putRes.ok) throw new Error(`파일 업로드 실패: ${putRes.status}`);
     await apiJson<CommitResult>("/photos", {
       method: "POST",
       headers: { ...authHeaders(token), "Content-Type": "application/json" },
@@ -193,9 +197,15 @@ export default function PhotosPage() {
   }
 
   async function removeTradeCategory(categoryId: string) {
+    if (!projectId) return;
+    const category = tradeCategories.find((trade) => trade.id === categoryId);
+    if (!category || category.is_system) return;
+    if (!window.confirm(`${category.label} 공종을 삭제할까요?`)) return;
     await apiJson<TradeCategoryResult>(`/projects/${projectId}/trade-categories/${categoryId}`, { method: "DELETE", headers: authHeaders(token) });
     setTradeCategories((current) => current.filter((trade) => trade.id !== categoryId));
     if (uploadMeta.trade_category_id === categoryId) setUploadMeta((current) => ({ ...current, trade_category_id: "", trade: "OTHER" }));
+    if (filterTrade === `category:${categoryId}`) setFilterTrade("");
+    setStatus(`${category.label} 공종을 삭제했습니다.`);
   }
 
   const selectedPhoto = useMemo(() => photos.find((photo) => photo.id === selectedId) ?? photos[0], [photos, selectedId]);
@@ -222,9 +232,9 @@ export default function PhotosPage() {
   return (
     <>
       <div className="breadcrumb">
-        <span>Project</span>
+        <span>프로젝트</span>
         <ChevronRight size={14} />
-        <span>{selectedRoom?.level_name ?? "Room"}</span>
+        <span>{selectedRoom?.level_name ?? "실"}</span>
         <ChevronRight size={14} />
         <strong>{selectedRoom ? `${selectedRoom.room_number ?? ""} ${selectedRoom.room_name}` : "사진 관리"}</strong>
       </div>
@@ -234,6 +244,10 @@ export default function PhotosPage() {
           <button className={activeTab === "list" ? "active" : ""} type="button" onClick={() => setActiveTab("list")}>사진 조회</button>
           <button className={activeTab === "upload" ? "active" : ""} type="button" onClick={() => setActiveTab("upload")}>사진 업로드</button>
         </div>
+      </section>
+
+      {activeTab === "list" ? (
+        <section className="panel">
         <div className="toolbar photo-toolbar">
           <Field label="프로젝트명">
             <select className="input" value={projectId} onChange={(event) => changeProject(event.target.value)}>
@@ -242,7 +256,7 @@ export default function PhotosPage() {
           </Field>
           <Field label="실">
             <select className="input" value={roomId} onChange={(event) => changeRoom(event.target.value)}>
-              <option value="">전체 Room</option>
+              <option value="">전체 실</option>
               {rooms.map((room) => <option key={room.id} value={room.id}>{room.level_name ?? "-"} / {room.room_number ?? ""} {room.room_name}</option>)}
             </select>
           </Field>
@@ -263,14 +277,15 @@ export default function PhotosPage() {
           <button className="button" onClick={() => loadPhotos().catch((err) => setStatus(err.message))} type="button"><Search size={16} /> 조회</button>
           <button className="filter-button" onClick={resetFilters} type="button">전체보기</button>
         </div>
-      </section>
+        </section>
+      ) : null}
 
       {activeTab === "list" ? (
         <div className="dashboard-grid">
           <section className="panel">
-            <div className="panel-header"><div><h1 className="panel-title">사진 조회</h1><div className="muted">{photos.length} Photos</div></div><span className="badge blue">Room 기준</span></div>
+            <div className="panel-header"><div><h1 className="panel-title">사진 조회</h1><div className="muted">사진 {photos.length}개</div></div><span className="badge blue">실 기준</span></div>
             {photos.length === 0 ? (
-              <div className="empty"><div><ImagePlus size={28} /><p>아직 사진이 없습니다.</p><p className="muted">업로드 탭에서 Room에 사진을 연결하세요.</p></div></div>
+              <div className="empty"><div><ImagePlus size={28} /><p>조건에 맞는 사진이 없습니다.</p><p className="muted">프로젝트, 실, 공종, 기간 조건을 다시 확인하세요.</p></div></div>
             ) : (
               <div className="photo-grid">
                 {photos.map((photo) => (
@@ -283,7 +298,7 @@ export default function PhotosPage() {
           </section>
 
           <section className="panel">
-            <div className="panel-header"><h2 className="panel-title">선택 사진 상세</h2><span className="badge orange">{selectedPhoto?.progress_status ?? "EMPTY"}</span></div>
+            <div className="panel-header"><h2 className="panel-title">선택 사진 상세</h2><span className="badge orange">{progressStatusLabel(selectedPhoto?.progress_status)}</span></div>
             {selectedPhoto ? (
               <>
                 <div className="detail-layout">
@@ -296,17 +311,17 @@ export default function PhotosPage() {
                     <dt>위치</dt><dd>{selectedPhoto.room?.level_name ?? "-"} &gt; {selectedPhoto.room?.room_number ?? ""} {selectedPhoto.room?.room_name ?? selectedPhoto.room_id}</dd>
                   </dl>
                 </div>
-                <div className="callout"><div className="callout-title"><Bot size={18} color="#2563eb" /> AI Summary</div><p className="muted" style={{ margin: 0 }}>{selectedPhoto.ai_description ?? selectedPhoto.latest_analysis?.summary ?? "분석 대기 중입니다."}</p></div>
+                <div className="callout"><div className="callout-title"><Bot size={18} color="#2563eb" /> AI 요약</div><p className="muted" style={{ margin: 0 }}>{selectedPhoto.ai_description ?? selectedPhoto.latest_analysis?.summary ?? "분석 대기 중입니다."}</p></div>
                 <div className="callout"><div className="callout-title">작업 내용</div><p className="muted" style={{ margin: 0 }}>{selectedPhoto.description ?? "-"}</p></div>
               </>
             ) : <div className="empty">사진을 선택하세요.</div>}
           </section>
 
           <aside className="panel">
-            <div className="panel-header"><h2 className="panel-title">Room Status</h2></div>
-            <div className="status-card"><span className="muted">선택 Room</span><strong>{selectedRoom ? `${selectedRoom.room_number ?? ""} ${selectedRoom.room_name}` : "전체 Room"}</strong><code>{selectedRoom?.bim_photo_room_id ?? "BIM_PHOTO_ROOM_ID"}</code></div>
+            <div className="panel-header"><h2 className="panel-title">조회 기준</h2></div>
+            <div className="status-card"><span className="muted">선택 실</span><strong>{selectedRoom ? `${selectedRoom.room_number ?? ""} ${selectedRoom.room_name}` : "전체 실"}</strong><code>{selectedRoom?.bim_photo_room_id ?? "BIM_PHOTO_ROOM_ID"}</code></div>
             <div style={{ height: 12 }} />
-            <div className="status-card"><span className="muted">사진 처리</span><div className="badge-row"><span className="badge green">R2 업로드</span><span className="badge blue">AI 큐</span><span className="badge orange">관리자 검토</span></div></div>
+            <div className="status-card"><span className="muted">조회 상태</span><div className="badge-row"><span className="badge green">API 조회</span><span className="badge blue">미리보기</span><span className="badge orange">AI 요약</span></div></div>
             <p className="muted">{status}</p>
           </aside>
         </div>
@@ -316,9 +331,14 @@ export default function PhotosPage() {
         <section className="panel">
           <div className="panel-header"><div><h2 className="panel-title">사진 업로드</h2><p className="muted">프로젝트, 실, 공사면, 공종, 작업일자, 작업자, 내용을 함께 저장합니다.</p></div><UploadCloud size={18} color="#2563eb" /></div>
           <div className="upload-grid">
+            <Field label="프로젝트명">
+              <select className="input" value={projectId} onChange={(event) => changeProject(event.target.value)}>
+                {projects.map((project) => <option key={project.id} value={project.id}>{project.name} / {project.code}</option>)}
+              </select>
+            </Field>
             <Field label="실">
               <select className="input" value={roomId} onChange={(event) => setRoomId(event.target.value)}>
-                <option value="">Room 선택</option>
+                <option value="">실 선택</option>
                 {rooms.map((room) => <option key={room.id} value={room.id}>{room.level_name ?? "-"} / {room.room_number ?? ""} {room.room_name}</option>)}
               </select>
             </Field>
@@ -336,7 +356,7 @@ export default function PhotosPage() {
               </select>
             </Field>
             <Field label="작업일자"><input className="input" type="date" value={uploadMeta.work_date} onChange={(event) => setUploadMeta({ ...uploadMeta, work_date: event.target.value })} /></Field>
-            <Field label="작업자"><input className="input" value={uploadMeta.worker_name} onChange={(event) => setUploadMeta({ ...uploadMeta, worker_name: event.target.value })} /></Field>
+            <Field label="작업자"><input className="input" value={uploadMeta.worker_name} onChange={(event) => setUploadMeta({ ...uploadMeta, worker_name: event.target.value })} placeholder="예: 최반장" /></Field>
             <Field label="사진"><input className="input file-input" type="file" accept="image/*" onChange={(event) => setFile(event.target.files?.[0] ?? null)} /></Field>
             <label className="field upload-note"><span className="label">내용</span><textarea className="input textarea" value={uploadMeta.description} onChange={(event) => setUploadMeta({ ...uploadMeta, description: event.target.value })} /></label>
             <button className="button upload-button" onClick={() => uploadPhoto().catch((err) => setStatus(err.message))} type="button"><UploadCloud size={16} /> 업로드</button>
@@ -344,9 +364,9 @@ export default function PhotosPage() {
         </section>
       ) : null}
 
-      {canManageFilters ? (
+      {activeTab === "upload" && canManageFilters ? (
         <section className="panel filter-manager-panel">
-          <div className="panel-header"><div><h2 className="panel-title">공종 분류 관리</h2><p className="muted">관리자는 프로젝트 공종을 추가하거나 비활성화할 수 있습니다.</p></div></div>
+          <div className="panel-header"><div><h2 className="panel-title">공종 분류 관리</h2><p className="muted">관리자는 업로드에 사용할 사용자 지정 공종을 추가하거나 삭제할 수 있습니다.</p></div></div>
           <div className="filter-manager-grid">
             <label className="field"><span className="label">추가할 공종명</span><input className="input" value={newTradeLabel} onChange={(event) => setNewTradeLabel(event.target.value)} placeholder="예: 석고보드" /></label>
             <button className="button" type="button" onClick={() => addTradeCategory().catch((err) => setStatus(err.message))}>공종 추가</button>
@@ -354,17 +374,22 @@ export default function PhotosPage() {
           <div className="filter-chip-row">
             {tradeCategories.filter((trade) => !trade.is_system).length === 0 ? <span className="muted">추가된 사용자 지정 공종이 없습니다.</span> : null}
             {tradeCategories.filter((trade) => !trade.is_system).map((trade) => (
-              <button className="filter-chip" key={trade.id} type="button" onClick={() => removeTradeCategory(trade.id).catch((err) => setStatus(err.message))}>{trade.label} 삭제</button>
+              <button className="filter-chip danger" key={trade.id} type="button" onClick={() => removeTradeCategory(trade.id).catch((err) => setStatus(err.message))} aria-label={`${trade.label} 공종 삭제`}>
+                <Trash2 size={14} />
+                {trade.label}
+              </button>
             ))}
           </div>
         </section>
       ) : null}
 
-      <div className="bottom-grid">
-        <section className="panel"><div className="panel-header"><h2 className="panel-title">Upload Pipeline</h2><UploadCloud size={18} color="#2563eb" /></div><div className="queue-list"><QueueItem icon={<CheckCircle2 size={16} color="#22c55e" />} name="Presigned URL" value="100%" /><QueueItem icon={<CircleDashed size={16} color="#2563eb" />} name="Object Storage" value="100%" /><QueueItem icon={<AlertCircle size={16} color="#f59e0b" />} name="AI Review" value="45%" /></div></section>
-        <section className="panel"><div className="panel-header"><h2 className="panel-title">AI Analysis Status</h2><Bot size={18} color="#2563eb" /></div><div className="badge-row"><span className="badge green">저장 완료</span><span className="badge blue">분석 큐 등록</span><span className="badge orange">검토 대기</span></div><p className="muted">업로드 후 worker가 사진을 분석하고 분석 요약을 내용란과 AI Summary에 저장합니다.</p></section>
-        <section className="panel"><div className="panel-header"><h2 className="panel-title">Revit Link</h2><ClipboardList size={18} color="#2563eb" /></div><p className="muted">Revit Add-in은 Room 선택 시 BIM_PHOTO_ROOM_ID로 같은 사진 조회 API를 호출합니다.</p><div className="progress"><span style={{ "--value": "100%" } as React.CSSProperties} /></div></section>
-      </div>
+      {activeTab === "upload" ? (
+        <div className="bottom-grid">
+          <section className="panel"><div className="panel-header"><h2 className="panel-title">업로드 흐름</h2><UploadCloud size={18} color="#2563eb" /></div><div className="queue-list"><QueueItem icon={<CheckCircle2 size={16} color="#22c55e" />} name="업로드 URL 발급" value="100%" /><QueueItem icon={<CircleDashed size={16} color="#2563eb" />} name="저장소 업로드" value="100%" /><QueueItem icon={<AlertCircle size={16} color="#f59e0b" />} name="AI 검토" value="45%" /></div></section>
+          <section className="panel"><div className="panel-header"><h2 className="panel-title">AI 분석 상태</h2><Bot size={18} color="#2563eb" /></div><div className="badge-row"><span className="badge green">저장 완료</span><span className="badge blue">분석 큐 등록</span><span className="badge orange">검토 대기</span></div><p className="muted">업로드 후 분석 작업이 사진을 확인하고 분석 요약을 AI 요약에 저장합니다.</p></section>
+          <section className="panel"><div className="panel-header"><h2 className="panel-title">실 연결</h2><ImagePlus size={18} color="#2563eb" /></div><p className="muted">업로드한 사진은 선택한 실의 BIM_PHOTO_ROOM_ID 기준으로 조회됩니다.</p><div className="progress"><span style={{ "--value": "100%" } as React.CSSProperties} /></div></section>
+        </div>
+      ) : null}
     </>
   );
 }
@@ -375,4 +400,13 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 
 function QueueItem({ icon, name, value }: { icon: React.ReactNode; name: string; value: string }) {
   return <div className="queue-item">{icon}<span>{name}</span><strong>{value}</strong><div style={{ gridColumn: "2 / 4" }} className="progress"><span style={{ "--value": value } as React.CSSProperties} /></div></div>;
+}
+
+function progressStatusLabel(status: string | undefined) {
+  if (status === "COMPLETED") return "완료";
+  if (status === "BLOCKED") return "이슈";
+  if (status === "IN_PROGRESS") return "진행중";
+  if (status === "PENDING_REVIEW") return "검토 대기";
+  if (status === "NOT_STARTED") return "시작 전";
+  return "선택 없음";
 }

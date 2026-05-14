@@ -28,6 +28,7 @@ import {
   RevitSheet,
   saveProjectId
 } from "../client";
+import { defaultSurfaceOptions, defaultTradeOptions, labelForOption } from "../photo-options";
 
 type DrawingViewerMode = "floorPlans" | "sheets";
 type ProjectList = { data: Project[] };
@@ -64,12 +65,12 @@ export default function DrawingViewer({ mode }: { mode: DrawingViewerMode }) {
   const [photos, setPhotos] = useState<Photo[]>([]);
   const [status, setStatus] = useState(
     mode === "floorPlans"
-      ? "Revit Add-in에서 Sync Floor Plans를 실행하면 Floor Plan 구역이 표시됩니다."
-      : "Revit Add-in에서 Sync Sheets를 실행하면 Sheet와 Room 구역이 표시됩니다."
+      ? "동기화된 평면도 구역을 불러오는 중입니다."
+      : "동기화된 시트와 실 구역을 불러오는 중입니다."
   );
 
   const isFloorPlanMode = mode === "floorPlans";
-  const pageTitle = isFloorPlanMode ? "Floor Plan" : "Sheets";
+  const pageTitle = isFloorPlanMode ? "평면도" : "시트";
   const selectedPlan = useMemo(
     () => (isFloorPlanMode ? plans.find((plan) => plan.id === planId) ?? plans[0] : undefined),
     [isFloorPlanMode, planId, plans]
@@ -212,16 +213,16 @@ export default function DrawingViewer({ mode }: { mode: DrawingViewerMode }) {
       const roomCount = floorPlanJson.data.reduce((sum, plan) => sum + plan.rooms.length, 0);
       setStatus(
         floorPlanJson.data.length > 0
-          ? `${floorPlanJson.data.length}개 Floor Plan과 ${roomCount}개 Room 구역을 불러왔습니다.`
-          : "동기화된 Floor Plan이 없습니다."
+          ? `${floorPlanJson.data.length}개 평면도와 ${roomCount}개 실 구역을 불러왔습니다.`
+          : "동기화된 평면도가 없습니다."
       );
       return;
     }
 
     setStatus(
       sheetJson.data.length > 0
-        ? `${sheetJson.data.length}개 Sheet와 ${sheetJson.data.reduce((sum, sheet) => sum + sheet.overlays.length, 0)}개 Room 구역을 불러왔습니다.`
-        : "동기화된 Revit Sheet가 없습니다."
+        ? `${sheetJson.data.length}개 시트와 ${sheetJson.data.reduce((sum, sheet) => sum + sheet.overlays.length, 0)}개 실 구역을 불러왔습니다.`
+        : "동기화된 Revit 시트가 없습니다."
     );
   }
 
@@ -293,7 +294,7 @@ export default function DrawingViewer({ mode }: { mode: DrawingViewerMode }) {
         </label>
         {isFloorPlanMode ? (
           <label className="field compact">
-            <span className="label">Floor Plan</span>
+            <span className="label">평면도</span>
             <select className="input" value={selectedPlan?.id ?? ""} onChange={(event) => selectPlan(event.target.value)}>
               {plans.map((plan) => (
                 <option key={plan.id} value={plan.id}>
@@ -304,7 +305,7 @@ export default function DrawingViewer({ mode }: { mode: DrawingViewerMode }) {
           </label>
         ) : (
           <label className="field compact">
-            <span className="label">Sheet</span>
+            <span className="label">시트</span>
             <select className="input" value={selectedSheet?.id ?? ""} onChange={(event) => selectSheet(event.target.value)}>
               {sheets.map((sheet) => (
                 <option key={sheet.id} value={sheet.id}>
@@ -322,19 +323,19 @@ export default function DrawingViewer({ mode }: { mode: DrawingViewerMode }) {
 
       <section className="viewer-layout">
         <aside className="panel viewer-tree">
-          <h2 className="section-title">{isFloorPlanMode ? "Floor Plan 목록" : "Sheet 목록"}</h2>
+          <h2 className="section-title">{isFloorPlanMode ? "평면도 목록" : "시트 목록"}</h2>
           <label className="search-box">
             <Search size={16} />
             <input
               value={treeQuery}
               onChange={(event) => setTreeQuery(event.target.value)}
-              placeholder={isFloorPlanMode ? "Floor Plan 검색" : "Sheet 검색"}
+              placeholder={isFloorPlanMode ? "평면도 검색" : "시트 검색"}
             />
           </label>
           {isFloorPlanMode ? (
             <div className="tree-group">
               <strong>
-                <Layers size={16} /> Revit Floor Plan
+                <Layers size={16} /> Revit 평면도
               </strong>
               {visiblePlans.map((plan) => (
                 <button className={plan.id === selectedPlan?.id ? "active" : ""} key={plan.id} type="button" onClick={() => selectPlan(plan.id)}>
@@ -349,7 +350,7 @@ export default function DrawingViewer({ mode }: { mode: DrawingViewerMode }) {
           ) : (
             <div className="tree-group">
               <strong>
-                <FileText size={16} /> Revit Sheet
+                <FileText size={16} /> Revit 시트
               </strong>
               {visibleSheets.map((sheet) => (
                 <button className={sheet.id === selectedSheet?.id ? "active" : ""} key={sheet.id} type="button" onClick={() => selectSheet(sheet.id)}>
@@ -377,8 +378,8 @@ export default function DrawingViewer({ mode }: { mode: DrawingViewerMode }) {
           ) : (
             <div className="floor-plan real-plan-empty">
               <KeyRound size={30} />
-              <strong>{isFloorPlanMode ? "동기화된 Floor Plan이 없습니다" : "동기화된 Revit Sheet가 없습니다"}</strong>
-              <span>{isFloorPlanMode ? "Revit에서 Sync Floor Plans를 실행하세요." : "Revit에서 Sync Sheets를 실행하세요."}</span>
+              <strong>{isFloorPlanMode ? "동기화된 평면도가 없습니다" : "동기화된 Revit 시트가 없습니다"}</strong>
+              <span>{isFloorPlanMode ? "Revit에서 평면도를 동기화하세요." : "Revit에서 시트를 동기화하세요."}</span>
             </div>
           )}
         </main>
@@ -386,8 +387,8 @@ export default function DrawingViewer({ mode }: { mode: DrawingViewerMode }) {
         <aside className="viewer-side">
           <section className="panel ref-card selected-room-card">
             <div className="room-detail-head">
-              <h2>선택된 Room</h2>
-              <button className="icon-button" type="button" onClick={() => setSelectedRoomId("")} aria-label="Room 선택 해제">
+              <h2>선택된 실</h2>
+              <button className="icon-button" type="button" onClick={() => setSelectedRoomId("")} aria-label="실 선택 해제">
                 <X size={18} />
               </button>
             </div>
@@ -400,16 +401,16 @@ export default function DrawingViewer({ mode }: { mode: DrawingViewerMode }) {
                 </h3>
                 <dl className="detail-definition">
                   <dt>표시 기준</dt>
-                  <dd>{isFloorPlanMode ? "Floor Plan zone" : "Sheet overlay"}</dd>
+                  <dd>{isFloorPlanMode ? "평면도 구역" : "시트 오버레이"}</dd>
                   <dt>층 / 영역</dt>
                   <dd>{selectedPlanRoom?.level_name ?? selectedOverlay?.room?.level_name ?? selectedPlan?.level_name ?? "-"}</dd>
                   <dt>면적</dt>
                   <dd>{selectedRoomArea !== null ? `${selectedRoomArea} m²` : "-"}</dd>
-                  <dt>Room ID</dt>
+                  <dt>실 ID</dt>
                   <dd>
                     <code>{selectedRoom.bim_photo_room_id}</code>
                   </dd>
-                  <dt>Revit Element</dt>
+                  <dt>Revit 요소</dt>
                   <dd>{getRevitElementId(selectedRoom)}</dd>
                   <dt>최근 사진</dt>
                   <dd>{photos.length}개</dd>
@@ -419,7 +420,7 @@ export default function DrawingViewer({ mode }: { mode: DrawingViewerMode }) {
                     사진 업로드 <ChevronRight size={15} />
                   </a>
                   <a className="button secondary" href={selectedPhotosHref}>
-                    Room 사진 보기
+                    실 사진 보기
                   </a>
                 </div>
               </>
@@ -430,9 +431,9 @@ export default function DrawingViewer({ mode }: { mode: DrawingViewerMode }) {
           <section className="panel ref-card">
             <h2 className="section-title">연결 정보</h2>
             <dl className="detail-definition">
-              <dt>{isFloorPlanMode ? "Floor Plan" : "Sheet"}</dt>
+              <dt>{isFloorPlanMode ? "평면도" : "시트"}</dt>
               <dd>{isFloorPlanMode ? selectedPlan?.view_name ?? "-" : selectedSheet ? `${selectedSheet.sheet_number} · ${selectedSheet.sheet_name}` : "-"}</dd>
-              <dt>Room 구역</dt>
+              <dt>실 구역</dt>
               <dd>{isFloorPlanMode ? selectedPlan?.rooms.length ?? 0 : selectedSheet?.overlays.length ?? 0}</dd>
               <dt>프로젝트</dt>
               <dd>{projects.find((project) => project.id === projectId)?.name ?? "-"}</dd>
@@ -453,7 +454,7 @@ export default function DrawingViewer({ mode }: { mode: DrawingViewerMode }) {
       <section className="panel ref-card viewer-photo-strip">
         <div className="ref-panel-title">
           <h2>
-            {selectedRoom ? formatRoomTitle(selectedRoom) : "Room"} 관련 사진 <span className="count-badge">{photos.length}</span>
+            {selectedRoom ? formatRoomTitle(selectedRoom) : "실"} 관련 사진 <span className="count-badge">{photos.length}</span>
           </h2>
           <a href={selectedPhotosHref}>
             모든 사진 보기 <ChevronRight size={14} />
@@ -462,14 +463,14 @@ export default function DrawingViewer({ mode }: { mode: DrawingViewerMode }) {
         <div className="strip-photos">
           {photos.slice(0, 6).map((photo, index) => (
             <article className={index === 0 ? "strip-photo active" : "strip-photo"} key={photo.id}>
-              {photo.preview_url ? <img src={photo.preview_url} alt={photo.description ?? "Room photo"} /> : <div className="photo-fallback" />}
+              {photo.preview_url ? <img src={photo.preview_url} alt={photo.description ?? "실 사진"} /> : <div className="photo-fallback" />}
               <strong>{photo.work_date}</strong>
               <span>
-                {photo.work_surface} · {photo.trade}
+                {labelForOption(defaultSurfaceOptions, photo.work_surface)} · {labelForOption(defaultTradeOptions, photo.trade)}
               </span>
             </article>
           ))}
-          {photos.length === 0 ? <p className="muted">이 Room에 등록된 사진이 없습니다.</p> : null}
+          {photos.length === 0 ? <p className="muted">이 실에 등록된 사진이 없습니다.</p> : null}
           <a className="more-photo" href={selectedPhotosHref}>
             <Camera size={25} />
             더보기
@@ -507,17 +508,17 @@ function SheetViewer({
           <div className="sheet-asset-empty">
             <FileText size={30} />
             <strong>{sheet.sheet_number}</strong>
-            <span>Sheet PDF를 불러오는 중이거나 PDF export가 없는 Sheet입니다.</span>
+            <span>시트 PDF를 불러오는 중이거나 PDF 내보내기가 없는 시트입니다.</span>
           </div>
         )}
-        <svg className="sheet-overlay-svg" viewBox="0 0 1 1" preserveAspectRatio="none" aria-label="Room overlay">
+        <svg className="sheet-overlay-svg" viewBox="0 0 1 1" preserveAspectRatio="none" aria-label="실 오버레이">
           {sheet.overlays.map((overlay) => (
             <SheetRoomShape key={overlay.id} overlay={overlay} selected={overlay.bim_photo_room_id === selectedRoomId} onSelect={onSelect} />
           ))}
         </svg>
         <div className="sheet-room-hint">
           <MousePointer2 size={15} />
-          <span>{selectedOverlay ? formatRoomTitle(selectedOverlay) : "도면 위 파란 Room 영역을 선택하세요."}</span>
+          <span>{selectedOverlay ? formatRoomTitle(selectedOverlay) : "도면 위 파란 실 영역을 선택하세요."}</span>
         </div>
       </div>
     </div>
@@ -675,7 +676,7 @@ function FloorPlanSvg({
           <div className="sheet-asset-empty">
             <Layers size={30} />
             <strong>{plan.view_name}</strong>
-            <span>Floor Plan PDF를 불러오는 중이거나 PDF export가 없는 View입니다.</span>
+            <span>평면도 PDF를 불러오는 중이거나 PDF 내보내기가 없는 뷰입니다.</span>
           </div>
         )}
         <svg
@@ -683,7 +684,7 @@ function FloorPlanSvg({
           viewBox={viewBox}
           preserveAspectRatio="none"
           role="img"
-          aria-label={`${plan.view_name} Revit floor plan`}
+          aria-label={`${plan.view_name} Revit 평면도`}
         >
           {plan.rooms.map((room) => (
             <PlanRoomShape
@@ -765,5 +766,5 @@ function formatRoomTitle(room: FloorPlanRoom | RevitRoomOverlay) {
 
 function formatBimRoomFallback(bimPhotoRoomId: string) {
   const id = bimPhotoRoomId.startsWith("rm_") ? bimPhotoRoomId.slice(3) : bimPhotoRoomId;
-  return `Room ${id.slice(0, 8)}`;
+  return `실 ${id.slice(0, 8)}`;
 }

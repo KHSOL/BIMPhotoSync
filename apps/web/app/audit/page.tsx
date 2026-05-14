@@ -1,8 +1,8 @@
 "use client";
 
-import { CalendarDays, Download, KeyRound, LockKeyhole, RotateCcw, Search, ShieldCheck, Trash2, UserPlus, Wand2 } from "lucide-react";
+import { CalendarDays, Download, KeyRound, RotateCcw, Search, ShieldCheck, Trash2, UserPlus, Wand2 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
-import { apiJson, AuditEvent, AuthEvent, authHeaders, canAccessAdminBoards, Project, ProjectMember, readProjectId, readSession, saveProjectId, type User } from "../client";
+import { apiJson, AuditEvent, authHeaders, canAccessAdminBoards, Project, ProjectMember, readProjectId, readSession, saveProjectId, type User } from "../client";
 
 export default function AuditPage() {
   const [hasSession, setHasSession] = useState(false);
@@ -12,7 +12,6 @@ export default function AuditPage() {
   const [projectId, setProjectId] = useState("");
   const [members, setMembers] = useState<ProjectMember[]>([]);
   const [auditEvents, setAuditEvents] = useState<AuditEvent[]>([]);
-  const [authEvents, setAuthEvents] = useState<AuthEvent[]>([]);
   const [selectedMemberId, setSelectedMemberId] = useState("");
   const [status, setStatus] = useState("");
 
@@ -40,14 +39,12 @@ export default function AuditPage() {
 
   async function loadProjectAudit(nextToken = token, nextProjectId = projectId) {
     if (!nextProjectId) return;
-    const [membersJson, auditJson, authJson] = await Promise.all([
+    const [membersJson, auditJson] = await Promise.all([
       apiJson<{ data: ProjectMember[] }>(`/projects/${nextProjectId}/members`, { headers: authHeaders(nextToken) }),
-      apiJson<{ data: AuditEvent[] }>(`/projects/${nextProjectId}/audit-events?limit=50`, { headers: authHeaders(nextToken) }),
-      apiJson<{ data: AuthEvent[] }>(`/projects/${nextProjectId}/auth-events?limit=20`, { headers: authHeaders(nextToken) })
+      apiJson<{ data: AuditEvent[] }>(`/projects/${nextProjectId}/audit-events?limit=50`, { headers: authHeaders(nextToken) })
     ]);
     setMembers(membersJson.data);
     setAuditEvents(auditJson.data);
-    setAuthEvents(authJson.data);
     setSelectedMemberId(membersJson.data[0]?.id ?? "");
     setStatus(`${membersJson.data.length}명의 참여자와 ${auditJson.data.length}개의 활동 로그를 불러왔습니다.`);
   }
@@ -108,8 +105,8 @@ export default function AuditPage() {
       <section className="panel empty-state">
         <KeyRound size={28} />
         <h1 className="panel-title">관리자 권한이 필요합니다</h1>
-        <p className="muted">Audit 보드는 관리자 계정에서만 표시됩니다.</p>
-        <a className="button" href="/dashboard">Dashboard로 이동</a>
+        <p className="muted">감사 보드는 관리자 계정에서만 표시됩니다.</p>
+        <a className="button" href="/dashboard">대시보드로 이동</a>
       </section>
     );
   }
@@ -118,8 +115,8 @@ export default function AuditPage() {
     <div className="reference-page">
       <header className="page-heading-row">
         <div>
-          <h1 className="page-title">Audit</h1>
-          <p className="muted">프로젝트 참여자, 활동 로그, 최근 로그인 이벤트를 실제 API 데이터로 조회합니다.</p>
+          <h1 className="page-title">감사</h1>
+          <p className="muted">프로젝트 참여자와 활동 로그를 실제 API 데이터로 조회합니다.</p>
         </div>
         <button className="filter-button" type="button" onClick={exportMembersToExcel}><Download size={16} />엑셀로 내보내기</button>
       </header>
@@ -133,18 +130,16 @@ export default function AuditPage() {
           <option value="">전체 사용자</option>
           {members.map((member) => <option key={member.id} value={member.id}>{member.user.name}</option>)}
         </select>
-        <select className="input"><option>로그인/로그아웃 제외</option></select>
         <select className="input"><option>전체 리소스</option></select>
         <label className="search-box"><Search size={17} /><input placeholder="키워드 검색" /></label>
         <button className="filter-button" type="button" onClick={() => loadProjectAudit().catch((error) => setStatus(error.message))}><RotateCcw size={16} />새로고침</button>
       </section>
 
-      <section className="metric-grid five">
+      <section className="metric-grid four">
         <Metric icon={<ShieldCheck />} label="전체 활동" value={String(auditEvents.length)} sub="현재 프로젝트" tone="blue" />
         <Metric icon={<UserPlus />} label="생성" value={String(auditEvents.filter((event) => event.action === "CREATE").length)} sub="실제 로그" tone="green" />
         <Metric icon={<Wand2 />} label="수정" value={String(auditEvents.filter((event) => event.action === "UPDATE").length)} sub="실제 로그" tone="orange" />
         <Metric icon={<Trash2 />} label="삭제" value={String(auditEvents.filter((event) => event.action === "DELETE").length)} sub="실제 로그" tone="purple" />
-        <Metric icon={<LockKeyhole />} label="최근 로그인" value={String(authEvents.length)} sub="auth event" tone="sky" />
       </section>
 
       <section className="panel ref-card">
@@ -155,7 +150,7 @@ export default function AuditPage() {
               <button className={member.id === selectedMember?.id ? "member-row active" : "member-row"} key={member.id} type="button" onClick={() => setSelectedMemberId(member.id)}>
                 <strong>{member.user.name}</strong>
                 <span>{member.user.email}</span>
-                <em>{member.role}</em>
+                <em>{roleLabel(member.role)}</em>
               </button>
             ))}
             {members.length === 0 ? <p className="muted">현재 프로젝트 참여자가 없습니다.</p> : null}
@@ -164,8 +159,8 @@ export default function AuditPage() {
             <div><dt>이름</dt><dd>{selectedMember?.user.name ?? "-"}</dd></div>
             <div><dt>이메일</dt><dd>{selectedMember?.user.email ?? "-"}</dd></div>
             <div><dt>회사</dt><dd>{selectedMember?.user.company_name ?? "-"}</dd></div>
-            <div><dt>전역 권한</dt><dd>{selectedMember?.user.role ?? "-"}</dd></div>
-            <div><dt>프로젝트 권한</dt><dd>{selectedMember?.role ?? "-"}</dd></div>
+            <div><dt>전역 권한</dt><dd>{selectedMember ? roleLabel(selectedMember.user.role) : "-"}</dd></div>
+            <div><dt>프로젝트 권한</dt><dd>{selectedMember ? roleLabel(selectedMember.role) : "-"}</dd></div>
             <div><dt>참여일</dt><dd>{selectedMember ? new Date(selectedMember.created_at).toLocaleString("ko-KR") : "-"}</dd></div>
           </dl>
         </div>
@@ -183,8 +178,8 @@ export default function AuditPage() {
                     <td>{new Date(event.created_at).toLocaleString("ko-KR")}</td>
                     <td>{event.actor?.name ?? "-"}</td>
                     <td>{event.project?.name ?? "-"}</td>
-                    <td><span className={`badge ${event.action === "DELETE" ? "red" : event.action === "UPDATE" ? "blue" : "green"}`}>{event.action}</span></td>
-                    <td>{event.resource_type}</td>
+                    <td><span className={`badge ${event.action === "DELETE" ? "red" : event.action === "UPDATE" ? "blue" : "green"}`}>{actionLabel(event.action)}</span></td>
+                    <td>{resourceTypeLabel(event.resource_type)}</td>
                     <td>{event.detail ?? event.resource_id ?? "-"}</td>
                     <td>{event.ip_address ?? "-"}</td>
                   </tr>
@@ -199,26 +194,12 @@ export default function AuditPage() {
           <section className="panel ref-card">
             <h2 className="section-title">작업 유형별 활동</h2>
             <div className="donut-card compact">
-              <div className="donut big audit"><strong>{auditEvents.length}</strong><span>Total</span></div>
+              <div className="donut big audit"><strong>{auditEvents.length}</strong><span>전체</span></div>
               <ul className="legend-list">
                 <li><i className="green-dot" />생성 <strong>{auditEvents.filter((event) => event.action === "CREATE").length}</strong></li>
                 <li><i className="blue-dot" />수정 <strong>{auditEvents.filter((event) => event.action === "UPDATE").length}</strong></li>
                 <li><i className="purple-dot" />삭제 <strong>{auditEvents.filter((event) => event.action === "DELETE").length}</strong></li>
               </ul>
-            </div>
-          </section>
-          <section className="panel ref-card">
-            <div className="ref-panel-title"><h2>최근 로그인 활동</h2></div>
-            <div className="login-activity-list">
-              {authEvents.map((event) => (
-                <div className="login-activity-row" key={event.id}>
-                  <span>{event.user?.name.slice(0, 2).toUpperCase() ?? "--"}</span>
-                  <strong>{event.user?.name ?? event.email}</strong>
-                  <time>{new Date(event.created_at).toLocaleString("ko-KR")}</time>
-                  <em className={event.success ? "success" : "fail"}>{event.success ? "성공" : "실패"}</em>
-                </div>
-              ))}
-              {authEvents.length === 0 ? <div className="empty compact-empty">아직 로그인 이벤트가 없습니다.</div> : null}
             </div>
           </section>
         </aside>
@@ -251,4 +232,30 @@ function safeFilename(value: string) {
 
 function escapeHtml(value: string) {
   return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
+
+function actionLabel(action: string) {
+  if (action === "CREATE") return "생성";
+  if (action === "UPDATE") return "수정";
+  if (action === "DELETE") return "삭제";
+  return action;
+}
+
+function roleLabel(role: string) {
+  if (role === "SUPER_ADMIN") return "최고관리자";
+  if (role === "COMPANY_ADMIN") return "회사 관리자";
+  if (role === "PROJECT_ADMIN") return "프로젝트 관리자";
+  if (role === "BIM_MANAGER") return "BIM 관리자";
+  if (role === "MANAGER") return "관리자";
+  if (role === "VIEWER") return "조회자";
+  return "현장 작업자";
+}
+
+function resourceTypeLabel(resourceType: string) {
+  if (resourceType === "TRADE_CATEGORY") return "공종";
+  if (resourceType === "PHOTO") return "사진";
+  if (resourceType === "REPORT") return "보고서";
+  if (resourceType === "PROJECT") return "프로젝트";
+  if (resourceType === "ROOM") return "실";
+  return resourceType;
 }
