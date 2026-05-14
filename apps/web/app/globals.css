@@ -3921,3 +3921,94 @@ body {
     padding-inline: 7px;
   }
 }
+
+/* Containment hardening: active states and dense rows must stay inside their cards. */
+.project-row {
+  align-items: start;
+  overflow: hidden;
+  row-gap: 12px;
+}
+
+.project-row.active {
+  box-shadow: inset 0 0 0 2px var(--blue-500);
+}
+
+.photo-tile.active,
+.strip-photo.active,
+.auth-role-card.active {
+  box-shadow: inset 0 0 0 2px var(--blue-500);
+}
+
+.project-row-actions {
+  grid-column: 1 / -1;
+  padding-left: 30px;
+}
+
+.project-row-actions .small-button {
+  flex: 1 1 108px;
+  max-width: 150px;
+}
+
+.trade-progress {
+  grid-template-columns: minmax(72px, 0.65fr) minmax(0, 1fr) minmax(42px, auto) minmax(24px, auto);
+  min-width: 0;
+}
+
+.trade-progress > span:first-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.level-bar-row {
+  grid-template-columns: minmax(72px, 0.62fr) minmax(0, 1fr) minmax(42px, auto);
+  gap: 10px;
+  min-width: 0;
+}
+
+.level-bar-row em {
+  min-width: 0;
+  max-width: 100%;
+  padding-inline: 8px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.level-bar-track,
+.progress {
+  min-width: 0;
+}
+
+.floating-tools {
+  display: none;
+}
+
+@media (max-width: 1280px) {
+  .trade-progress {
+    grid-template-columns: minmax(66px, 0.62fr) minmax(0, 1fr) minmax(40px, auto);
+  }
+
+  .trade-progress small {
+    display: none;
+  }
+
+  .level-bar-row {
+    grid-template-columns: minmax(68px, 0.58fr) minmax(0, 1fr) minmax(40px, auto);
+  }
+}
+
+@media (max-width: 720px) {
+  .project-row-actions {
+    padding-left: 0;
+  }
+
+  .project-row-actions .small-button {
+    max-width: none;
+  }
+
+  .trade-progress,
+  .level-bar-row {
+    grid-template-columns: minmax(0, 0.72fr) minmax(0, 1fr) auto;
+  }
+}

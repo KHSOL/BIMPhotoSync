@@ -1,19 +1,14 @@
 "use client";
 
 import {
-  Box,
   Camera,
   ChevronRight,
-  Crosshair,
   FileText,
   Filter,
   KeyRound,
   Layers,
   MousePointer2,
-  Move,
-  Ruler,
   Search,
-  Settings,
   Star,
   X
 } from "lucide-react";
@@ -65,7 +60,6 @@ export default function DrawingViewer({ mode }: { mode: DrawingViewerMode }) {
   const [sheetId, setSheetId] = useState("");
   const [sheetAssetUrl, setSheetAssetUrl] = useState("");
   const [selectedRoomId, setSelectedRoomId] = useState("");
-  const [activeTool, setActiveTool] = useState<"select" | "measure" | "note" | "section" | "settings">("select");
   const [treeQuery, setTreeQuery] = useState("");
   const [photos, setPhotos] = useState<Photo[]>([]);
   const [status, setStatus] = useState(
@@ -320,32 +314,6 @@ export default function DrawingViewer({ mode }: { mode: DrawingViewerMode }) {
             </select>
           </label>
         )}
-        <div className="tool-segment">
-          <button className={activeTool === "select" ? "active" : ""} type="button" onClick={() => setActiveTool("select")}>
-            <MousePointer2 size={17} />
-            선택
-          </button>
-          <button className={activeTool === "measure" ? "active" : ""} type="button" onClick={() => setActiveTool("measure")}>
-            <Ruler size={17} />
-            측정
-          </button>
-          <button className={activeTool === "note" ? "active" : ""} type="button" onClick={() => setActiveTool("note")}>
-            <Crosshair size={17} />
-            주석
-          </button>
-          <button className={activeTool === "section" ? "active" : ""} type="button" onClick={() => setActiveTool("section")}>
-            <Box size={17} />
-            단면
-          </button>
-        </div>
-        <div className="tool-segment small">
-          <button className="active" type="button">
-            2D
-          </button>
-          <button type="button" disabled>
-            3D
-          </button>
-        </div>
         <button className="filter-button" type="button" onClick={() => loadProjectGeometry().catch((err: Error) => setStatus(err.message))}>
           <Filter size={16} />
           새로고침
@@ -413,26 +381,6 @@ export default function DrawingViewer({ mode }: { mode: DrawingViewerMode }) {
               <span>{isFloorPlanMode ? "Revit에서 Sync Floor Plans를 실행하세요." : "Revit에서 Sync Sheets를 실행하세요."}</span>
             </div>
           )}
-          <div className="floating-tools">
-            <button className={activeTool === "select" ? "active" : ""} type="button" onClick={() => setActiveTool("select")}>
-              <Move size={19} />
-            </button>
-            <button className={activeTool === "select" ? "active" : ""} type="button" onClick={() => setActiveTool("select")}>
-              <MousePointer2 size={19} />
-            </button>
-            <button className={activeTool === "note" ? "active" : ""} type="button" onClick={() => setActiveTool("note")}>
-              <Crosshair size={19} />
-            </button>
-            <button className={activeTool === "section" ? "active" : ""} type="button" onClick={() => setActiveTool("section")}>
-              <Box size={19} />
-            </button>
-            <button className={activeTool === "measure" ? "active" : ""} type="button" onClick={() => setActiveTool("measure")}>
-              <Ruler size={19} />
-            </button>
-            <button className={activeTool === "settings" ? "active" : ""} type="button" onClick={() => setActiveTool("settings")}>
-              <Settings size={19} />
-            </button>
-          </div>
         </main>
 
         <aside className="viewer-side">
