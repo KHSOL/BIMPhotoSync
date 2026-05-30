@@ -30,6 +30,7 @@ import {
   saveProjectId
 } from "../client";
 import { defaultSurfaceOptions, defaultTradeOptions, labelForOption } from "../photo-options";
+import { FloorPlan3D } from "./FloorPlan3D";
 
 type DrawingViewerMode = "floorPlans" | "sheets";
 type ProjectList = { data: Project[] };
@@ -62,6 +63,7 @@ export default function DrawingViewer({ mode }: { mode: DrawingViewerMode }) {
   const [sheets, setSheets] = useState<RevitSheet[]>([]);
   const [sheetId, setSheetId] = useState("");
   const [sheetAssetUrl, setSheetAssetUrl] = useState("");
+  const [floorPlanViewMode, setFloorPlanViewMode] = useState<"2d" | "3d">("2d");
   const [selectedRoomId, setSelectedRoomId] = useState("");
   const [treeQuery, setTreeQuery] = useState("");
   const [roomProgressByBimId, setRoomProgressByBimId] = useState<Record<string, Room["progress_by_surface"]>>({});
@@ -185,9 +187,10 @@ export default function DrawingViewer({ mode }: { mode: DrawingViewerMode }) {
 
   async function loadProjects(nextToken = token) {
     const json = await apiJson<ProjectList>("/projects", { headers: authHeaders(nextToken) });
-    setProjects(json.data);
+    const nextProjects = Array.isArray(json.data) ? json.data : [];
+    setProjects(nextProjects);
     const storedProjectId = readProjectId();
-    const nextProjectId = json.data.some((project) => project.id === storedProjectId) ? storedProjectId : json.data[0]?.id ?? "";
+    const nextProjectId = nextProjects.some((project) => project.id === storedProjectId) ? storedProjectId : nextProjects[0]?.id ?? "";
     setProjectId(nextProjectId);
     if (nextProjectId) {
       saveProjectId(nextProjectId);
@@ -203,35 +206,38 @@ export default function DrawingViewer({ mode }: { mode: DrawingViewerMode }) {
       apiJson<RoomList>(`/projects/${nextProjectId}/rooms`, { headers: authHeaders(nextToken) })
     ]);
 
-    setPlans(floorPlanJson.data);
-    setSheets(sheetJson.data);
+    const nextPlans = Array.isArray(floorPlanJson.data) ? floorPlanJson.data : [];
+    const nextSheets = Array.isArray(sheetJson.data) ? sheetJson.data : [];
+    const nextRooms = Array.isArray(roomJson.data) ? roomJson.data : [];
+    setPlans(nextPlans);
+    setSheets(nextSheets);
     setRoomProgressByBimId(
-      roomJson.data.reduce<Record<string, Room["progress_by_surface"]>>((result, room) => {
+      nextRooms.reduce<Record<string, Room["progress_by_surface"]>>((result, room) => {
         result[room.bim_photo_room_id] = room.progress_by_surface;
         return result;
       }, {})
     );
-    setPlanId(floorPlanJson.data[0]?.id ?? "");
-    setSheetId(sheetJson.data[0]?.id ?? "");
+    setPlanId(nextPlans[0]?.id ?? "");
+    setSheetId(nextSheets[0]?.id ?? "");
     setSelectedRoomId(
       isFloorPlanMode
-        ? floorPlanJson.data[0]?.rooms[0]?.bim_photo_room_id ?? ""
-        : sheetJson.data[0]?.overlays[0]?.bim_photo_room_id ?? ""
+        ? nextPlans[0]?.rooms[0]?.bim_photo_room_id ?? ""
+        : nextSheets[0]?.overlays[0]?.bim_photo_room_id ?? ""
     );
 
     if (isFloorPlanMode) {
-      const roomCount = floorPlanJson.data.reduce((sum, plan) => sum + plan.rooms.length, 0);
+      const roomCount = nextPlans.reduce((sum, plan) => sum + plan.rooms.length, 0);
       setStatus(
-        floorPlanJson.data.length > 0
-          ? `${floorPlanJson.data.length}개 평면도와 ${roomCount}개 방 구역을 불러왔습니다.`
+        nextPlans.length > 0
+          ? `${nextPlans.length}개 평면도와 ${roomCount}개 방 구역을 불러왔습니다.`
           : "동기화된 평면도가 없습니다."
       );
       return;
     }
 
     setStatus(
-      sheetJson.data.length > 0
-        ? `${sheetJson.data.length}개 시트와 ${sheetJson.data.reduce((sum, sheet) => sum + sheet.overlays.length, 0)}개 방 구역을 불러왔습니다.`
+      nextSheets.length > 0
+        ? `${nextSheets.length}개 시트와 ${nextSheets.reduce((sum, sheet) => sum + sheet.overlays.length, 0)}개 방 구역을 불러왔습니다.`
         : "동기화된 Revit 시트가 없습니다."
     );
   }
@@ -329,6 +335,16 @@ export default function DrawingViewer({ mode }: { mode: DrawingViewerMode }) {
           <Filter size={16} />
           새로고침
         </button>
+        {isFloorPlanMode ? (
+          <div className="segmented-control" aria-label="도면 보기 방식">
+            <button className={floorPlanViewMode === "2d" ? "active" : ""} type="button" onClick={() => setFloorPlanViewMode("2d")}>
+              2D
+            </button>
+            <button className={floorPlanViewMode === "3d" ? "active" : ""} type="button" onClick={() => setFloorPlanViewMode("3d")}>
+              3D
+            </button>
+          </div>
+        ) : null}
       </section>
 
       <section className="viewer-layout">
@@ -376,7 +392,14 @@ export default function DrawingViewer({ mode }: { mode: DrawingViewerMode }) {
         </aside>
 
         <main className="viewer-main">
-          {isFloorPlanMode && selectedPlan ? (
+          {isFloorPlanMode && selectedPlan && floorPlanViewMode === "3d" ? (
+            <FloorPlan3D
+              plan={selectedPlan}
+              selectedRoomId={selectedRoomId}
+              roomProgressByBimId={roomProgressByBimId}
+              onSelect={setSelectedRoomId}
+            />
+          ) : isFloorPlanMode && selectedPlan ? (
             <FloorPlanSvg
               plan={selectedPlan}
               assetUrl={floorPlanAssetUrl}

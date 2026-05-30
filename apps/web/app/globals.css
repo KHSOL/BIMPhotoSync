@@ -2331,6 +2331,50 @@ a {
   white-space: nowrap;
 }
 
+.segmented-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  min-height: 40px;
+  padding: 3px;
+  border: 1px solid var(--gray-200);
+  border-radius: 8px;
+  background: var(--gray-50);
+}
+
+.segmented-control button {
+  min-width: 48px;
+  min-height: 32px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--gray-600);
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.segmented-control button.active {
+  background: #fff;
+  color: var(--blue-600);
+  box-shadow: var(--shadow-sm);
+}
+
+.floor-plan-3d {
+  position: relative;
+  width: 100%;
+  min-height: clamp(420px, 62vh, 760px);
+  overflow: hidden;
+  border: 1px solid var(--gray-200);
+  border-radius: 8px;
+  background: var(--gray-50);
+}
+
+.floor-plan-3d-canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
 .revit-room-shape {
   cursor: pointer;
 }
