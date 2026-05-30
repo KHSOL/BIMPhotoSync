@@ -92,6 +92,7 @@ export type Room = {
   area_m2?: number | null;
   location_text?: string | null;
   status: string;
+  progress_by_surface?: Record<string, { status: "NOT_STARTED" | "IN_PROGRESS" | "COMPLETED"; photo_count: number }>;
 };
 
 export type PlanPoint = {

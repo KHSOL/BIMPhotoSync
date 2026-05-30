@@ -201,11 +201,14 @@ export class ReportsService {
             "아래 사진과 메타데이터를 근거로 한국어 JSON 보고서를 작성한다.",
             "반드시 JSON만 반환한다. Markdown 금지.",
             "JSON 필드: title, generated_at, generated_by, filters, situation, comparison_photos, progress_timeline, analysis_result, memo.",
+            "분류와 분석 순서는 프로젝트 → 방(실) → 공사면 → 작업일자 → 공종 → 작성자(작업자) 순서를 따른다.",
+            "비교 사진은 같은 방/공사면 안에서 날짜 순 변화가 드러나도록 먼저 설명한다.",
             `제목: ${title}`,
             `생성자: ${generatedBy}`,
             `필터: ${JSON.stringify(reportFilters(dto))}`,
+            dto.ai_prompt ? `관리자 추가 지시: ${dto.ai_prompt}` : "",
             `사진 메타데이터: ${JSON.stringify(photos.map(photoSummary))}`
-          ].join("\n")
+          ].filter(Boolean).join("\n")
         }
       ];
 
@@ -262,12 +265,12 @@ function buildTitle(dto: GenerateReportDto, photos: PhotoForReport[]) {
 }
 
 function buildHeuristicReport(title: string, generatedBy: string, dto: GenerateReportDto, photos: PhotoForReport[]): ReportContent {
-  const sorted = [...photos].sort((a, b) => a.workDate.getTime() - b.workDate.getTime() || a.uploadedAt.getTime() - b.uploadedAt.getTime());
+  const sorted = sortPhotosForReport(photos);
   const first = sorted[0];
   const last = sorted[sorted.length - 1];
   const groups = new Map<string, number>();
   for (const photo of sorted) {
-    const key = `${photo.room.roomNumber ?? ""} ${photo.room.roomName} / ${photo.workSurface} / ${photo.trade}`;
+    const key = `${photo.room.roomNumber ?? ""} ${photo.room.roomName} / ${photo.workSurface} / ${photo.workDate.toISOString().slice(0, 10)} / ${photo.trade} / ${photo.workerName ?? "-"}`;
     groups.set(key, (groups.get(key) ?? 0) + 1);
   }
   const timeline = sorted.map((photo) => {
@@ -282,8 +285,10 @@ function buildHeuristicReport(title: string, generatedBy: string, dto: GenerateR
           first && last && first.id !== last.id
             ? `초기 사진(${first.workDate.toISOString().slice(0, 10)})부터 최근 사진(${last.workDate.toISOString().slice(0, 10)})까지의 변화 흐름을 시간순으로 정리했습니다.`
             : "단일 시점 사진 기준으로 현재 상태를 정리했습니다.",
-          `주요 분류는 ${Array.from(groups.entries()).map(([key, count]) => `${key} ${count}건`).join(", ")}입니다.`
-        ].join(" ");
+          "분류 기준은 프로젝트 → 방(실) → 공사면 → 작업일자 → 공종 → 작성자(작업자) 순서입니다.",
+          `주요 분류는 ${Array.from(groups.entries()).map(([key, count]) => `${key} ${count}건`).join(", ")}입니다.`,
+          dto.ai_prompt ? `관리자 지시사항(${dto.ai_prompt})을 보고서 관점에 반영했습니다.` : ""
+        ].filter(Boolean).join(" ");
 
   return {
     title,
@@ -305,6 +310,21 @@ function buildHeuristicReport(title: string, generatedBy: string, dto: GenerateR
   };
 }
 
+function sortPhotosForReport(photos: PhotoForReport[]) {
+  return [...photos].sort((a, b) => {
+    const roomA = `${a.room.roomNumber ?? ""} ${a.room.roomName}`;
+    const roomB = `${b.room.roomNumber ?? ""} ${b.room.roomName}`;
+    return (
+      roomA.localeCompare(roomB, "ko-KR") ||
+      a.workSurface.localeCompare(b.workSurface) ||
+      a.workDate.getTime() - b.workDate.getTime() ||
+      a.trade.localeCompare(b.trade) ||
+      (a.workerName ?? "").localeCompare(b.workerName ?? "", "ko-KR") ||
+      a.uploadedAt.getTime() - b.uploadedAt.getTime()
+    );
+  });
+}
+
 function reportFilters(dto: GenerateReportDto) {
   return {
     project_id: dto.project_id,
@@ -314,7 +334,8 @@ function reportFilters(dto: GenerateReportDto) {
     trade_category_id: dto.trade_category_id ?? null,
     date_from: dto.date_from ?? null,
     date_to: dto.date_to ?? null,
-    worker_name: dto.worker_name ?? null
+    worker_name: dto.worker_name ?? null,
+    ai_prompt: dto.ai_prompt ?? null
   };
 }
 

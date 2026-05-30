@@ -2,7 +2,7 @@ import { GetObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { InjectQueue } from "@nestjs/bullmq";
 import { BadRequestException, Injectable, NotFoundException } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
-import { Photo, Prisma } from "@prisma/client";
+import { Photo, Prisma, ProgressStatus } from "@prisma/client";
 import { Queue } from "bullmq";
 import { PrismaService } from "../prisma/prisma.service";
 import { ProjectsService } from "../projects/projects.service";
@@ -60,6 +60,7 @@ export class PhotosService {
           workDate: new Date(dto.work_date),
           workerName: dto.worker_name,
           description: dto.description,
+          progressStatus: inferInitialProgressStatus(dto.description),
           takenAt: dto.taken_at ? new Date(dto.taken_at) : undefined,
           objectKey: upload.objectKey,
           mimeType: upload.mimeType,
@@ -187,6 +188,10 @@ export class PhotosService {
     }
     return { data: updated };
   }
+}
+
+function inferInitialProgressStatus(description: string | undefined) {
+  return description?.includes("완료") ? ProgressStatus.COMPLETED : ProgressStatus.PENDING_REVIEW;
 }
 
 export function toPhotoResponse(photo: Photo & { room?: unknown; tradeCategory?: { id: string; code: string; label: string } | null; analyses?: unknown[] }, config: ConfigService) {

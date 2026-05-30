@@ -192,9 +192,9 @@ export default function RoomsPage() {
                 </tr>
               </thead>
               <tbody>
-                {visibleRooms.map((room, index) => {
-                  const progress = Math.max(12, 86 - ((page - 1) * pageSize + index) * 7);
-                  const done = progress >= 95;
+                {visibleRooms.map((room) => {
+                  const progress = roomProgressPercent(room);
+                  const progressStatus = roomProgressStatus(room);
                   return (
                     <tr key={room.id} className={room.id === selectedRoom?.id ? "selected" : ""} onClick={() => setSelectedRoomId(room.id)}>
                       <td><input type="checkbox" aria-label={`${room.room_name} 선택`} checked={room.id === selectedRoom?.id} readOnly /></td>
@@ -207,7 +207,7 @@ export default function RoomsPage() {
                           <b>{progress}%</b>
                         </div>
                       </td>
-                      <td><span className={done ? "badge green" : "badge blue"}>{done ? "완료" : "진행중"}</span></td>
+                      <td><span className={progressStatus.badgeClass}>{progressStatus.label}</span></td>
                       <td><div className="mini-photo"><div className="photo-fallback" /></div></td>
                       <td><code>{room.bim_photo_room_id}</code></td>
                       <td><a href={`/photos?project_id=${projectId}&room_id=${room.id}`}>사진</a></td>
@@ -275,4 +275,22 @@ export default function RoomsPage() {
       </section>
     </div>
   );
+}
+
+function roomProgressStatus(room: Room) {
+  const values = Object.values(room.progress_by_surface ?? {});
+  if (values.some((item) => item.status === "COMPLETED")) return { label: "완료", badgeClass: "badge green" };
+  if (values.some((item) => item.status === "IN_PROGRESS")) return { label: "진행중", badgeClass: "badge orange" };
+  return { label: "시작 전", badgeClass: "badge red" };
+}
+
+function roomProgressPercent(room: Room) {
+  const values = Object.values(room.progress_by_surface ?? {});
+  if (values.length === 0) return 0;
+  const score = values.reduce((sum, item) => {
+    if (item.status === "COMPLETED") return sum + 1;
+    if (item.status === "IN_PROGRESS") return sum + 0.5;
+    return sum;
+  }, 0);
+  return Math.round((score / values.length) * 100);
 }

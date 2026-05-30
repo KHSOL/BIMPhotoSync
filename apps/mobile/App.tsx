@@ -51,6 +51,7 @@ type Room = {
   room_name: string;
   room_number?: string | null;
   level_name?: string | null;
+  progress_by_surface?: Record<string, { status: "NOT_STARTED" | "IN_PROGRESS" | "COMPLETED"; photo_count: number }>;
 };
 
 type User = {
@@ -252,6 +253,33 @@ export default function App() {
           <Text style={styles.userBadge}>{user ? roleLabel(user.role) : "방문자"}</Text>
         </View>
 
+        <Section title="현장 빠른 업로드">
+          <View style={styles.quickRow}>
+            <Pressable style={styles.primaryButton} onPress={() => takePhoto().catch((err) => Alert.alert("오류", err.message))}>
+              <Text style={styles.primaryButtonText}>바로 촬영</Text>
+            </Pressable>
+            <Pressable style={styles.secondaryButton} onPress={() => pickImages().catch((err) => Alert.alert("오류", err.message))}>
+              <Text style={styles.secondaryButtonText}>앨범 선택</Text>
+            </Pressable>
+          </View>
+          <Text style={styles.caption}>사진 {images.length}장 · {selectedRoom ? `${selectedRoom.room_number ?? ""} ${selectedRoom.room_name}` : "방 선택 대기"}</Text>
+          <Text style={styles.label}>구역 선택</Text>
+          <View style={styles.chipGrid}>
+            {rooms.map((room) => (
+              <Pressable key={room.id} style={[styles.chip, roomId === room.id && styles.chipActive]} onPress={() => setRoomId(room.id)}>
+                <Text style={[styles.chipText, roomId === room.id && styles.chipTextActive]}>
+                  {room.room_number ?? ""} {room.room_name}
+                </Text>
+                <Text style={styles.caption}>{roomProgressLabel(room)} / {room.level_name ?? "-"}</Text>
+              </Pressable>
+            ))}
+          </View>
+          {rooms.length === 0 ? <Text style={styles.caption}>로그인 후 프로젝트 방 목록이 표시됩니다.</Text> : null}
+          <Pressable style={[styles.uploadButton, uploading && styles.disabledButton]} disabled={uploading} onPress={() => upload().catch((err) => Alert.alert("오류", err.message))}>
+            <Text style={styles.primaryButtonText}>{uploading ? "업로드 중" : "선택 구역에 업로드"}</Text>
+          </Pressable>
+        </Section>
+
         <Section title="계정">
           <View style={styles.segmented}>
             <Pressable style={[styles.segment, authMode === "login" && styles.segmentActive]} onPress={() => setAuthMode("login")}>
@@ -422,6 +450,13 @@ function roleLabel(role: string) {
   return "현장 작업자";
 }
 
+function roomProgressLabel(room: Room) {
+  const wall = room.progress_by_surface?.WALL;
+  if (wall?.status === "COMPLETED") return "완료";
+  if (wall?.status === "IN_PROGRESS") return "진행중";
+  return "시작 전";
+}
+
 function authHeaders(token: string) {
   return { Authorization: `Bearer ${token}` };
 }
@@ -512,6 +547,15 @@ const styles = StyleSheet.create({
   },
   secondaryButtonText: { color: "#2563EB", fontWeight: "800" },
   disabledButton: { opacity: 0.65 },
+  uploadButton: {
+    minHeight: 50,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#0F172A",
+    borderRadius: 8,
+    paddingHorizontal: 16,
+    marginTop: 12
+  },
   chipGrid: { flexDirection: "row", flexWrap: "wrap", marginTop: 4 },
   chip: {
     borderColor: "#CBD5E1",

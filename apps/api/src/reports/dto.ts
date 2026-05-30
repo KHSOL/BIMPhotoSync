@@ -53,4 +53,9 @@ export class GenerateReportDto {
   @IsString()
   @MaxLength(5000)
   memo?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(3000)
+  ai_prompt?: string;
 }

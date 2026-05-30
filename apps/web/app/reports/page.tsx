@@ -48,7 +48,8 @@ export default function ReportsPage() {
     date_to: "",
     worker_name: "",
     title: "",
-    memo: ""
+    memo: "",
+    ai_prompt: ""
   });
 
   useEffect(() => {
@@ -136,7 +137,8 @@ export default function ReportsPage() {
       date_to: "",
       worker_name: "",
       title: "",
-      memo: ""
+      memo: "",
+      ai_prompt: ""
     });
     setStatus("보고서 생성 필터를 초기화했습니다.");
   }
@@ -159,6 +161,7 @@ export default function ReportsPage() {
         worker_name: filters.worker_name || undefined,
         title: filters.title || undefined,
         memo: filters.memo || undefined,
+        ai_prompt: filters.ai_prompt || undefined,
         format: "JSON"
       };
       const json = await apiJson<ReportResult>("/reports/generate", {
@@ -293,6 +296,15 @@ export default function ReportsPage() {
         <label className="search-box report-search">
           <Search size={17} />
           <input value={filters.title} onChange={(event) => setFilters({ ...filters, title: event.target.value })} placeholder="보고서 제목 검색 또는 생성 제목" />
+        </label>
+        <label className="field compact report-instruction-field">
+          <span className="label">AI 지시문</span>
+          <textarea
+            className="input"
+            value={filters.ai_prompt}
+            onChange={(event) => setFilters({ ...filters, ai_prompt: event.target.value })}
+            placeholder="예: 지난 7일간 공정 지연 원인과 완료 근거를 중심으로 작성해줘"
+          />
         </label>
         <button className="filter-button" type="button" onClick={resetFilters}><Filter size={16} />전체보기</button>
       </section>

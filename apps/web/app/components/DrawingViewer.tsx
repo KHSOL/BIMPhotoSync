@@ -26,6 +26,7 @@ import {
   RevitFloorPlan,
   RevitRoomOverlay,
   RevitSheet,
+  Room,
   saveProjectId
 } from "../client";
 import { defaultSurfaceOptions, defaultTradeOptions, labelForOption } from "../photo-options";
@@ -34,6 +35,7 @@ type DrawingViewerMode = "floorPlans" | "sheets";
 type ProjectList = { data: Project[] };
 type FloorPlanList = { data: RevitFloorPlan[] };
 type SheetList = { data: RevitSheet[] };
+type RoomList = { data: Room[] };
 type RoomPhotosResponse = { data: { photos: Photo[] } };
 type PdfJsModule = typeof import("pdfjs-dist");
 type PdfRenderState = "idle" | "loading" | "ready" | "error";
@@ -62,6 +64,7 @@ export default function DrawingViewer({ mode }: { mode: DrawingViewerMode }) {
   const [sheetAssetUrl, setSheetAssetUrl] = useState("");
   const [selectedRoomId, setSelectedRoomId] = useState("");
   const [treeQuery, setTreeQuery] = useState("");
+  const [roomProgressByBimId, setRoomProgressByBimId] = useState<Record<string, Room["progress_by_surface"]>>({});
   const [photos, setPhotos] = useState<Photo[]>([]);
   const [status, setStatus] = useState(
     mode === "floorPlans"
@@ -194,13 +197,20 @@ export default function DrawingViewer({ mode }: { mode: DrawingViewerMode }) {
 
   async function loadProjectGeometry(nextToken = token, nextProjectId = projectId) {
     if (!nextProjectId) return;
-    const [floorPlanJson, sheetJson] = await Promise.all([
+    const [floorPlanJson, sheetJson, roomJson] = await Promise.all([
       apiJson<FloorPlanList>(`/revit/projects/${nextProjectId}/floor-plans`, { headers: authHeaders(nextToken) }),
-      apiJson<SheetList>(`/revit/projects/${nextProjectId}/sheets`, { headers: authHeaders(nextToken) })
+      apiJson<SheetList>(`/revit/projects/${nextProjectId}/sheets`, { headers: authHeaders(nextToken) }),
+      apiJson<RoomList>(`/projects/${nextProjectId}/rooms`, { headers: authHeaders(nextToken) })
     ]);
 
     setPlans(floorPlanJson.data);
     setSheets(sheetJson.data);
+    setRoomProgressByBimId(
+      roomJson.data.reduce<Record<string, Room["progress_by_surface"]>>((result, room) => {
+        result[room.bim_photo_room_id] = room.progress_by_surface;
+        return result;
+      }, {})
+    );
     setPlanId(floorPlanJson.data[0]?.id ?? "");
     setSheetId(sheetJson.data[0]?.id ?? "");
     setSelectedRoomId(
@@ -371,10 +381,17 @@ export default function DrawingViewer({ mode }: { mode: DrawingViewerMode }) {
               plan={selectedPlan}
               assetUrl={floorPlanAssetUrl}
               selectedRoomId={selectedRoomId}
+              roomProgressByBimId={roomProgressByBimId}
               onSelect={setSelectedRoomId}
             />
           ) : !isFloorPlanMode && selectedSheet ? (
-            <SheetViewer sheet={selectedSheet} assetUrl={sheetAssetUrl} selectedRoomId={selectedRoomId} onSelect={setSelectedRoomId} />
+            <SheetViewer
+              sheet={selectedSheet}
+              assetUrl={sheetAssetUrl}
+              selectedRoomId={selectedRoomId}
+              roomProgressByBimId={roomProgressByBimId}
+              onSelect={setSelectedRoomId}
+            />
           ) : (
             <div className="floor-plan real-plan-empty">
               <KeyRound size={30} />
@@ -485,11 +502,13 @@ function SheetViewer({
   sheet,
   assetUrl,
   selectedRoomId,
+  roomProgressByBimId,
   onSelect
 }: {
   sheet: RevitSheet;
   assetUrl: string;
   selectedRoomId: string;
+  roomProgressByBimId: Record<string, Room["progress_by_surface"]>;
   onSelect: (roomId: string) => void;
 }) {
   const isPdf = sheet.asset?.mime_type === "application/pdf";
@@ -513,7 +532,13 @@ function SheetViewer({
         )}
         <svg className="sheet-overlay-svg" viewBox="0 0 1 1" preserveAspectRatio="none" aria-label="방 오버레이">
           {sheet.overlays.map((overlay) => (
-            <SheetRoomShape key={overlay.id} overlay={overlay} selected={overlay.bim_photo_room_id === selectedRoomId} onSelect={onSelect} />
+            <SheetRoomShape
+              key={overlay.id}
+              overlay={overlay}
+              selected={overlay.bim_photo_room_id === selectedRoomId}
+              progressStatus={roomDisplayProgress(roomProgressByBimId[overlay.bim_photo_room_id])}
+              onSelect={onSelect}
+            />
           ))}
         </svg>
         <div className="sheet-room-hint">
@@ -628,17 +653,19 @@ function PdfSheetCanvas({ assetUrl, label }: { assetUrl: string; label: string }
 function SheetRoomShape({
   overlay,
   selected,
+  progressStatus,
   onSelect
 }: {
   overlay: RevitRoomOverlay;
   selected: boolean;
+  progressStatus: RoomProgressStatus;
   onSelect: (roomId: string) => void;
 }) {
   const points = overlay.normalized_polygon.map((point) => `${point.x},${point.y}`).join(" ");
   const center = getNormalizedPolygonCenter(overlay);
   const label = formatRoomTitle(overlay);
   return (
-    <g className={selected ? "sheet-room-zone-group selected" : "sheet-room-zone-group"} onClick={() => onSelect(overlay.bim_photo_room_id)}>
+    <g className={`sheet-room-zone-group progress-${progressStatus}${selected ? " selected" : ""}`} onClick={() => onSelect(overlay.bim_photo_room_id)}>
       <polygon className={selected ? "sheet-room-zone selected" : "sheet-room-zone"} points={points} />
       <circle className="sheet-room-pin" cx={center.x} cy={center.y} r="0.008" />
       <text className="sheet-room-label" x={center.x} y={center.y - 0.012} textAnchor="middle" fontSize="0.014">
@@ -653,11 +680,13 @@ function FloorPlanSvg({
   plan,
   assetUrl,
   selectedRoomId,
+  roomProgressByBimId,
   onSelect
 }: {
   plan: RevitFloorPlan;
   assetUrl: string;
   selectedRoomId: string;
+  roomProgressByBimId: Record<string, Room["progress_by_surface"]>;
   onSelect: (roomId: string) => void;
 }) {
   const viewBox = `${plan.bounds.min_x} ${-plan.bounds.max_y} ${plan.bounds.width} ${plan.bounds.height}`;
@@ -692,6 +721,7 @@ function FloorPlanSvg({
               room={room}
               bounds={plan.bounds}
               selected={room.bim_photo_room_id === selectedRoomId}
+              progressStatus={roomDisplayProgress(roomProgressByBimId[room.bim_photo_room_id])}
               onSelect={onSelect}
             />
           ))}
@@ -705,11 +735,13 @@ function PlanRoomShape({
   room,
   bounds,
   selected,
+  progressStatus,
   onSelect
 }: {
   room: FloorPlanRoom;
   bounds: PlanBounds;
   selected: boolean;
+  progressStatus: RoomProgressStatus;
   onSelect: (roomId: string) => void;
 }) {
   const points = room.polygon.map((point) => `${point.x},${-point.y}`).join(" ");
@@ -720,7 +752,7 @@ function PlanRoomShape({
   const nameFontSize = minDimension * 0.014;
 
   return (
-    <g className={selected ? "revit-room-shape selected" : "revit-room-shape"} onClick={() => onSelect(room.bim_photo_room_id)}>
+    <g className={`revit-room-shape progress-${progressStatus}${selected ? " selected" : ""}`} onClick={() => onSelect(room.bim_photo_room_id)}>
       <polygon points={points} />
       <circle cx={room.center.x} cy={-room.center.y} r={markerRadius} />
       <text x={room.center.x} y={-room.center.y - labelGap} textAnchor="middle" fontSize={numberFontSize}>
@@ -732,6 +764,18 @@ function PlanRoomShape({
       <title>{formatRoomTitle(room)}</title>
     </g>
   );
+}
+
+type RoomProgressStatus = "not-started" | "in-progress" | "completed";
+
+function roomDisplayProgress(progress: Room["progress_by_surface"] | undefined): RoomProgressStatus {
+  const wall = progress?.WALL;
+  if (wall?.status === "COMPLETED") return "completed";
+  if (wall?.status === "IN_PROGRESS") return "in-progress";
+  const values = Object.values(progress ?? {});
+  if (values.some((item) => item.status === "COMPLETED")) return "completed";
+  if (values.some((item) => item.status === "IN_PROGRESS")) return "in-progress";
+  return "not-started";
 }
 
 function getRoomDatabaseId(room: FloorPlanRoom | RevitRoomOverlay | undefined) {

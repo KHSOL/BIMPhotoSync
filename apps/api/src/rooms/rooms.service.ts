@@ -1,8 +1,34 @@
 import { Injectable, NotFoundException } from "@nestjs/common";
 import { randomUUID } from "crypto";
+import { Prisma, ProgressStatus, WorkSurface } from "@prisma/client";
 import { PrismaService } from "../prisma/prisma.service";
 import { ProjectsService } from "../projects/projects.service";
 import { CreateRoomDto, UpdateRoomDto } from "./dto";
+
+const workSurfaces = [
+  WorkSurface.FLOOR,
+  WorkSurface.WALL,
+  WorkSurface.CEILING,
+  WorkSurface.WINDOW,
+  WorkSurface.DOOR,
+  WorkSurface.PIPE,
+  WorkSurface.ELECTRIC,
+  WorkSurface.OTHER
+] as const;
+
+type SurfaceProgressStatus = "NOT_STARTED" | "IN_PROGRESS" | "COMPLETED";
+type RoomWithProgressPhotos = Prisma.RoomGetPayload<{
+  include: {
+    photos: {
+      select: {
+        workSurface: true;
+        description: true;
+        aiDescription: true;
+        progressStatus: true;
+      };
+    };
+  };
+}>;
 
 @Injectable()
 export class RoomsService {
@@ -26,6 +52,17 @@ export class RoomsService {
               ]
             }
           : {})
+      },
+      include: {
+        photos: {
+          where: { status: "ACTIVE" },
+          select: {
+            workSurface: true,
+            description: true,
+            aiDescription: true,
+            progressStatus: true
+          }
+        }
       },
       orderBy: [{ levelName: "asc" }, { roomNumber: "asc" }, { roomName: "asc" }]
     });
@@ -81,7 +118,14 @@ export function toRoomResponse(room: {
   levelName: string | null;
   locationText: string | null;
   status: string;
+  photos?: Array<{
+    workSurface: WorkSurface;
+    description: string | null;
+    aiDescription: string | null;
+    progressStatus: ProgressStatus;
+  }>;
 }) {
+  const progressBySurface = room.photos ? buildSurfaceProgress(room.photos) : undefined;
   return {
     id: room.id,
     project_id: room.projectId,
@@ -92,7 +136,23 @@ export function toRoomResponse(room: {
     room_name: room.roomName,
     level_name: room.levelName,
     location_text: room.locationText,
-    status: room.status
+    status: room.status,
+    ...(progressBySurface ? { progress_by_surface: progressBySurface } : {})
   };
+}
+
+function buildSurfaceProgress(photos: RoomWithProgressPhotos["photos"]) {
+  return workSurfaces.reduce<Record<string, { status: SurfaceProgressStatus; photo_count: number }>>((result, surface) => {
+    const surfacePhotos = photos.filter((photo) => photo.workSurface === surface);
+    const completed = surfacePhotos.some((photo) => {
+      const note = `${photo.description ?? ""} ${photo.aiDescription ?? ""}`;
+      return photo.progressStatus === ProgressStatus.COMPLETED || note.includes("완료");
+    });
+    result[surface] = {
+      status: completed ? "COMPLETED" : surfacePhotos.length > 0 ? "IN_PROGRESS" : "NOT_STARTED",
+      photo_count: surfacePhotos.length
+    };
+    return result;
+  }, {});
 }
 
