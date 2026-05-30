@@ -2,7 +2,6 @@ import "dotenv/config";
 import { GetObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { AiProvider, Prisma, PrismaClient, ProgressStatus, Trade, WorkSurface } from "@prisma/client";
 import { Worker } from "bullmq";
-import OpenAI from "openai";
 
 const prisma = new PrismaClient();
 const connection = { url: process.env.REDIS_URL ?? "redis://localhost:6379" };
@@ -18,7 +17,6 @@ const s3 = new S3Client({
 });
 
 const bucket = process.env.S3_BUCKET ?? "bim-photo-sync";
-const openai = process.env.OPENAI_API_KEY ? new OpenAI({ apiKey: process.env.OPENAI_API_KEY }) : null;
 
 type PhotoForAnalysis = {
   id: string;
@@ -32,6 +30,11 @@ type PhotoForAnalysis = {
     roomName: string;
     levelName: string | null;
   } | null;
+};
+
+type GeminiInlineData = {
+  mime_type: string;
+  data: string;
 };
 
 type AnalysisResult = {
@@ -52,45 +55,44 @@ const surfaceValues = new Set<string>(Object.values(WorkSurface));
 const progressValues = new Set<string>(Object.values(ProgressStatus));
 
 async function analyze(photo: PhotoForAnalysis): Promise<AnalysisResult> {
-  if (!openai) return inferHeuristic(photo, "OPENAI_API_KEY is not configured.");
+  const apiKey = process.env.GEMINI_API_KEY;
+  if (!apiKey) return inferHeuristic(photo, "GEMINI_API_KEY is not configured.");
 
   try {
-    const image = await readImageAsDataUrl(photo);
-    const modelName = process.env.OPENAI_VISION_MODEL ?? "gpt-4o-mini";
-    const response = await openai.chat.completions.create({
-      model: modelName,
-      response_format: { type: "json_object" },
-      messages: [
-        {
-          role: "system",
-          content:
-            "You analyze construction site photos for BIM Photo Sync. Return only JSON with keys summary, detected_trade, detected_surface, progress_status, confidence, observations. Write summary and observations in Korean. Use enum values exactly."
+    const image = await readImageInlineData(photo);
+    const modelName = process.env.GEMINI_VISION_MODEL ?? "gemini-3.1-flash-lite";
+    const prompt = [
+      "너는 BIM 현장 사진 분석 담당자다.",
+      "아래 사진과 메타데이터를 근거로 한국어 JSON만 반환한다. Markdown 금지.",
+      "JSON 필드: summary, detected_trade, detected_surface, progress_status, confidence, observations.",
+      "enum 값은 반드시 허용 목록 중 하나만 사용한다.",
+      "공정 상태 규칙: 작업 흔적이 명확하면 IN_PROGRESS, 메모나 시각적 근거가 완료이면 COMPLETED, 문제/중단/차단이면 BLOCKED, 확신이 낮으면 PENDING_REVIEW.",
+      `방: ${photo.room?.levelName ?? "-"} / ${photo.room?.roomNumber ?? ""} ${photo.room?.roomName ?? ""}`,
+      `입력 공종: ${photo.trade}`,
+      `입력 공사면: ${photo.workSurface}`,
+      `작업자 메모: ${photo.description ?? ""}`,
+      `허용 공종: ${Object.values(Trade).join(", ")}`,
+      `허용 공사면: ${Object.values(WorkSurface).join(", ")}`,
+      `허용 공정상태: ${Object.values(ProgressStatus).join(", ")}`
+    ].join("\n");
+
+    const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        generationConfig: {
+          temperature: 0.1,
+          response_mime_type: "application/json"
         },
-        {
-          role: "user",
-          content: [
-            {
-              type: "text",
-              text: [
-                `Room: ${photo.room?.levelName ?? "-"} / ${photo.room?.roomNumber ?? ""} ${photo.room?.roomName ?? ""}`,
-                `Expected trade: ${photo.trade}`,
-                `Expected surface: ${photo.workSurface}`,
-                `Worker memo: ${photo.description ?? ""}`,
-                "Progress rule: no uploaded evidence or no visible work means NOT_STARTED/PENDING_REVIEW; visible work in progress means IN_PROGRESS; clear completion or memo '완료' means COMPLETED; issue/blocked means BLOCKED.",
-                `Allowed trades: ${Object.values(Trade).join(", ")}`,
-                `Allowed surfaces: ${Object.values(WorkSurface).join(", ")}`,
-                `Allowed progress: ${Object.values(ProgressStatus).join(", ")}`
-              ].join("\n")
-            },
-            { type: "image_url", image_url: { url: image } }
-          ]
-        }
-      ],
-      temperature: 0.1
+        contents: [{ role: "user", parts: [{ text: prompt }, { inline_data: image }] }]
+      })
     });
 
-    const raw = response.choices[0]?.message.content ?? "{}";
-    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    if (!res.ok) throw new Error(`Gemini photo analysis failed: ${res.status} ${await res.text()}`);
+
+    const json = (await res.json()) as { candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }> };
+    const text = json.candidates?.[0]?.content?.parts?.map((part) => part.text ?? "").join("") ?? "{}";
+    const parsed = parseJsonObject(text);
     const summary = typeof parsed.summary === "string" && parsed.summary.trim() ? parsed.summary.trim() : "사진 기준 현장 상태를 분석했습니다.";
     const detectedTrade = enumValue(parsed.detected_trade, tradeValues, photo.trade);
     const detectedSurface = enumValue(parsed.detected_surface, surfaceValues, photo.workSurface);
@@ -111,24 +113,26 @@ async function analyze(photo: PhotoForAnalysis): Promise<AnalysisResult> {
         confidence,
         observations: Array.isArray(parsed.observations) ? parsed.observations : []
       },
-      modelProvider: AiProvider.OPENAI,
+      modelProvider: AiProvider.GEMINI,
       modelName,
-      promptVersion: "vision-v1",
+      promptVersion: "gemini-vision-v1",
       requiresHumanReview: confidence < 0.82
     };
   } catch (error) {
-    return inferHeuristic(photo, error instanceof Error ? error.message : "OpenAI vision analysis failed.");
+    return inferHeuristic(photo, error instanceof Error ? error.message : "Gemini photo analysis failed.");
   }
 }
 
-async function readImageAsDataUrl(photo: PhotoForAnalysis) {
+async function readImageInlineData(photo: PhotoForAnalysis): Promise<GeminiInlineData> {
   const object = await s3.send(new GetObjectCommand({ Bucket: bucket, Key: photo.objectKey }));
   const chunks: Buffer[] = [];
   for await (const chunk of object.Body as AsyncIterable<Uint8Array>) {
     chunks.push(Buffer.from(chunk));
   }
-  const mimeType = object.ContentType ?? photo.mimeType;
-  return `data:${mimeType};base64,${Buffer.concat(chunks).toString("base64")}`;
+  return {
+    mime_type: object.ContentType ?? photo.mimeType,
+    data: Buffer.concat(chunks).toString("base64")
+  };
 }
 
 function inferHeuristic(photo: PhotoForAnalysis, fallbackReason?: string): AnalysisResult {
@@ -136,7 +140,6 @@ function inferHeuristic(photo: PhotoForAnalysis, fallbackReason?: string): Analy
   const summary = photo.description?.trim()
     ? `현장 메모 기준으로 "${photo.description.trim()}" 상태로 판단됩니다.`
     : `${photo.workSurface} 면의 ${photo.trade} 작업 사진으로 등록되었습니다. 관리자 검토가 필요합니다.`;
-
   const notes = ["Heuristic fallback analysis. Manager review required.", fallbackReason].filter((note): note is string => Boolean(note));
 
   return {
@@ -164,6 +167,11 @@ function inferProgressStatus(textValue: string | null | undefined) {
   if (text.includes("완료") || text.includes("completed") || text.includes("done")) return ProgressStatus.COMPLETED;
   if (text.includes("차단") || text.includes("중단") || text.includes("blocked") || text.includes("issue")) return ProgressStatus.BLOCKED;
   return ProgressStatus.IN_PROGRESS;
+}
+
+function parseJsonObject(text: string) {
+  const cleaned = text.replace(/^```json\s*/i, "").replace(/^```\s*/i, "").replace(/```$/i, "").trim();
+  return JSON.parse(cleaned) as Record<string, unknown>;
 }
 
 function enumValue(value: unknown, allowed: Set<string>, fallback: string) {

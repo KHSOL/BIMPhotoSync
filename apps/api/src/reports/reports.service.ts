@@ -190,7 +190,7 @@ export class ReportsService {
 
   private async tryGenerateWithGemini(title: string, generatedBy: string, dto: GenerateReportDto, photos: PhotoForReport[]) {
     const apiKey = this.config.get<string>("GEMINI_API_KEY");
-    const modelName = this.config.get<string>("GEMINI_REPORT_MODEL", "gemini-3.1-flash-lite-preview");
+    const modelName = this.config.get<string>("GEMINI_REPORT_MODEL", "gemini-3.1-flash-lite");
     if (!apiKey) return { provider: "HEURISTIC", modelName: "bim-photo-sync-report-v1", content: null, errorMessage: null };
 
     try {

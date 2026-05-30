@@ -80,6 +80,7 @@ enum ReportFormat {
 }
 
 enum AiProvider {
+  GEMINI
   OPENAI
   HEURISTIC
 }
