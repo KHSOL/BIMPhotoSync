@@ -14,7 +14,7 @@ import * as ImagePicker from "expo-image-picker";
 import { StatusBar } from "expo-status-bar";
 
 const API_BASE =
-  process.env.EXPO_PUBLIC_API_BASE_URL ?? "https://bimphotosync-api-production.up.railway.app/api/v1";
+  process.env.EXPO_PUBLIC_API_BASE_URL ?? "https://bimphotosync-api.onrender.com/api/v1";
 
 const trades = [
   ["WATERPROOF", "방수"],

@@ -3,6 +3,7 @@ import { Module } from "@nestjs/common";
 import { ConfigModule, ConfigService } from "@nestjs/config";
 import { AdminModule } from "./admin/admin.module";
 import { AppController } from "./app.controller";
+import { InlineAiWorkerService } from "./ai-worker/inline-ai-worker.service";
 import { AiModule } from "./ai/ai.module";
 import { AuthModule } from "./auth/auth.module";
 import { DashboardModule } from "./dashboard/dashboard.module";
@@ -35,7 +36,8 @@ import { UploadsModule } from "./uploads/uploads.module";
     AiModule,
     RevitModule
   ],
-  controllers: [AppController]
+  controllers: [AppController],
+  providers: [InlineAiWorkerService]
 })
 export class AppModule {}
 

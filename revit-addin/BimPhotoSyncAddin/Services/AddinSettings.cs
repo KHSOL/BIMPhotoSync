@@ -9,7 +9,7 @@ public static class AddinSettings
     private const int MinimumHttpTimeoutSeconds = 30;
     private const int MaximumHttpTimeoutSeconds = 600;
 
-    public static string ApiBaseUrl { get; set; } = "https://bimphotosync-api-production.up.railway.app/api/v1";
+    public static string ApiBaseUrl { get; set; } = "https://bimphotosync-api.onrender.com/api/v1";
     public static string JwtToken { get; set; } = "";
     public static string ProjectId { get; set; } = "";
     public static string? RevitModelId { get; set; }

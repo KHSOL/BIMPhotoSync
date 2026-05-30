@@ -17,7 +17,7 @@
       }
     },
     "extra": {
-      "apiBaseUrl": "https://bimphotosync-api-production.up.railway.app/api/v1"
+      "apiBaseUrl": "https://bimphotosync-api.onrender.com/api/v1"
     }
   }
 }

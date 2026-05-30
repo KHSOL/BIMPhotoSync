@@ -190,7 +190,7 @@ export class PhotosService {
 }
 
 export function toPhotoResponse(photo: Photo & { room?: unknown; tradeCategory?: { id: string; code: string; label: string } | null; analyses?: unknown[] }, config: ConfigService) {
-  const publicBase = config.get<string>("API_PUBLIC_URL", "http://localhost:4000");
+  const publicBase = config.get<string>("API_PUBLIC_URL") ?? config.get<string>("RENDER_EXTERNAL_URL", "http://localhost:4000");
   return {
     id: photo.id,
     project_id: photo.projectId,
