@@ -14,7 +14,7 @@ import * as ImagePicker from "expo-image-picker";
 import { StatusBar } from "expo-status-bar";
 
 const API_BASE =
-  process.env.EXPO_PUBLIC_API_BASE_URL ?? "https://bimphotosync-api.onrender.com/api/v1";
+  process.env.EXPO_PUBLIC_API_BASE_URL ?? "https://api-production-1d018.up.railway.app/api/v1";
 
 const trades = [
   ["WATERPROOF", "방수"],
@@ -70,9 +70,9 @@ type AuthResponse = {
 export default function App() {
   const [authMode, setAuthMode] = useState<"login" | "register">("login");
   const [registerRole, setRegisterRole] = useState<"WORKER" | "COMPANY_ADMIN">("WORKER");
-  const [email, setEmail] = useState("dev@bim.local");
-  const [password, setPassword] = useState("password123");
-  const [name, setName] = useState("최반장");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [name, setName] = useState("");
   const [companyName, setCompanyName] = useState("BIM Photo Sync");
   const [token, setToken] = useState("");
   const [user, setUser] = useState<User | null>(null);
@@ -267,9 +267,12 @@ export default function App() {
           <View style={styles.chipGrid}>
             {rooms.map((room) => (
               <Pressable key={room.id} style={[styles.chip, roomId === room.id && styles.chipActive]} onPress={() => setRoomId(room.id)}>
-                <Text style={[styles.chipText, roomId === room.id && styles.chipTextActive]}>
-                  {room.room_number ?? ""} {room.room_name}
-                </Text>
+                <View style={styles.chipTitleRow}>
+                  <View style={[styles.statusDot, progressDotStyle(room)]} />
+                  <Text style={[styles.chipText, roomId === room.id && styles.chipTextActive]}>
+                    {room.room_number ?? ""} {room.room_name}
+                  </Text>
+                </View>
                 <Text style={styles.caption}>{roomProgressLabel(room)} / {room.level_name ?? "-"}</Text>
               </Pressable>
             ))}
@@ -457,6 +460,13 @@ function roomProgressLabel(room: Room) {
   return "시작 전";
 }
 
+function progressDotStyle(room: Room) {
+  const wall = room.progress_by_surface?.WALL;
+  if (wall?.status === "COMPLETED") return styles.statusDone;
+  if (wall?.status === "IN_PROGRESS") return styles.statusDoing;
+  return styles.statusTodo;
+}
+
 function authHeaders(token: string) {
   return { Authorization: `Bearer ${token}` };
 }
@@ -577,8 +587,13 @@ const styles = StyleSheet.create({
     marginBottom: 7
   },
   chipActive: { borderColor: "#2563EB", backgroundColor: "#EFF6FF" },
+  chipTitleRow: { flexDirection: "row", alignItems: "center", gap: 6 },
   chipText: { color: "#334155", fontSize: 13, fontWeight: "700" },
   chipTextActive: { color: "#2563EB" },
+  statusDot: { width: 8, height: 8, borderRadius: 4 },
+  statusTodo: { backgroundColor: "#DC2626" },
+  statusDoing: { backgroundColor: "#EAB308" },
+  statusDone: { backgroundColor: "#16A34A" },
   caption: { color: "#64748B", fontSize: 11, lineHeight: 16 },
   previewRow: { position: "relative", marginBottom: 12 },
   preview: { width: "100%", height: 190, borderRadius: 8, backgroundColor: "#E2E8F0" },

@@ -183,6 +183,7 @@ Dynamo를 후속 도구로 추가한다면 Room 파라미터 점검, 누락 Room
 | Render | NestJS API와 Redis-compatible Key Value 배포 후보 | Railway를 쓰지 않을 때의 대체 배포 경로입니다. 무료 플랜에서는 API Web Service 안에서 `RUN_INLINE_AI_WORKER=true`로 AI 분석 worker를 함께 실행합니다. |
 | Supabase | 운영 PostgreSQL 후보 | Prisma가 연결하는 canonical DB로 사용 가능합니다. Auth/Storage는 현재 자체 JWT/S3 흐름과 역할이 겹치므로 선택적으로만 사용합니다. |
 | Cloudflare R2 | 운영 Object Storage 후보 | S3-compatible API로 presigned URL 업로드/다운로드를 처리합니다. |
+| OpenAI Vision API | 사진 단위 AI 분석 후보 | `OPENAI_API_KEY`가 worker에 설정되면 R2 원본 사진을 읽어 공종/공사면/공정상태/요약을 분석합니다. 없거나 실패하면 휴리스틱 분석으로 대체합니다. |
 | Google Gemini API | 리포트 생성 AI 후보 | `GEMINI_API_KEY`가 설정되면 reports service가 Gemini generateContent API를 호출할 수 있습니다. |
 | Redis | 비동기 작업 큐 | BullMQ가 사진 AI 분석 job을 저장하고 worker가 처리합니다. |
 | Autodesk Revit | BIM authoring 및 Room 기준 인터페이스 | Add-in이 Room ID를 쓰고 선택된 Room의 사진을 조회합니다. |
@@ -219,7 +220,7 @@ flowchart TB
 - API healthcheck는 `/api/v1/health`입니다.
 - CI는 `.github/workflows/ci.yml`에서 `npm ci`, `npm run typecheck`, `npm run build`를 실행합니다.
 
-Railway 새 프로젝트 생성 후 `DATABASE_URL`, `DIRECT_URL`, `REDIS_URL`, `S3_ENDPOINT`, `S3_BUCKET`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`, `JWT_SECRET`, 선택 항목인 `GEMINI_API_KEY`를 Dashboard에서 입력합니다. Render를 대체 배포로 쓸 경우에는 `render.yaml` Blueprint를 사용할 수 있습니다.
+Railway 새 프로젝트 생성 후 `DATABASE_URL`, `DIRECT_URL`, `REDIS_URL`, `S3_ENDPOINT`, `S3_BUCKET`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`, `JWT_SECRET`를 Dashboard에서 입력합니다. 사진 분석을 실제 비전 모델로 돌리려면 worker에 `OPENAI_API_KEY`를 추가하고, 필요 시 `OPENAI_VISION_MODEL`로 모델을 지정합니다. 보고서 문장 생성을 Gemini로 보강하려면 API에 `GEMINI_API_KEY`를 추가합니다. Render를 대체 배포로 쓸 경우에는 `render.yaml` Blueprint를 사용할 수 있으며, 무료 플랜에서는 별도 Background Worker가 없으므로 API 서비스 안에서 `RUN_INLINE_AI_WORKER=true`로 휴리스틱 분석만 함께 실행하는 구성이 현실적입니다.
 
 ## Repository Structure
 

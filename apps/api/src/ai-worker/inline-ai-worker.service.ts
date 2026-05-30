@@ -1,6 +1,6 @@
 import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
-import { Prisma, ProgressStatus, Trade, WorkSurface } from "@prisma/client";
+import { AiProvider, Prisma, ProgressStatus, Trade, WorkSurface } from "@prisma/client";
 import { Job, Worker } from "bullmq";
 import { PrismaService } from "../prisma/prisma.service";
 
@@ -46,7 +46,7 @@ export class InlineAiWorkerService implements OnModuleInit, OnModuleDestroy {
     this.worker.on("failed", (job, error) => {
       this.logger.error(`Photo AI job failed: ${job?.id ?? "unknown"}`, error.stack);
     });
-    this.logger.log("Inline photo AI worker started.");
+    this.logger.log("Inline photo AI worker started with heuristic fallback analysis.");
   }
 
   async onModuleDestroy() {
@@ -64,7 +64,7 @@ export class InlineAiWorkerService implements OnModuleInit, OnModuleDestroy {
       this.prisma.photoAiAnalysis.create({
         data: {
           photoId: data.photoId,
-          modelProvider: "HEURISTIC",
+          modelProvider: AiProvider.HEURISTIC,
           modelName: "bim-photo-sync-basic-v1",
           promptVersion: "basic-v1",
           resultJson: result.resultJson,
@@ -86,16 +86,10 @@ export class InlineAiWorkerService implements OnModuleInit, OnModuleDestroy {
 }
 
 function inferAnalysis(photo: PhotoForAnalysis): AnalysisResult {
-  const text = `${photo.description ?? ""} ${photo.trade} ${photo.workSurface}`.toLowerCase();
-  const progressStatus =
-    text.includes("완료") || text.includes("completed")
-      ? ProgressStatus.COMPLETED
-      : text.includes("차단") || text.includes("blocked") || text.includes("issue")
-        ? ProgressStatus.BLOCKED
-        : ProgressStatus.IN_PROGRESS;
+  const progressStatus = inferProgressStatus(`${photo.description ?? ""} ${photo.trade} ${photo.workSurface}`);
   const summary = photo.description?.trim()
-    ? `현장 메모 기준 ${photo.description.trim()} 상태로 판단됩니다.`
-    : `${photo.workSurface} 면의 ${photo.trade} 작업 사진으로 판단됩니다.`;
+    ? `현장 메모 기준으로 "${photo.description.trim()}" 상태로 판단됩니다.`
+    : `${photo.workSurface} 면의 ${photo.trade} 작업 사진으로 등록되었습니다. 관리자 검토가 필요합니다.`;
 
   return {
     summary,
@@ -108,7 +102,14 @@ function inferAnalysis(photo: PhotoForAnalysis): AnalysisResult {
       detected_trade: photo.trade,
       detected_surface: photo.workSurface,
       progress_status: progressStatus,
-      notes: ["MVP heuristic analysis. Manager review required."]
+      notes: ["Heuristic fallback analysis. Manager review required."]
     }
   };
+}
+
+function inferProgressStatus(textValue: string) {
+  const text = textValue.toLowerCase();
+  if (text.includes("완료") || text.includes("completed") || text.includes("done")) return ProgressStatus.COMPLETED;
+  if (text.includes("차단") || text.includes("중단") || text.includes("blocked") || text.includes("issue")) return ProgressStatus.BLOCKED;
+  return ProgressStatus.IN_PROGRESS;
 }

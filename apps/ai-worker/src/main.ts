@@ -1,32 +1,144 @@
 import "dotenv/config";
-import { Prisma, PrismaClient, ProgressStatus, Trade, WorkSurface } from "@prisma/client";
+import { GetObjectCommand, S3Client } from "@aws-sdk/client-s3";
+import { AiProvider, Prisma, PrismaClient, ProgressStatus, Trade, WorkSurface } from "@prisma/client";
 import { Worker } from "bullmq";
+import OpenAI from "openai";
 
 const prisma = new PrismaClient();
 const connection = { url: process.env.REDIS_URL ?? "redis://localhost:6379" };
 
-function infer(photo: {
+const s3 = new S3Client({
+  endpoint: process.env.S3_ENDPOINT,
+  region: process.env.S3_REGION ?? "us-east-1",
+  forcePathStyle: (process.env.S3_FORCE_PATH_STYLE ?? "true") === "true",
+  credentials: {
+    accessKeyId: process.env.S3_ACCESS_KEY_ID ?? "minio",
+    secretAccessKey: process.env.S3_SECRET_ACCESS_KEY ?? "minio123"
+  }
+});
+
+const bucket = process.env.S3_BUCKET ?? "bim-photo-sync";
+const openai = process.env.OPENAI_API_KEY ? new OpenAI({ apiKey: process.env.OPENAI_API_KEY }) : null;
+
+type PhotoForAnalysis = {
+  id: string;
   trade: Trade;
   workSurface: WorkSurface;
   description: string | null;
-}): {
+  objectKey: string;
+  mimeType: string;
+  room?: {
+    roomNumber: string | null;
+    roomName: string;
+    levelName: string | null;
+  } | null;
+};
+
+type AnalysisResult = {
   summary: string;
   detectedTrade: Trade;
   detectedSurface: WorkSurface;
   progressStatus: ProgressStatus;
   confidence: number;
   resultJson: Prisma.InputJsonValue;
-} {
-  const text = `${photo.description ?? ""} ${photo.trade} ${photo.workSurface}`.toLowerCase();
-  const progressStatus =
-    text.includes("완료") || text.includes("completed")
-      ? ProgressStatus.COMPLETED
-      : text.includes("차단") || text.includes("blocked") || text.includes("issue")
-        ? ProgressStatus.BLOCKED
-        : ProgressStatus.IN_PROGRESS;
+  modelProvider: AiProvider;
+  modelName: string;
+  promptVersion: string;
+  requiresHumanReview: boolean;
+};
+
+const tradeValues = new Set<string>(Object.values(Trade));
+const surfaceValues = new Set<string>(Object.values(WorkSurface));
+const progressValues = new Set<string>(Object.values(ProgressStatus));
+
+async function analyze(photo: PhotoForAnalysis): Promise<AnalysisResult> {
+  if (!openai) return inferHeuristic(photo, "OPENAI_API_KEY is not configured.");
+
+  try {
+    const image = await readImageAsDataUrl(photo);
+    const modelName = process.env.OPENAI_VISION_MODEL ?? "gpt-4o-mini";
+    const response = await openai.chat.completions.create({
+      model: modelName,
+      response_format: { type: "json_object" },
+      messages: [
+        {
+          role: "system",
+          content:
+            "You analyze construction site photos for BIM Photo Sync. Return only JSON with keys summary, detected_trade, detected_surface, progress_status, confidence, observations. Write summary and observations in Korean. Use enum values exactly."
+        },
+        {
+          role: "user",
+          content: [
+            {
+              type: "text",
+              text: [
+                `Room: ${photo.room?.levelName ?? "-"} / ${photo.room?.roomNumber ?? ""} ${photo.room?.roomName ?? ""}`,
+                `Expected trade: ${photo.trade}`,
+                `Expected surface: ${photo.workSurface}`,
+                `Worker memo: ${photo.description ?? ""}`,
+                "Progress rule: no uploaded evidence or no visible work means NOT_STARTED/PENDING_REVIEW; visible work in progress means IN_PROGRESS; clear completion or memo '완료' means COMPLETED; issue/blocked means BLOCKED.",
+                `Allowed trades: ${Object.values(Trade).join(", ")}`,
+                `Allowed surfaces: ${Object.values(WorkSurface).join(", ")}`,
+                `Allowed progress: ${Object.values(ProgressStatus).join(", ")}`
+              ].join("\n")
+            },
+            { type: "image_url", image_url: { url: image } }
+          ]
+        }
+      ],
+      temperature: 0.1
+    });
+
+    const raw = response.choices[0]?.message.content ?? "{}";
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    const summary = typeof parsed.summary === "string" && parsed.summary.trim() ? parsed.summary.trim() : "사진 기준 현장 상태를 분석했습니다.";
+    const detectedTrade = enumValue(parsed.detected_trade, tradeValues, photo.trade);
+    const detectedSurface = enumValue(parsed.detected_surface, surfaceValues, photo.workSurface);
+    const progressStatus = enumValue(parsed.progress_status, progressValues, inferProgressStatus(photo.description));
+    const confidence = clampConfidence(parsed.confidence);
+
+    return {
+      summary,
+      detectedTrade: detectedTrade as Trade,
+      detectedSurface: detectedSurface as WorkSurface,
+      progressStatus: progressStatus as ProgressStatus,
+      confidence,
+      resultJson: {
+        summary,
+        detected_trade: detectedTrade,
+        detected_surface: detectedSurface,
+        progress_status: progressStatus,
+        confidence,
+        observations: Array.isArray(parsed.observations) ? parsed.observations : []
+      },
+      modelProvider: AiProvider.OPENAI,
+      modelName,
+      promptVersion: "vision-v1",
+      requiresHumanReview: confidence < 0.82
+    };
+  } catch (error) {
+    return inferHeuristic(photo, error instanceof Error ? error.message : "OpenAI vision analysis failed.");
+  }
+}
+
+async function readImageAsDataUrl(photo: PhotoForAnalysis) {
+  const object = await s3.send(new GetObjectCommand({ Bucket: bucket, Key: photo.objectKey }));
+  const chunks: Buffer[] = [];
+  for await (const chunk of object.Body as AsyncIterable<Uint8Array>) {
+    chunks.push(Buffer.from(chunk));
+  }
+  const mimeType = object.ContentType ?? photo.mimeType;
+  return `data:${mimeType};base64,${Buffer.concat(chunks).toString("base64")}`;
+}
+
+function inferHeuristic(photo: PhotoForAnalysis, fallbackReason?: string): AnalysisResult {
+  const progressStatus = inferProgressStatus(`${photo.description ?? ""} ${photo.trade} ${photo.workSurface}`);
   const summary = photo.description?.trim()
-    ? `현장 메모 기준 ${photo.description.trim()} 상태로 판단됩니다.`
-    : `${photo.workSurface} 면의 ${photo.trade} 작업 사진으로 판단됩니다.`;
+    ? `현장 메모 기준으로 "${photo.description.trim()}" 상태로 판단됩니다.`
+    : `${photo.workSurface} 면의 ${photo.trade} 작업 사진으로 등록되었습니다. 관리자 검토가 필요합니다.`;
+
+  const notes = ["Heuristic fallback analysis. Manager review required.", fallbackReason].filter((note): note is string => Boolean(note));
+
   return {
     summary,
     detectedTrade: photo.trade,
@@ -38,9 +150,30 @@ function infer(photo: {
       detected_trade: photo.trade,
       detected_surface: photo.workSurface,
       progress_status: progressStatus,
-      notes: ["MVP heuristic analysis. Manager review required."]
-    }
+      notes
+    },
+    modelProvider: AiProvider.HEURISTIC,
+    modelName: "bim-photo-sync-basic-v1",
+    promptVersion: "basic-v1",
+    requiresHumanReview: true
   };
+}
+
+function inferProgressStatus(textValue: string | null | undefined) {
+  const text = (textValue ?? "").toLowerCase();
+  if (text.includes("완료") || text.includes("completed") || text.includes("done")) return ProgressStatus.COMPLETED;
+  if (text.includes("차단") || text.includes("중단") || text.includes("blocked") || text.includes("issue")) return ProgressStatus.BLOCKED;
+  return ProgressStatus.IN_PROGRESS;
+}
+
+function enumValue(value: unknown, allowed: Set<string>, fallback: string) {
+  return typeof value === "string" && allowed.has(value) ? value : fallback;
+}
+
+function clampConfidence(value: unknown) {
+  const numberValue = typeof value === "number" ? value : Number(value);
+  if (!Number.isFinite(numberValue)) return 0.7;
+  return Math.min(0.99, Math.max(0.01, numberValue));
 }
 
 new Worker(
@@ -49,21 +182,21 @@ new Worker(
     const { photoId } = job.data as { photoId: string };
     const photo = await prisma.photo.findUnique({ where: { id: photoId }, include: { room: true } });
     if (!photo) throw new Error(`Photo not found: ${photoId}`);
-    const result = infer(photo);
+    const result = await analyze(photo);
     await prisma.$transaction([
       prisma.photoAiAnalysis.create({
         data: {
           photoId,
-          modelProvider: "HEURISTIC",
-          modelName: "bim-photo-sync-basic-v1",
-          promptVersion: "basic-v1",
+          modelProvider: result.modelProvider,
+          modelName: result.modelName,
+          promptVersion: result.promptVersion,
           resultJson: result.resultJson,
           summary: result.summary,
           detectedTrade: result.detectedTrade,
           detectedSurface: result.detectedSurface,
           progressStatus: result.progressStatus,
           confidence: result.confidence,
-          requiresHumanReview: true
+          requiresHumanReview: result.requiresHumanReview
         }
       }),
       prisma.photo.update({
