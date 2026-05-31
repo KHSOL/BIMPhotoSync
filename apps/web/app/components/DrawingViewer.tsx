@@ -395,6 +395,7 @@ export default function DrawingViewer({ mode }: { mode: DrawingViewerMode }) {
           {isFloorPlanMode && selectedPlan && floorPlanViewMode === "3d" ? (
             <FloorPlan3D
               plan={selectedPlan}
+              assetUrl={floorPlanAssetUrl}
               selectedRoomId={selectedRoomId}
               roomProgressByBimId={roomProgressByBimId}
               onSelect={setSelectedRoomId}
