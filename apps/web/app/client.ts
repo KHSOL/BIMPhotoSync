@@ -266,8 +266,13 @@ export function readSession() {
 }
 
 export function saveSession(token: string, user: User) {
+  const previousUser = window.localStorage.getItem("bps_user");
+  const previousCompanyId = previousUser ? (JSON.parse(previousUser) as User).company_id : null;
   window.localStorage.setItem("bps_token", token);
   window.localStorage.setItem("bps_user", JSON.stringify(user));
+  if (previousCompanyId !== user.company_id) {
+    window.localStorage.removeItem("bps_project_id");
+  }
   window.dispatchEvent(new Event("bps_session_changed"));
 }
 
@@ -285,6 +290,10 @@ export function readProjectId() {
 
 export function saveProjectId(projectId: string) {
   window.localStorage.setItem("bps_project_id", projectId);
+}
+
+export function clearProjectId() {
+  window.localStorage.removeItem("bps_project_id");
 }
 
 export async function apiJson<T>(path: string, options: RequestInit = {}) {
