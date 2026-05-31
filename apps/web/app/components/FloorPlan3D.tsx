@@ -12,6 +12,7 @@ type SelectableMesh = import("three").Mesh & {
     roomId: string;
     selectable: true;
     progressStatus: RoomProgressStatus;
+    elementKind: "floor" | "wall";
   };
 };
 
@@ -20,9 +21,11 @@ type ManagedResource =
   | import("three").Material
   | import("three").Texture;
 
-const ROOM_HEIGHT_RATIO = 0.105;
-const WALL_THICKNESS_RATIO = 0.0065;
+const ROOM_HEIGHT_RATIO = 0.072;
+const WALL_THICKNESS_RATIO = 0.0048;
 const SLAB_THICKNESS_RATIO = 0.012;
+const WALL_COLOR = 0xf8fafc;
+const WALL_EDGE_COLOR = 0x334155;
 
 export function FloorPlan3D({
   plan,
@@ -91,7 +94,7 @@ export function FloorPlan3D({
       const slabThickness = Math.max(maxDimension * SLAB_THICKNESS_RATIO, 0.7);
       const selectableMeshes: SelectableMesh[] = [];
       const managedResources: ManagedResource[] = [];
-      const labelSprites: import("three").Sprite[] = [];
+      const labelPlanes: import("three").Mesh<import("three").PlaneGeometry, import("three").MeshBasicMaterial>[] = [];
 
       addLighting(THREE, scene, centerX, centerY, maxDimension);
       addGroundPlane(THREE, scene, managedResources, centerX, centerY, width, height, maxDimension);
@@ -109,21 +112,21 @@ export function FloorPlan3D({
         selectableMeshes.push(...roomObjects.selectableMeshes);
         managedResources.push(...roomObjects.resources);
 
-        const label = createRoomLabel(THREE, room, status, wallHeight + slabThickness * 1.25, maxDimension);
+        const label = createRoomLabel(THREE, room, status, slabThickness * 1.55, maxDimension);
         if (label) {
-          labelSprites.push(label.sprite);
-          managedResources.push(label.texture, label.material);
-          scene.add(label.sprite);
+          labelPlanes.push(label.mesh);
+          managedResources.push(label.geometry, label.texture, label.material);
+          scene.add(label.mesh);
         }
       }
 
-      const camera = new THREE.PerspectiveCamera(38, 1, 0.1, maxDimension * 12);
-      const cameraDistance = Math.max(width, height) * 1.55;
-      camera.position.set(centerX - maxDimension * 0.55, centerY - cameraDistance, maxDimension * 0.82);
-      camera.lookAt(centerX, centerY, wallHeight * 0.18);
+      const camera = new THREE.PerspectiveCamera(33, 1, 0.1, maxDimension * 12);
+      const cameraDistance = Math.max(width, height) * 1.18;
+      camera.position.set(centerX - maxDimension * 0.42, centerY - cameraDistance, maxDimension * 0.9);
+      camera.lookAt(centerX, centerY, wallHeight * 0.08);
 
       const controls = new OrbitControls(camera, renderer.domElement);
-      controls.target.set(centerX, centerY, wallHeight * 0.16);
+      controls.target.set(centerX, centerY, wallHeight * 0.08);
       controls.enableDamping = true;
       controls.dampingFactor = 0.08;
       controls.enablePan = true;
@@ -146,21 +149,27 @@ export function FloorPlan3D({
           const isSelected = roomId === selectedRoomIdRef.current;
           const isHovered = roomId === hoveredRoomId;
           const materials = (Array.isArray(mesh.material) ? mesh.material : [mesh.material]) as import("three").MeshStandardMaterial[];
+          const isFloor = mesh.userData.elementKind === "floor";
 
           for (const material of materials) {
+            if (isFloor) {
+              material.color.set(isSelected ? 0xbfdbfe : isHovered ? 0xccfbf1 : progressColor(mesh.userData.progressStatus));
+            } else {
+              material.color.set(WALL_COLOR);
+            }
             material.emissive.set(isSelected ? 0x2563eb : isHovered ? 0x0f766e : 0x000000);
-            material.emissiveIntensity = isSelected ? 0.32 : isHovered ? 0.13 : 0;
-            material.opacity = isSelected ? 0.98 : isHovered ? 0.95 : 0.88;
+            material.emissiveIntensity = isSelected ? (isFloor ? 0.18 : 0.1) : isHovered ? 0.08 : 0;
+            material.opacity = isFloor ? (isSelected ? 0.64 : isHovered ? 0.48 : 0.32) : isSelected ? 0.96 : 0.9;
           }
           mesh.position.z = isSelected ? slabThickness * 0.22 : isHovered ? slabThickness * 0.1 : 0;
         }
 
-        for (const sprite of labelSprites) {
-          const roomId = String(sprite.userData.roomId ?? "");
+        for (const label of labelPlanes) {
+          const roomId = String(label.userData.roomId ?? "");
           const isActive = roomId === selectedRoomIdRef.current || roomId === hoveredRoomId;
-          sprite.material.opacity = isActive ? 1 : 0.78;
-          const scale = isActive ? Number(sprite.userData.activeScale ?? 1) : Number(sprite.userData.baseScale ?? 1);
-          sprite.scale.set(scale, scale * 0.38, 1);
+          label.visible = Boolean(label.userData.alwaysVisible) || isActive;
+          const material = label.material as import("three").MeshBasicMaterial;
+          material.opacity = isActive ? 0.96 : 0.58;
         }
       };
 
@@ -347,8 +356,8 @@ function createRoomObjects(
   const resources: ManagedResource[] = [];
   const selectableMeshes: SelectableMesh[] = [];
   const color = progressColor(progressStatus);
-  const edgeColor = progressEdgeColor(progressStatus);
-  const shape = createRoomShape(THREE, room);
+  const polygon = simplifyPolygon(room.polygon, Math.max(wallThickness * 0.42, 0.04));
+  const shape = createRoomShape(THREE, polygon);
   if (!shape) return null;
 
   const slabGeometry = new THREE.ExtrudeGeometry(shape, {
@@ -360,24 +369,24 @@ function createRoomObjects(
   });
   const slabMaterial = new THREE.MeshStandardMaterial({
     color,
-    roughness: 0.78,
+    roughness: 0.84,
     metalness: 0.02,
     transparent: true,
-    opacity: 0.88
+    opacity: 0.32
   });
   const slab = new THREE.Mesh(slabGeometry, slabMaterial) as unknown as SelectableMesh;
   slab.castShadow = true;
   slab.receiveShadow = true;
-  slab.userData = { roomId: room.bim_photo_room_id, selectable: true, progressStatus };
+  slab.userData = { roomId: room.bim_photo_room_id, selectable: true, progressStatus, elementKind: "floor" };
   group.add(slab);
   selectableMeshes.push(slab);
   resources.push(slabGeometry, slabMaterial);
 
-  const lineMaterial = new THREE.LineBasicMaterial({ color: edgeColor, transparent: true, opacity: 0.74 });
-  for (let index = 0; index < room.polygon.length; index += 1) {
-    const start = room.polygon[index];
-    const end = room.polygon[(index + 1) % room.polygon.length];
-    const wall = createWallMesh(THREE, start, end, wallHeight, wallThickness, color, room.bim_photo_room_id, progressStatus);
+  const lineMaterial = new THREE.LineBasicMaterial({ color: WALL_EDGE_COLOR, transparent: true, opacity: 0.55 });
+  for (let index = 0; index < polygon.length; index += 1) {
+    const start = polygon[index];
+    const end = polygon[(index + 1) % polygon.length];
+    const wall = createWallMesh(THREE, start, end, wallHeight, wallThickness, room.bim_photo_room_id, progressStatus);
     if (wall) {
       group.add(wall.mesh);
       selectableMeshes.push(wall.mesh);
@@ -397,10 +406,10 @@ function createRoomObjects(
   return { group, resources, selectableMeshes };
 }
 
-function createRoomShape(THREE: ThreeModule, room: FloorPlanRoom) {
-  if (room.polygon.length < 3) return null;
+function createRoomShape(THREE: ThreeModule, polygon: FloorPlanRoom["polygon"]) {
+  if (polygon.length < 3) return null;
   const shape = new THREE.Shape();
-  room.polygon.forEach((point, index) => {
+  polygon.forEach((point, index) => {
     if (index === 0) shape.moveTo(point.x, point.y);
     else shape.lineTo(point.x, point.y);
   });
@@ -414,7 +423,6 @@ function createWallMesh(
   end: { x: number; y: number },
   wallHeight: number,
   wallThickness: number,
-  color: number,
   roomId: string,
   progressStatus: RoomProgressStatus
 ) {
@@ -425,18 +433,18 @@ function createWallMesh(
 
   const geometry = new THREE.BoxGeometry(length, wallThickness, wallHeight);
   const material = new THREE.MeshStandardMaterial({
-    color: lightenColor(color, 0.18),
-    roughness: 0.82,
+    color: WALL_COLOR,
+    roughness: 0.88,
     metalness: 0.02,
     transparent: true,
-    opacity: 0.88
+    opacity: 0.9
   });
   const mesh = new THREE.Mesh(geometry, material) as unknown as SelectableMesh;
   mesh.castShadow = true;
   mesh.receiveShadow = true;
   mesh.position.set((start.x + end.x) / 2, (start.y + end.y) / 2, wallHeight / 2);
   mesh.rotation.z = Math.atan2(dy, dx);
-  mesh.userData = { roomId, selectable: true, progressStatus };
+  mesh.userData = { roomId, selectable: true, progressStatus, elementKind: "wall" };
   return { mesh, geometry, material };
 }
 
@@ -457,28 +465,42 @@ function createRoomLabel(
   if (!context) return null;
 
   context.clearRect(0, 0, canvas.width, canvas.height);
-  context.fillStyle = "rgba(255,255,255,0.92)";
-  roundRect(context, 28, 38, 456, 92, 28);
+  context.fillStyle = "rgba(255,255,255,0.78)";
+  roundRect(context, 54, 52, 404, 86, 18);
   context.fill();
-  context.strokeStyle = status === "completed" ? "#16a34a" : status === "in-progress" ? "#d97706" : "#dc2626";
-  context.lineWidth = 10;
+  context.strokeStyle = status === "completed" ? "#22c55e" : status === "in-progress" ? "#f59e0b" : "#ef4444";
+  context.lineWidth = 6;
   context.stroke();
-  context.fillStyle = "#0f172a";
-  context.font = "700 42px Arial, sans-serif";
+  context.fillStyle = "#111827";
+  context.font = "700 38px Arial, sans-serif";
   context.textAlign = "center";
   context.textBaseline = "middle";
-  context.fillText(text.slice(0, 18), 256, 84, 400);
+  context.fillText(text.slice(0, 16), 256, 95, 360);
 
   const texture = new THREE.CanvasTexture(canvas);
   texture.colorSpace = THREE.SRGBColorSpace;
-  const material = new THREE.SpriteMaterial({ map: texture, transparent: true, opacity: 0.78, depthTest: false });
-  const sprite = new THREE.Sprite(material);
-  const baseScale = Math.max(maxDimension * 0.085, 7);
-  sprite.scale.set(baseScale, baseScale * 0.38, 1);
-  sprite.position.set(room.center.x, room.center.y, z);
-  sprite.renderOrder = 4;
-  sprite.userData = { roomId: room.bim_photo_room_id, baseScale, activeScale: baseScale * 1.16 };
-  return { sprite, texture, material };
+  texture.anisotropy = 4;
+  const material = new THREE.MeshBasicMaterial({
+    map: texture,
+    transparent: true,
+    opacity: 0.58,
+    depthTest: true,
+    depthWrite: false,
+    side: THREE.DoubleSide
+  });
+  const roomArea = room.area_m2 ?? polygonArea(room.polygon);
+  const areaScale = Math.sqrt(Math.max(roomArea, 1));
+  const labelWidth = Math.min(Math.max(areaScale * 0.52, maxDimension * 0.035), maxDimension * 0.085);
+  const labelHeight = labelWidth * 0.375;
+  const geometry = new THREE.PlaneGeometry(labelWidth, labelHeight);
+  const mesh = new THREE.Mesh(geometry, material);
+  mesh.position.set(room.center.x, room.center.y, z);
+  mesh.renderOrder = 5;
+  mesh.userData = {
+    roomId: room.bim_photo_room_id,
+    alwaysVisible: roomArea > maxDimension * maxDimension * 0.014
+  };
+  return { mesh, geometry, texture, material };
 }
 
 function roundRect(context: CanvasRenderingContext2D, x: number, y: number, width: number, height: number, radius: number) {
@@ -492,22 +514,42 @@ function roundRect(context: CanvasRenderingContext2D, x: number, y: number, widt
 }
 
 function progressColor(status: RoomProgressStatus) {
-  if (status === "completed") return 0x22c55e;
-  if (status === "in-progress") return 0xf59e0b;
-  return 0xef4444;
+  if (status === "completed") return 0xbbf7d0;
+  if (status === "in-progress") return 0xfde68a;
+  return 0xfecaca;
 }
 
-function progressEdgeColor(status: RoomProgressStatus) {
-  if (status === "completed") return 0x15803d;
-  if (status === "in-progress") return 0xb45309;
-  return 0xb91c1c;
+function polygonArea(polygon: FloorPlanRoom["polygon"]) {
+  if (polygon.length < 3) return 0;
+  let sum = 0;
+  for (let index = 0; index < polygon.length; index += 1) {
+    const current = polygon[index];
+    const next = polygon[(index + 1) % polygon.length];
+    sum += current.x * next.y - next.x * current.y;
+  }
+  return Math.abs(sum) / 2;
 }
 
-function lightenColor(color: number, amount: number) {
-  const red = Math.min(255, Math.round(((color >> 16) & 255) + 255 * amount));
-  const green = Math.min(255, Math.round(((color >> 8) & 255) + 255 * amount));
-  const blue = Math.min(255, Math.round((color & 255) + 255 * amount));
-  return (red << 16) + (green << 8) + blue;
+function simplifyPolygon(polygon: FloorPlanRoom["polygon"], epsilon: number): FloorPlanRoom["polygon"] {
+  if (polygon.length < 4) return polygon;
+
+  const withoutShortSegments = polygon.filter((point, index) => {
+    const previous = polygon[(index + polygon.length - 1) % polygon.length];
+    return Math.hypot(point.x - previous.x, point.y - previous.y) > epsilon;
+  });
+  const candidates = withoutShortSegments.length >= 3 ? withoutShortSegments : polygon;
+
+  return candidates.filter((point, index) => {
+    const previous = candidates[(index + candidates.length - 1) % candidates.length];
+    const next = candidates[(index + 1) % candidates.length];
+    const ax = point.x - previous.x;
+    const ay = point.y - previous.y;
+    const bx = next.x - point.x;
+    const by = next.y - point.y;
+    const cross = Math.abs(ax * by - ay * bx);
+    const length = Math.hypot(ax, ay) + Math.hypot(bx, by);
+    return length <= 0.001 || cross / length > epsilon * 0.24;
+  });
 }
 
 function roomDisplayProgress(progress: Room["progress_by_surface"] | undefined): RoomProgressStatus {
