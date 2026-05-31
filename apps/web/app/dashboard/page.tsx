@@ -2,7 +2,7 @@
 
 import { AlertCircle, BarChart3, Building2, Camera, CheckCircle2, FileText, Home, KeyRound, RefreshCw } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
-import { apiJson, authHeaders, canAccessAdminBoards, readProjectId, readSession, saveProjectId, type User } from "../client";
+import { apiJson, authHeaders, canAccessAdminBoards, clearProjectId, readProjectId, readSession, saveProjectId, type User } from "../client";
 import { defaultSurfaceOptions, defaultTradeOptions, labelForOption } from "../photo-options";
 
 type DashboardProject = {
@@ -62,7 +62,7 @@ export default function DashboardPage() {
     const storedProjectId = readProjectId();
     setToken(session.token);
     setSelectedProjectId(storedProjectId);
-    void loadSummary(session.token, storedProjectId);
+    void loadSummary(session.token, storedProjectId).catch((error) => handleSummaryError(error, session.token, storedProjectId));
   }, []);
 
   async function loadSummary(nextToken = token, projectId = selectedProjectId) {
@@ -73,10 +73,23 @@ export default function DashboardPage() {
     setStatus(projectId ? "선택한 프로젝트 현황을 불러왔습니다." : "전체 프로젝트 현황을 불러왔습니다.");
   }
 
+  async function handleSummaryError(error: unknown, nextToken = token, attemptedProjectId = selectedProjectId) {
+    const message = error instanceof Error ? error.message : "현황 조회 실패";
+    if (attemptedProjectId && message.includes("No project access")) {
+      clearProjectId();
+      setSelectedProjectId("");
+      await loadSummary(nextToken, "");
+      setStatus("이전 계정의 프로젝트 선택을 초기화하고 전체 현황을 불러왔습니다.");
+      return;
+    }
+    setStatus(message);
+    setSummary(emptySummary);
+  }
+
   function changeProject(projectId: string) {
     setSelectedProjectId(projectId);
     if (projectId) saveProjectId(projectId);
-    void loadSummary(token, projectId).catch((error) => setStatus(error instanceof Error ? error.message : "현황 조회 실패"));
+    void loadSummary(token, projectId).catch((error) => handleSummaryError(error, token, projectId));
   }
 
   const selectedProjectName = useMemo(() => {
@@ -126,7 +139,7 @@ export default function DashboardPage() {
               ))}
             </select>
           </label>
-          <button className="filter-button" type="button" onClick={() => loadSummary().catch((error) => setStatus(error.message))}>
+          <button className="filter-button" type="button" onClick={() => loadSummary().catch((error) => handleSummaryError(error))}>
             <RefreshCw size={16} />
             새로고침
           </button>
@@ -243,6 +256,26 @@ export default function DashboardPage() {
     </div>
   );
 }
+
+const emptySummary: DashboardSummary["data"] = {
+  projects: [],
+  selected_project_id: null,
+  totals: {
+    rooms: 0,
+    photos: 0,
+    analyzed_photos: 0,
+    reports: 0,
+    revit_models: 0,
+    completed_photos: 0,
+    issue_photos: 0,
+    in_progress_photos: 0,
+    pending_photos: 0
+  },
+  trade_distribution: [],
+  level_distribution: [],
+  recent_photos: [],
+  recent_reports: []
+};
 
 function Metric({ icon, label, value, sub, tone }: { icon: React.ReactNode; label: string; value: number; sub: string; tone: string }) {
   return (
