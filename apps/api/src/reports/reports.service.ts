@@ -114,6 +114,20 @@ export class ReportsService {
         buffer: Buffer.from(renderWordHtml(response.content as ReportContent), "utf8")
       };
     }
+    if (format.toUpperCase() === "PDF") {
+      return {
+        filename: `${safeTitle}.html`,
+        contentType: "text/html; charset=utf-8",
+        buffer: Buffer.from(renderPrintableHtml(response.content as ReportContent), "utf8")
+      };
+    }
+    if (format.toUpperCase() === "HWP") {
+      return {
+        filename: `${safeTitle}.hwp`,
+        contentType: "application/x-hwp; charset=utf-8",
+        buffer: Buffer.from(renderWordHtml(response.content as ReportContent), "utf8")
+      };
+    }
     return {
       filename: `${safeTitle}.json`,
       contentType: "application/json; charset=utf-8",
@@ -425,8 +439,29 @@ function renderWordHtml(content: ReportContent) {
   </body></html>`;
 }
 
-function escapeHtml(value: string) {
-  return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+function renderPrintableHtml(content: ReportContent) {
+  return `<!doctype html><html><head><meta charset="utf-8"><title>${escapeHtml(content.title)}</title><style>
+    body{font-family:Malgun Gothic,Arial,sans-serif;margin:32px;color:#111827;}
+    h1{font-size:24px;margin:0 0 16px;} h2{font-size:17px;margin-top:24px;}
+    table{border-collapse:collapse;width:100%;margin-top:12px;} td,th{border:1px solid #9CA3AF;padding:7px;text-align:left;vertical-align:top;}
+    .meta{color:#4B5563;margin:4px 0;} @media print{body{margin:18mm;}}
+  </style></head><body>
+    <h1>${escapeHtml(content.title)}</h1>
+    <p class="meta"><strong>생성일:</strong> ${escapeHtml(content.generated_at)}</p>
+    <p class="meta"><strong>생성자:</strong> ${escapeHtml(content.generated_by)}</p>
+    <h2>상황 분석</h2>
+    <p>${escapeHtml(content.analysis_result)}</p>
+    <h2>변화 과정</h2>
+    <ol>${content.progress_timeline.map((line) => `<li>${escapeHtml(line)}</li>`).join("")}</ol>
+    <h2>비교 사진 근거</h2>
+    <table><thead><tr><th>작업일자</th><th>Room</th><th>공사면</th><th>공종</th><th>작업자</th><th>내용</th><th>AI 요약</th></tr></thead>
+    <tbody>${content.comparison_photos.map((photo) => `<tr><td>${escapeHtml(photo.work_date)}</td><td>${escapeHtml(photo.room)}</td><td>${escapeHtml(photo.work_surface)}</td><td>${escapeHtml(photo.trade)}</td><td>${escapeHtml(photo.worker_name ?? "")}</td><td>${escapeHtml(photo.description ?? "")}</td><td>${escapeHtml(photo.ai_description ?? "")}</td></tr>`).join("")}</tbody></table>
+    ${content.memo ? `<h2>메모</h2><p>${escapeHtml(content.memo)}</p>` : ""}
+  </body></html>`;
+}
+
+function escapeHtml(value: unknown) {
+  return String(value ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 }
 
 function toReportResponse(report: Prisma.GeneratedReportGetPayload<{

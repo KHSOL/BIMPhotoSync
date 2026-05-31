@@ -26,7 +26,7 @@ type RoomList = { data: Room[] };
 type ReportList = { data: GeneratedReport[] };
 type ReportResult = { data: GeneratedReport };
 type TradeCategoryList = { data: TradeCategory[] };
-type ExportFormat = "JSON" | "XLSX" | "DOCX";
+type ExportFormat = "JSON" | "XLSX" | "DOCX" | "PDF" | "HWP";
 
 export default function ReportsPage() {
   const [token, setToken] = useState("");
@@ -192,7 +192,14 @@ export default function ReportsPage() {
       throw new Error(Array.isArray(message) ? message.join(", ") : message);
     }
     const disposition = res.headers.get("content-disposition");
-    const fallbackName = format === "XLSX" ? `${report.title}.xls` : `${report.title}.doc`;
+    const fallbackByFormat: Record<ExportFormat, string> = {
+      JSON: `${report.title}.json`,
+      XLSX: `${report.title}.xls`,
+      DOCX: `${report.title}.doc`,
+      PDF: `${report.title}.html`,
+      HWP: `${report.title}.hwp`
+    };
+    const fallbackName = fallbackByFormat[format];
     const filename = filenameFromDisposition(disposition) ?? fallbackName;
     downloadBlob(await res.blob(), filename);
   }
@@ -314,7 +321,7 @@ export default function ReportsPage() {
         <Metric icon={<Eye />} label="생성 완료" value={String(reports.filter((r) => r.status === "GENERATED").length)} sub="저장된 보고서" tone="green" />
         <Metric icon={<CalendarDays />} label="최근 생성" value={selectedReport ? new Date(selectedReport.created_at).toLocaleDateString("ko-KR") : "-"} sub="선택 보고서" tone="orange" />
         <Metric icon={<Download />} label="사진 근거" value={String(selectedReport?.photo_ids.length ?? 0)} sub="선택 보고서" tone="purple" />
-        <Metric icon={<FileSpreadsheet />} label="내보내기" value="3" sub="JSON / 엑셀 / 워드" tone="sky" />
+        <Metric icon={<FileSpreadsheet />} label="내보내기" value="5" sub="JSON / 엑셀 / 워드 / PDF / HWP" tone="sky" />
       </section>
 
       <section className="reports-layout">
@@ -396,6 +403,8 @@ export default function ReportsPage() {
                 <button className="button" type="button" onClick={() => requestDownload(selectedReport, "JSON")}><Download size={16} />JSON</button>
                 <button className="button secondary" type="button" onClick={() => requestDownload(selectedReport, "XLSX")}><FileSpreadsheet size={16} />엑셀</button>
                 <button className="button secondary" type="button" onClick={() => requestDownload(selectedReport, "DOCX")}><FileText size={16} />워드</button>
+                <button className="button secondary" type="button" onClick={() => requestDownload(selectedReport, "PDF")}><FileText size={16} />PDF</button>
+                <button className="button secondary" type="button" onClick={() => requestDownload(selectedReport, "HWP")}><FileText size={16} />HWP</button>
               </div>
             </>
           ) : (
