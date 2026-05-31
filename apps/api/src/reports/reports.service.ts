@@ -379,19 +379,65 @@ function normalizeReportContent(
   photos: PhotoForReport[]
 ): ReportContent {
   const fallback = buildHeuristicReport(title, generatedBy, dto, photos);
+  const comparisonPhotos = Array.isArray(value.comparison_photos)
+    ? value.comparison_photos.map((photo, index) => normalizeComparisonPhoto(photo, fallback.comparison_photos[index])).filter((photo): photo is ReportContent["comparison_photos"][number] => Boolean(photo))
+    : [];
+  const timeline = Array.isArray(value.progress_timeline)
+    ? value.progress_timeline.map((line) => stringifyReportValue(line)).filter((line) => line.length > 0)
+    : [];
   return {
     ...fallback,
-    ...value,
-    title: value.title || fallback.title,
-    generated_at: value.generated_at || fallback.generated_at,
-    generated_by: value.generated_by || fallback.generated_by,
-    filters: value.filters || fallback.filters,
-    situation: value.situation || fallback.situation,
-    comparison_photos: value.comparison_photos?.length ? value.comparison_photos : fallback.comparison_photos,
-    progress_timeline: value.progress_timeline?.length ? value.progress_timeline : fallback.progress_timeline,
-    analysis_result: value.analysis_result || fallback.analysis_result,
-    memo: value.memo ?? fallback.memo
+    title: stringifyReportValue(value.title) || fallback.title,
+    generated_at: stringifyReportValue(value.generated_at) || fallback.generated_at,
+    generated_by: stringifyReportValue(value.generated_by) || fallback.generated_by,
+    filters: isRecord(value.filters) ? value.filters : fallback.filters,
+    situation: isRecord(value.situation) ? { ...fallback.situation, ...value.situation } : fallback.situation,
+    comparison_photos: comparisonPhotos.length ? comparisonPhotos : fallback.comparison_photos,
+    progress_timeline: timeline.length ? timeline : fallback.progress_timeline,
+    analysis_result: stringifyReportValue(value.analysis_result) || fallback.analysis_result,
+    memo: value.memo === null ? null : stringifyReportValue(value.memo) || fallback.memo
   };
+}
+
+function normalizeComparisonPhoto(
+  value: unknown,
+  fallback: ReportContent["comparison_photos"][number] | undefined
+): ReportContent["comparison_photos"][number] | null {
+  if (!isRecord(value)) return fallback ?? null;
+  return {
+    photo_id: stringifyReportValue(value.photo_id) || fallback?.photo_id || "",
+    work_date: stringifyReportValue(value.work_date ?? value.date) || fallback?.work_date || "",
+    room: stringifyReportValue(value.room) || fallback?.room || "",
+    work_surface: stringifyReportValue(value.work_surface) || fallback?.work_surface || "",
+    trade: stringifyReportValue(value.trade) || fallback?.trade || "",
+    worker_name: stringifyNullableReportValue(value.worker_name ?? value.worker),
+    description: stringifyNullableReportValue(value.description),
+    ai_description: stringifyNullableReportValue(value.ai_description ?? value.summary)
+  };
+}
+
+function stringifyNullableReportValue(value: unknown) {
+  const text = stringifyReportValue(value);
+  return text.length > 0 ? text : null;
+}
+
+function stringifyReportValue(value: unknown): string {
+  if (value === null || value === undefined) return "";
+  if (typeof value === "string") return value.trim();
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  if (value instanceof Date) return value.toISOString();
+  if (Array.isArray(value)) return value.map((item) => stringifyReportValue(item)).filter(Boolean).join(" ");
+  if (isRecord(value)) {
+    return Object.entries(value)
+      .map(([key, item]) => `${key}: ${stringifyReportValue(item)}`)
+      .filter((line) => !line.endsWith(": "))
+      .join(" / ");
+  }
+  return "";
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function renderExcelHtml(content: ReportContent) {
