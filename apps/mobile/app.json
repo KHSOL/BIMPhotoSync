@@ -17,8 +17,11 @@
       }
     },
     "extra": {
-      "apiBaseUrl": "https://api-production-1d018.up.railway.app/api/v1"
-    }
+      "apiBaseUrl": "https://api-production-1d018.up.railway.app/api/v1",
+      "eas": {
+        "projectId": "c67aaba8-2622-4ea4-b17d-bb34a380d088"
+      }
+    },
+    "owner": "khsol"
   }
 }
-

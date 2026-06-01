@@ -5,8 +5,12 @@
   "main": "index.js",
   "scripts": {
     "start": "expo start",
+    "start:lan": "expo start --lan",
+    "start:localhost": "expo start --localhost",
     "start:tunnel": "expo start --tunnel",
     "build:android:preview": "npx eas-cli@latest build --platform android --profile preview",
+    "build:ios:preview": "npx eas-cli@latest build --platform ios --profile preview",
+    "build:preview": "npx eas-cli@latest build --platform all --profile preview",
     "build:android:production": "npx eas-cli@latest build --platform android --profile production",
     "build:ios:production": "npx eas-cli@latest build --platform ios --profile production",
     "typecheck": "tsc -p tsconfig.json --noEmit"

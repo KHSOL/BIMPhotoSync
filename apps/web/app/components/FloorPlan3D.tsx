@@ -12,7 +12,7 @@ type SelectableMesh = import("three").Mesh & {
     roomId: string;
     selectable: true;
     progressStatus: RoomProgressStatus;
-    elementKind: "floor" | "wall";
+    elementKind: "floor";
   };
 };
 
@@ -21,10 +21,7 @@ type ManagedResource =
   | import("three").Material
   | import("three").Texture;
 
-const ROOM_HEIGHT_RATIO = 0.028;
-const WALL_THICKNESS_RATIO = 0.0028;
 const SLAB_THICKNESS_RATIO = 0.004;
-const WALL_COLOR = 0xf5f6f7;
 const WALL_EDGE_COLOR = 0x334155;
 
 export function FloorPlan3D({
@@ -87,8 +84,7 @@ export function FloorPlan3D({
       const maxDimension = Math.max(width, height);
       const centerX = bounds.min_x + width / 2;
       const centerY = bounds.min_y + height / 2;
-      const wallHeight = Math.max(maxDimension * ROOM_HEIGHT_RATIO, 1.8);
-      const wallThickness = Math.max(maxDimension * WALL_THICKNESS_RATIO, 0.18);
+      const outlineHeight = Math.max(maxDimension * 0.018, 0.8);
       const slabThickness = Math.max(maxDimension * SLAB_THICKNESS_RATIO, 0.18);
       const selectableMeshes: SelectableMesh[] = [];
       const managedResources: ManagedResource[] = [];
@@ -103,7 +99,7 @@ export function FloorPlan3D({
 
       for (const room of plan.rooms) {
         const status = roomProgress[room.bim_photo_room_id] ?? "not-started";
-        const roomObjects = createRoomObjects(THREE, room, status, wallHeight, wallThickness, slabThickness);
+        const roomObjects = createRoomObjects(THREE, room, status, outlineHeight, slabThickness);
         if (!roomObjects) continue;
 
         scene.add(roomObjects.group);
@@ -121,12 +117,12 @@ export function FloorPlan3D({
       const viewSize = maxDimension * 1.18;
       const camera = new THREE.OrthographicCamera(-viewSize / 2, viewSize / 2, viewSize / 2, -viewSize / 2, -maxDimension * 4, maxDimension * 8);
       camera.up.set(0, 0, 1);
-      camera.position.set(centerX - maxDimension * 0.72, centerY - maxDimension * 0.86, maxDimension * 0.95);
+      camera.position.set(centerX - maxDimension * 0.58, centerY - maxDimension * 0.72, maxDimension * 1.12);
       camera.zoom = 1.2;
-      camera.lookAt(centerX, centerY, wallHeight * 0.22);
+      camera.lookAt(centerX, centerY, outlineHeight * 0.18);
 
       const controls = new OrbitControls(camera, renderer.domElement);
-      controls.target.set(centerX, centerY, wallHeight * 0.22);
+      controls.target.set(centerX, centerY, outlineHeight * 0.18);
       controls.enableDamping = true;
       controls.dampingFactor = 0.08;
       controls.enablePan = true;
@@ -149,17 +145,12 @@ export function FloorPlan3D({
           const isSelected = roomId === selectedRoomIdRef.current;
           const isHovered = roomId === hoveredRoomId;
           const materials = (Array.isArray(mesh.material) ? mesh.material : [mesh.material]) as import("three").MeshStandardMaterial[];
-          const isFloor = mesh.userData.elementKind === "floor";
 
           for (const material of materials) {
-            if (isFloor) {
-              material.color.set(isSelected ? 0xbfdbfe : isHovered ? 0xccfbf1 : progressColor(mesh.userData.progressStatus));
-            } else {
-              material.color.set(WALL_COLOR);
-            }
+            material.color.set(isSelected ? 0xbfdbfe : isHovered ? 0xccfbf1 : progressColor(mesh.userData.progressStatus));
             material.emissive.set(isSelected ? 0x2563eb : isHovered ? 0x0f766e : 0x000000);
-            material.emissiveIntensity = isSelected ? (isFloor ? 0.18 : 0.1) : isHovered ? 0.08 : 0;
-            material.opacity = isFloor ? (isSelected ? 0.5 : isHovered ? 0.34 : 0.18) : isSelected ? 0.9 : 0.82;
+            material.emissiveIntensity = isSelected ? 0.18 : isHovered ? 0.08 : 0;
+            material.opacity = isSelected ? 0.42 : isHovered ? 0.28 : 0.13;
           }
           mesh.position.z = isSelected ? slabThickness * 0.22 : isHovered ? slabThickness * 0.1 : 0;
         }
@@ -167,9 +158,9 @@ export function FloorPlan3D({
         for (const label of labelPlanes) {
           const roomId = String(label.userData.roomId ?? "");
           const isActive = roomId === selectedRoomIdRef.current || roomId === hoveredRoomId;
-          label.visible = Boolean(label.userData.alwaysVisible) || isActive;
+          label.visible = isActive;
           const material = label.material as import("three").MeshBasicMaterial;
-          material.opacity = isActive ? 0.96 : 0.58;
+          material.opacity = isActive ? 0.94 : 0;
         }
       };
 
@@ -334,8 +325,7 @@ function createRoomObjects(
   THREE: ThreeModule,
   room: FloorPlanRoom,
   progressStatus: RoomProgressStatus,
-  wallHeight: number,
-  wallThickness: number,
+  outlineHeight: number,
   slabThickness: number
 ) {
   if (room.polygon.length < 3) return null;
@@ -344,7 +334,7 @@ function createRoomObjects(
   const resources: ManagedResource[] = [];
   const selectableMeshes: SelectableMesh[] = [];
   const color = progressColor(progressStatus);
-  const polygon = simplifyPolygon(room.polygon, Math.max(wallThickness * 0.42, 0.04));
+  const polygon = simplifyPolygon(room.polygon, 0.04);
   const shape = createRoomShape(THREE, polygon);
   if (!shape) return null;
 
@@ -367,26 +357,28 @@ function createRoomObjects(
   selectableMeshes.push(slab);
   resources.push(slabGeometry, slabMaterial);
 
-  const lineMaterial = new THREE.LineBasicMaterial({ color: WALL_EDGE_COLOR, transparent: true, opacity: 0.55 });
+  const lineMaterial = new THREE.LineBasicMaterial({ color: WALL_EDGE_COLOR, transparent: true, opacity: 0.62 });
+  const ghostLineMaterial = new THREE.LineBasicMaterial({ color: WALL_EDGE_COLOR, transparent: true, opacity: 0.18 });
   for (let index = 0; index < polygon.length; index += 1) {
     const start = polygon[index];
     const end = polygon[(index + 1) % polygon.length];
-    const wall = createWallMesh(THREE, start, end, wallHeight, wallThickness, room.bim_photo_room_id, progressStatus);
-    if (wall) {
-      group.add(wall.mesh);
-      selectableMeshes.push(wall.mesh);
-      resources.push(wall.geometry, wall.material);
-    }
 
     const lineGeometry = new THREE.BufferGeometry().setFromPoints([
-      new THREE.Vector3(start.x, start.y, wallHeight + slabThickness * 1.35),
-      new THREE.Vector3(end.x, end.y, wallHeight + slabThickness * 1.35)
+      new THREE.Vector3(start.x, start.y, slabThickness * 1.35),
+      new THREE.Vector3(end.x, end.y, slabThickness * 1.35)
     ]);
     const line = new THREE.Line(lineGeometry, lineMaterial);
     group.add(line);
-    resources.push(lineGeometry);
+
+    const raisedLineGeometry = new THREE.BufferGeometry().setFromPoints([
+      new THREE.Vector3(start.x, start.y, outlineHeight),
+      new THREE.Vector3(end.x, end.y, outlineHeight)
+    ]);
+    const raisedLine = new THREE.Line(raisedLineGeometry, ghostLineMaterial);
+    group.add(raisedLine);
+    resources.push(lineGeometry, raisedLineGeometry);
   }
-  resources.push(lineMaterial);
+  resources.push(lineMaterial, ghostLineMaterial);
 
   return { group, resources, selectableMeshes };
 }
@@ -400,37 +392,6 @@ function createRoomShape(THREE: ThreeModule, polygon: FloorPlanRoom["polygon"]) 
   });
   shape.closePath();
   return shape;
-}
-
-function createWallMesh(
-  THREE: ThreeModule,
-  start: { x: number; y: number },
-  end: { x: number; y: number },
-  wallHeight: number,
-  wallThickness: number,
-  roomId: string,
-  progressStatus: RoomProgressStatus
-) {
-  const dx = end.x - start.x;
-  const dy = end.y - start.y;
-  const length = Math.hypot(dx, dy);
-  if (length <= 0.001) return null;
-
-  const geometry = new THREE.BoxGeometry(length, wallThickness, wallHeight);
-  const material = new THREE.MeshStandardMaterial({
-    color: WALL_COLOR,
-    roughness: 0.92,
-    metalness: 0,
-    transparent: true,
-    opacity: 0.82
-  });
-  const mesh = new THREE.Mesh(geometry, material) as unknown as SelectableMesh;
-  mesh.castShadow = false;
-  mesh.receiveShadow = false;
-  mesh.position.set((start.x + end.x) / 2, (start.y + end.y) / 2, wallHeight / 2);
-  mesh.rotation.z = Math.atan2(dy, dx);
-  mesh.userData = { roomId, selectable: true, progressStatus, elementKind: "wall" };
-  return { mesh, geometry, material };
 }
 
 function createRoomLabel(
@@ -450,17 +411,17 @@ function createRoomLabel(
   if (!context) return null;
 
   context.clearRect(0, 0, canvas.width, canvas.height);
-  context.fillStyle = "rgba(255,255,255,0.78)";
-  roundRect(context, 54, 52, 404, 86, 18);
+  context.fillStyle = "rgba(255,255,255,0.9)";
+  roundRect(context, 72, 58, 368, 76, 16);
   context.fill();
   context.strokeStyle = status === "completed" ? "#22c55e" : status === "in-progress" ? "#f59e0b" : "#ef4444";
-  context.lineWidth = 6;
+  context.lineWidth = 5;
   context.stroke();
   context.fillStyle = "#111827";
-  context.font = "700 38px Arial, sans-serif";
+  context.font = "700 30px Arial, sans-serif";
   context.textAlign = "center";
   context.textBaseline = "middle";
-  context.fillText(text.slice(0, 16), 256, 95, 360);
+  context.fillText(text.slice(0, 18), 256, 96, 324);
 
   const texture = new THREE.CanvasTexture(canvas);
   texture.colorSpace = THREE.SRGBColorSpace;
@@ -475,15 +436,15 @@ function createRoomLabel(
   });
   const roomArea = room.area_m2 ?? polygonArea(room.polygon);
   const areaScale = Math.sqrt(Math.max(roomArea, 1));
-  const labelWidth = Math.min(Math.max(areaScale * 0.9, maxDimension * 0.08), maxDimension * 0.22);
+  const labelWidth = Math.min(Math.max(areaScale * 0.58, maxDimension * 0.052), maxDimension * 0.14);
   const labelHeight = labelWidth * 0.375;
   const geometry = new THREE.PlaneGeometry(labelWidth, labelHeight);
   const mesh = new THREE.Mesh(geometry, material);
   mesh.position.set(room.center.x, room.center.y, z);
+  mesh.visible = false;
   mesh.renderOrder = 5;
   mesh.userData = {
-    roomId: room.bim_photo_room_id,
-    alwaysVisible: roomArea > maxDimension * maxDimension * 0.014
+    roomId: room.bim_photo_room_id
   };
   return { mesh, geometry, texture, material };
 }

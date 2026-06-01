@@ -1514,7 +1514,7 @@ a {
 .level-bar-row {
   min-width: 0;
   display: grid;
-  grid-template-columns: minmax(112px, 0.46fr) minmax(120px, 1fr) 52px;
+  grid-template-columns: minmax(150px, 1fr) minmax(84px, 0.58fr) 52px;
   align-items: center;
   gap: 12px;
 }
@@ -1530,9 +1530,7 @@ a {
   color: var(--gray-700);
   font-size: 13px;
   line-height: 18px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
 }
 
 .level-bar-label small {
@@ -1777,7 +1775,7 @@ a {
 }
 
 .rooms-layout {
-  grid-template-columns: minmax(0, 1.4fr) 460px;
+  grid-template-columns: minmax(0, 1fr);
 }
 
 .reports-layout {
@@ -3208,10 +3206,6 @@ video {
 }
 
 @media (max-width: 1440px) {
-  .rooms-layout {
-    grid-template-columns: minmax(0, 1fr) minmax(360px, 0.48fr);
-  }
-
   .reports-layout {
     grid-template-columns: minmax(0, 1fr) minmax(340px, 0.42fr);
   }
@@ -3957,10 +3951,13 @@ body {
   grid-template-columns: minmax(0, 1fr);
 }
 
-.rooms-layout,
 .reports-layout,
 .audit-layout {
   grid-template-columns: minmax(0, 1fr) minmax(min(100%, 320px), 0.42fr);
+}
+
+.rooms-layout {
+  grid-template-columns: minmax(0, 1fr);
 }
 
 .viewer-layout {
@@ -4117,7 +4114,7 @@ body {
 }
 
 .level-bar-row {
-  grid-template-columns: minmax(72px, 0.62fr) minmax(0, 1fr) minmax(42px, auto);
+  grid-template-columns: minmax(140px, 1fr) minmax(72px, 0.54fr) minmax(42px, auto);
   gap: 10px;
   min-width: 0;
 }
@@ -4149,7 +4146,7 @@ body {
   }
 
   .level-bar-row {
-    grid-template-columns: minmax(68px, 0.58fr) minmax(0, 1fr) minmax(40px, auto);
+    grid-template-columns: minmax(132px, 1fr) minmax(64px, 0.5fr) minmax(40px, auto);
   }
 }
 

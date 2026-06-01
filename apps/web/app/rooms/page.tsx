@@ -8,8 +8,7 @@ import {
   Filter,
   KeyRound,
   RefreshCw,
-  Search,
-  X
+  Search
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { apiJson, authHeaders, Project, readProjectId, readSession, Room, saveProjectId } from "../client";
@@ -98,7 +97,6 @@ export default function RoomsPage() {
   const visibleRooms = useMemo(() => rooms.slice((page - 1) * pageSize, page * pageSize), [page, rooms]);
   const selectedRoom = rooms.find((room) => room.id === selectedRoomId) ?? visibleRooms[0] ?? rooms[0];
   const selectedProject = projects.find((project) => project.id === projectId);
-  const selectedPhotosHref = selectedRoom ? `/photos?project_id=${projectId}&room_id=${selectedRoom.id}` : "/photos";
   const mappedRooms = rooms.filter((room) => room.bim_photo_room_id).length;
   const roomSummary = [
     ["전체 방", String(rooms.length), "조회됨", "blue"],
@@ -241,37 +239,6 @@ export default function RoomsPage() {
           </div>
         </article>
 
-        <aside className="panel ref-card room-detail-panel">
-          <div className="room-detail-head">
-            <div>
-              <h2>{selectedRoom ? `${selectedRoom.room_number ?? ""} ${selectedRoom.room_name}` : "방 선택"}</h2>
-              <span className="badge blue">연동됨</span>
-            </div>
-            <button className="icon-button" type="button" onClick={() => setSelectedRoomId("")} aria-label="방 선택 해제"><X size={18} /></button>
-          </div>
-          <div className="tab-row">
-            <button className="active" type="button">개요</button>
-            <a href={selectedPhotosHref}>사진</a>
-            <a href="/viewer">평면도</a>
-          </div>
-          <div className="mini-plan">
-            <div className="plan-room selected"><span /></div>
-            <div className="plan-room" />
-            <div className="plan-marker" />
-          </div>
-          <dl className="detail-definition">
-            <dt>층</dt><dd>{selectedRoom?.level_name ?? "-"}</dd>
-            <dt>방 번호</dt><dd>{selectedRoom?.room_number ?? "-"}</dd>
-            <dt>방 이름</dt><dd>{selectedRoom?.room_name ?? "-"}</dd>
-            <dt>Revit 요소</dt><dd>{selectedRoom?.revit_element_id ?? "-"}</dd>
-            <dt>BIM_PHOTO_ROOM_ID</dt><dd><code>{selectedRoom?.bim_photo_room_id ?? "-"}</code></dd>
-          </dl>
-          <div className="room-actions">
-            <a className="filter-button" href={selectedPhotosHref}>사진 보기</a>
-            <a className="button" href="/viewer">평면도에서 보기</a>
-          </div>
-          <p className="muted">{selectedProject?.name ?? "프로젝트"} / {status}</p>
-        </aside>
       </section>
     </div>
   );
