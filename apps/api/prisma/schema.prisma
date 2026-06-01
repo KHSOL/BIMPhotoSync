@@ -129,6 +129,7 @@ model Project {
   accessKeyHash String?         @map("access_key_hash")
   members       ProjectMember[]
   revitModels   RevitModel[]
+  modelAssets    RevitModelAsset[]
   floorPlans    RevitFloorPlan[]
   revitSheets   RevitSheet[]
   revitViews    RevitView[]
@@ -225,12 +226,34 @@ model RevitModel {
   modelName   String   @map("model_name")
   documentGuid String? @map("document_guid")
   rooms       Room[]
+  modelAssets RevitModelAsset[]
   floorPlans  RevitFloorPlan[]
   sheets      RevitSheet[]
   views       RevitView[]
   createdAt   DateTime @default(now()) @map("created_at")
 
   @@map("revit_models")
+}
+
+model RevitModelAsset {
+  id             String      @id @default(uuid()) @db.Uuid
+  projectId      String      @map("project_id") @db.Uuid
+  revitModelId   String?     @map("revit_model_id") @db.Uuid
+  project        Project     @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  revitModel     RevitModel? @relation(fields: [revitModelId], references: [id], onDelete: SetNull)
+  viewName       String      @map("view_name")
+  sourceViewId   String?     @map("source_view_id")
+  exportFormat   String      @default("OBJ") @map("export_format")
+  assetObjectKey String      @map("asset_object_key")
+  assetMimeType  String      @map("asset_mime_type")
+  fileSize       BigInt?     @map("file_size")
+  checksumSha256 String?     @map("checksum_sha256")
+  syncedAt       DateTime    @default(now()) @map("synced_at")
+  createdAt      DateTime    @default(now()) @map("created_at")
+  updatedAt      DateTime    @updatedAt @map("updated_at")
+
+  @@index([projectId, syncedAt(sort: Desc)], map: "idx_revit_model_assets_project_synced")
+  @@map("revit_model_assets")
 }
 
 model RevitFloorPlan {

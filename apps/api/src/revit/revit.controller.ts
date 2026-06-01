@@ -2,7 +2,7 @@ import { Body, Controller, Get, Param, Post, Res, UseGuards } from "@nestjs/comm
 import { Response } from "express";
 import { CurrentUser, JwtUser } from "../common/current-user";
 import { JwtAuthGuard } from "../common/jwt-auth.guard";
-import { RevitConnectDto, SyncFloorPlanDto, SyncRoomsDto, SyncSheetsDto } from "./dto";
+import { RevitConnectDto, SyncFloorPlanDto, SyncModelAssetDto, SyncRoomsDto, SyncSheetsDto } from "./dto";
 import { RevitService } from "./revit.service";
 
 @Controller("revit")
@@ -30,6 +30,11 @@ export class RevitController {
     return this.revit.syncSheets(user, dto);
   }
 
+  @Post("3d-models")
+  syncModelAsset(@CurrentUser() user: JwtUser, @Body() dto: SyncModelAssetDto) {
+    return this.revit.syncModelAsset(user, dto);
+  }
+
   @Get("projects/:projectId/floor-plans")
   floorPlans(@CurrentUser() user: JwtUser, @Param("projectId") projectId: string) {
     return this.revit.floorPlans(user, projectId);
@@ -53,9 +58,22 @@ export class RevitController {
     return this.revit.sheets(user, projectId);
   }
 
+  @Get("projects/:projectId/3d-models")
+  modelAssets(@CurrentUser() user: JwtUser, @Param("projectId") projectId: string) {
+    return this.revit.modelAssets(user, projectId);
+  }
+
   @Get("sheets/:sheetId/asset")
   async sheetAsset(@CurrentUser() user: JwtUser, @Param("sheetId") sheetId: string, @Res() res: Response) {
     const asset = await this.revit.sheetAsset(user, sheetId);
+    res.setHeader("Content-Type", asset.contentType);
+    res.setHeader("Cache-Control", "private, max-age=300");
+    res.send(asset.buffer);
+  }
+
+  @Get("3d-models/:modelAssetId/asset")
+  async modelAsset(@CurrentUser() user: JwtUser, @Param("modelAssetId") modelAssetId: string, @Res() res: Response) {
+    const asset = await this.revit.modelAsset(user, modelAssetId);
     res.setHeader("Content-Type", asset.contentType);
     res.setHeader("Cache-Control", "private, max-age=300");
     res.send(asset.buffer);

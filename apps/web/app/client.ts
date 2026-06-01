@@ -136,6 +136,26 @@ export type RevitFloorPlan = {
   created_at: string;
 };
 
+export type RevitModel3D = {
+  id: string;
+  project_id: string;
+  revit_model_id?: string | null;
+  view_name: string;
+  source_view_id?: string | null;
+  export_format: string;
+  asset: RevitModelAsset;
+  checksum_sha256?: string | null;
+  synced_at: string;
+  created_at: string;
+};
+
+export type RevitModelAsset = {
+  object_key: string;
+  mime_type?: string | null;
+  file_size?: number | null;
+  url: string;
+};
+
 export type RevitSheetAsset = {
   object_key: string;
   mime_type?: string | null;

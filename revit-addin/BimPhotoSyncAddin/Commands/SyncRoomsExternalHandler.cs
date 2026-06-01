@@ -2,7 +2,10 @@ using Autodesk.Revit.DB;
 using Autodesk.Revit.UI;
 using BimPhotoSyncAddin.Models;
 using BimPhotoSyncAddin.Services;
+using System.Globalization;
 using System.IO;
+using System.Security.Cryptography;
+using System.Text;
 
 namespace BimPhotoSyncAddin.Commands;
 
@@ -77,6 +80,7 @@ public sealed class SyncRoomsExternalHandler : IExternalEventHandler
                 RevitSyncOperation.CurrentView => SyncCurrentView(doc, response.Data.Room_Mappings),
                 RevitSyncOperation.FloorPlans => $"Synced {SyncFloorPlans(doc, response.Data.Room_Mappings)} Revit Floor Plan views.",
                 RevitSyncOperation.Sheets => $"Synced {SyncSheets(doc, response.Data.Room_Mappings)} Revit Sheets.",
+                RevitSyncOperation.Model3D => Sync3DModel(doc),
                 _ => "Room sync complete. Use Sync Floor Plans or Sync Sheets for drawing sync."
             };
 
@@ -285,6 +289,203 @@ public sealed class SyncRoomsExternalHandler : IExternalEventHandler
 
         ValidationLog.Write($"Synced {syncedCount} sheets with room overlays.");
         return syncedCount;
+    }
+
+    private static string Sync3DModel(Document doc)
+    {
+        if (string.IsNullOrWhiteSpace(AddinSettings.ProjectId))
+        {
+            return "Skipped 3D model sync: Project ID is not configured.";
+        }
+
+        View3D? view = GetModelExportView(doc);
+        if (view == null)
+        {
+            return "Skipped 3D model sync: no non-template 3D view was found.";
+        }
+
+        byte[] bytes = Encoding.UTF8.GetBytes(ExportObj(doc, view));
+        string checksum = Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant();
+        string assetName = $"{doc.Title}_{view.Name}_3d";
+        PresignModelAssetResponse? presign = new ApiClient()
+            .PresignModelAssetAsync(new PresignModelAssetRequest(
+                AddinSettings.ProjectId,
+                "text/plain",
+                bytes.LongLength,
+                assetName,
+                checksum))
+            .GetAwaiter()
+            .GetResult();
+
+        if (presign == null)
+        {
+            return "Skipped 3D model sync: upload presign failed.";
+        }
+
+        new ApiClient()
+            .UploadBytesAsync(presign.Data.Presigned_Url, "text/plain", bytes)
+            .GetAwaiter()
+            .GetResult();
+
+        SyncModelAssetResponse? response = new ApiClient()
+            .SyncModelAssetAsync(new SyncModelAssetRequest(
+                AddinSettings.ProjectId,
+                AddinSettings.RevitModelId,
+                view.Name,
+                view.Id.Value.ToString(),
+                "OBJ",
+                new SheetAssetDto(presign.Data.Object_Key, "text/plain", null, null),
+                bytes.LongLength,
+                checksum))
+            .GetAwaiter()
+            .GetResult();
+
+        return response == null
+            ? "3D model uploaded but metadata sync returned no response."
+            : $"Synced 3D model {view.Name} ({Math.Round(bytes.LongLength / 1024.0 / 1024.0, 2)} MB).";
+    }
+
+    private static View3D? GetModelExportView(Document doc)
+    {
+        if (doc.ActiveView is View3D active3D && !active3D.IsTemplate && !active3D.IsPerspective)
+        {
+            return active3D;
+        }
+
+        return new FilteredElementCollector(doc)
+            .OfClass(typeof(View3D))
+            .Cast<View3D>()
+            .Where(view => !view.IsTemplate && !view.IsPerspective)
+            .OrderByDescending(view => view.Name.Equals("{3D}", StringComparison.OrdinalIgnoreCase))
+            .ThenBy(view => view.Name)
+            .FirstOrDefault();
+    }
+
+    private static string ExportObj(Document doc, View3D view)
+    {
+        StringBuilder builder = new();
+        builder.AppendLine("# BIM Photo Sync Revit OBJ export");
+        builder.AppendLine($"# Document: {doc.Title}");
+        builder.AppendLine($"# View: {view.Name}");
+        builder.AppendLine("s off");
+
+        Options options = new()
+        {
+            View = view,
+            DetailLevel = ViewDetailLevel.Fine,
+            ComputeReferences = false,
+            IncludeNonVisibleObjects = false
+        };
+
+        int vertexOffset = 0;
+        int exportedElements = 0;
+        foreach (Element element in new FilteredElementCollector(doc, view.Id).WhereElementIsNotElementType())
+        {
+            if (!ShouldExportModelElement(element)) continue;
+
+            GeometryElement? geometry = element.get_Geometry(options);
+            if (geometry == null) continue;
+
+            int before = vertexOffset;
+            string safeName = SanitizeObjName(element.Category?.Name ?? element.GetType().Name);
+            builder.AppendLine($"o {safeName}_{element.Id.Value}");
+            AppendGeometry(builder, geometry, Transform.Identity, ref vertexOffset);
+            if (vertexOffset > before) exportedElements++;
+        }
+
+        builder.AppendLine($"# Exported elements: {exportedElements}");
+        return builder.ToString();
+    }
+
+    private static bool ShouldExportModelElement(Element element)
+    {
+        Category? category = element.Category;
+        if (category == null || category.CategoryType != CategoryType.Model) return false;
+        if (element is SpatialElement) return false;
+
+        long categoryId = category.Id.Value;
+        return Exportable3DCategories.Contains(categoryId);
+    }
+
+    private static readonly HashSet<long> Exportable3DCategories = new()
+    {
+        (long)BuiltInCategory.OST_Walls,
+        (long)BuiltInCategory.OST_Floors,
+        (long)BuiltInCategory.OST_Ceilings,
+        (long)BuiltInCategory.OST_Roofs,
+        (long)BuiltInCategory.OST_Doors,
+        (long)BuiltInCategory.OST_Windows,
+        (long)BuiltInCategory.OST_Stairs,
+        (long)BuiltInCategory.OST_Railings,
+        (long)BuiltInCategory.OST_Columns,
+        (long)BuiltInCategory.OST_StructuralColumns,
+        (long)BuiltInCategory.OST_StructuralFraming,
+        (long)BuiltInCategory.OST_CurtainWallPanels,
+        (long)BuiltInCategory.OST_CurtainWallMullions,
+        (long)BuiltInCategory.OST_GenericModel
+    };
+
+    private static void AppendGeometry(StringBuilder builder, GeometryElement geometry, Transform transform, ref int vertexOffset)
+    {
+        foreach (GeometryObject geometryObject in geometry)
+        {
+            switch (geometryObject)
+            {
+                case Solid solid:
+                    AppendSolid(builder, solid, transform, ref vertexOffset);
+                    break;
+                case GeometryInstance instance:
+                    AppendGeometry(builder, instance.GetInstanceGeometry(), transform.Multiply(instance.Transform), ref vertexOffset);
+                    break;
+            }
+        }
+    }
+
+    private static void AppendSolid(StringBuilder builder, Solid solid, Transform transform, ref int vertexOffset)
+    {
+        if (solid.Faces.Size == 0 || solid.Volume <= 0) return;
+
+        foreach (Face face in solid.Faces)
+        {
+            Mesh mesh = face.Triangulate();
+            int faceVertexStart = vertexOffset + 1;
+            for (int i = 0; i < mesh.Vertices.Count; i++)
+            {
+                XYZ point = transform.OfPoint(mesh.Vertices[i]);
+                builder.Append("v ");
+                builder.Append(ObjNumber(point.X));
+                builder.Append(' ');
+                builder.Append(ObjNumber(point.Z));
+                builder.Append(' ');
+                builder.Append(ObjNumber(-point.Y));
+                builder.AppendLine();
+            }
+
+            for (int i = 0; i < mesh.NumTriangles; i++)
+            {
+                MeshTriangle triangle = mesh.get_Triangle(i);
+                builder.Append("f ");
+                builder.Append(faceVertexStart + (int)triangle.get_Index(0));
+                builder.Append(' ');
+                builder.Append(faceVertexStart + (int)triangle.get_Index(1));
+                builder.Append(' ');
+                builder.Append(faceVertexStart + (int)triangle.get_Index(2));
+                builder.AppendLine();
+            }
+
+            vertexOffset += mesh.Vertices.Count;
+        }
+    }
+
+    private static string ObjNumber(double value)
+    {
+        return Math.Round(value, 6).ToString("0.######", CultureInfo.InvariantCulture);
+    }
+
+    private static string SanitizeObjName(string value)
+    {
+        string sanitized = new(value.Select(character => char.IsLetterOrDigit(character) ? character : '_').ToArray());
+        return string.IsNullOrWhiteSpace(sanitized) ? "Element" : sanitized;
     }
 
     private static int SyncSheet(

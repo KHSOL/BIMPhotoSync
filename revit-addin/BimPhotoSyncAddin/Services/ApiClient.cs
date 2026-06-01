@@ -108,6 +108,15 @@ public sealed class ApiClient
         return await response.Content.ReadFromJsonAsync<PresignDrawingAssetResponse>().ConfigureAwait(false);
     }
 
+    public async Task<PresignModelAssetResponse?> PresignModelAssetAsync(PresignModelAssetRequest request)
+    {
+        PrepareHeaders();
+        var response = await _http.PostAsJsonAsync($"{AddinSettings.ApiBaseUrl}/uploads/models/presign", request)
+            .ConfigureAwait(false);
+        await EnsureSuccessAsync(response).ConfigureAwait(false);
+        return await response.Content.ReadFromJsonAsync<PresignModelAssetResponse>().ConfigureAwait(false);
+    }
+
     public async Task UploadBytesAsync(string presignedUrl, string mimeType, byte[] bytes)
     {
         _http.DefaultRequestHeaders.Authorization = null;
@@ -125,6 +134,15 @@ public sealed class ApiClient
             .ConfigureAwait(false);
         await EnsureSuccessAsync(response).ConfigureAwait(false);
         return await response.Content.ReadFromJsonAsync<SyncSheetsResponse>().ConfigureAwait(false);
+    }
+
+    public async Task<SyncModelAssetResponse?> SyncModelAssetAsync(SyncModelAssetRequest request)
+    {
+        PrepareHeaders();
+        var response = await _http.PostAsJsonAsync($"{AddinSettings.ApiBaseUrl}/revit/3d-models", request)
+            .ConfigureAwait(false);
+        await EnsureSuccessAsync(response).ConfigureAwait(false);
+        return await response.Content.ReadFromJsonAsync<SyncModelAssetResponse>().ConfigureAwait(false);
     }
 
     private static async Task EnsureSuccessAsync(HttpResponseMessage response)

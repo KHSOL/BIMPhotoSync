@@ -24,6 +24,7 @@ import {
   readProjectId,
   readSession,
   RevitFloorPlan,
+  RevitModel3D,
   RevitRoomOverlay,
   RevitSheet,
   Room,
@@ -31,10 +32,12 @@ import {
 } from "../client";
 import { defaultSurfaceOptions, defaultTradeOptions, labelForOption } from "../photo-options";
 import { FloorPlan3D } from "./FloorPlan3D";
+import { ObjModelViewer } from "./ObjModelViewer";
 
 type DrawingViewerMode = "floorPlans" | "sheets";
 type ProjectList = { data: Project[] };
 type FloorPlanList = { data: RevitFloorPlan[] };
+type Model3DList = { data: RevitModel3D[] };
 type SheetList = { data: RevitSheet[] };
 type RoomList = { data: Room[] };
 type RoomPhotosResponse = { data: { photos: Photo[] } };
@@ -60,6 +63,8 @@ export default function DrawingViewer({ mode }: { mode: DrawingViewerMode }) {
   const [plans, setPlans] = useState<RevitFloorPlan[]>([]);
   const [planId, setPlanId] = useState("");
   const [floorPlanAssetUrl, setFloorPlanAssetUrl] = useState("");
+  const [modelAssets, setModelAssets] = useState<RevitModel3D[]>([]);
+  const [modelAssetId, setModelAssetId] = useState("");
   const [sheets, setSheets] = useState<RevitSheet[]>([]);
   const [sheetId, setSheetId] = useState("");
   const [sheetAssetUrl, setSheetAssetUrl] = useState("");
@@ -83,6 +88,10 @@ export default function DrawingViewer({ mode }: { mode: DrawingViewerMode }) {
   const selectedSheet = useMemo(
     () => (!isFloorPlanMode ? sheets.find((sheet) => sheet.id === sheetId) ?? sheets[0] : undefined),
     [isFloorPlanMode, sheetId, sheets]
+  );
+  const selectedModelAsset = useMemo(
+    () => modelAssets.find((asset) => asset.id === modelAssetId) ?? modelAssets[0],
+    [modelAssetId, modelAssets]
   );
   const allPlanRooms = useMemo(() => plans.flatMap((plan) => plan.rooms), [plans]);
   const selectedPlanRoom = useMemo(
@@ -200,16 +209,19 @@ export default function DrawingViewer({ mode }: { mode: DrawingViewerMode }) {
 
   async function loadProjectGeometry(nextToken = token, nextProjectId = projectId) {
     if (!nextProjectId) return;
-    const [floorPlanJson, sheetJson, roomJson] = await Promise.all([
+    const [floorPlanJson, modelAssetJson, sheetJson, roomJson] = await Promise.all([
       apiJson<FloorPlanList>(`/revit/projects/${nextProjectId}/floor-plans`, { headers: authHeaders(nextToken) }),
+      apiJson<Model3DList>(`/revit/projects/${nextProjectId}/3d-models`, { headers: authHeaders(nextToken) }),
       apiJson<SheetList>(`/revit/projects/${nextProjectId}/sheets`, { headers: authHeaders(nextToken) }),
       apiJson<RoomList>(`/projects/${nextProjectId}/rooms`, { headers: authHeaders(nextToken) })
     ]);
 
     const nextPlans = Array.isArray(floorPlanJson.data) ? floorPlanJson.data : [];
+    const nextModelAssets = Array.isArray(modelAssetJson.data) ? modelAssetJson.data : [];
     const nextSheets = Array.isArray(sheetJson.data) ? sheetJson.data : [];
     const nextRooms = Array.isArray(roomJson.data) ? roomJson.data : [];
     setPlans(nextPlans);
+    setModelAssets(nextModelAssets);
     setSheets(nextSheets);
     setRoomProgressByBimId(
       nextRooms.reduce<Record<string, Room["progress_by_surface"]>>((result, room) => {
@@ -218,6 +230,7 @@ export default function DrawingViewer({ mode }: { mode: DrawingViewerMode }) {
       }, {})
     );
     setPlanId(nextPlans[0]?.id ?? "");
+    setModelAssetId(nextModelAssets[0]?.id ?? "");
     setSheetId(nextSheets[0]?.id ?? "");
     setSelectedRoomId(
       isFloorPlanMode
@@ -331,6 +344,18 @@ export default function DrawingViewer({ mode }: { mode: DrawingViewerMode }) {
             </select>
           </label>
         )}
+        {isFloorPlanMode && floorPlanViewMode === "3d" && modelAssets.length > 0 ? (
+          <label className="field compact">
+            <span className="label">3D 모델</span>
+            <select className="input" value={selectedModelAsset?.id ?? ""} onChange={(event) => setModelAssetId(event.target.value)}>
+              {modelAssets.map((model) => (
+                <option key={model.id} value={model.id}>
+                  {model.view_name} · {new Date(model.synced_at).toLocaleDateString("ko-KR")}
+                </option>
+              ))}
+            </select>
+          </label>
+        ) : null}
         <button className="filter-button" type="button" onClick={() => loadProjectGeometry().catch((err: Error) => setStatus(err.message))}>
           <Filter size={16} />
           새로고침
@@ -392,7 +417,13 @@ export default function DrawingViewer({ mode }: { mode: DrawingViewerMode }) {
         </aside>
 
         <main className="viewer-main">
-          {isFloorPlanMode && selectedPlan && floorPlanViewMode === "3d" ? (
+          {isFloorPlanMode && selectedPlan && floorPlanViewMode === "3d" && selectedModelAsset ? (
+            <ObjModelViewer
+              assetUrl={selectedModelAsset.asset.url}
+              token={token}
+              label={`${selectedModelAsset.view_name} Revit 3D model`}
+            />
+          ) : isFloorPlanMode && selectedPlan && floorPlanViewMode === "3d" ? (
             <FloorPlan3D
               plan={selectedPlan}
               assetUrl={floorPlanAssetUrl}

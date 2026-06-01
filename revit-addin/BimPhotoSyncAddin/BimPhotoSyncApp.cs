@@ -31,39 +31,56 @@ public class BimPhotoSyncApp : IExternalApplication
             // Tab may already exist after reload.
         }
 
-        RibbonPanel panel = app.CreateRibbonPanel(tabName, "Room Photos");
-        panel.AddItem(new PushButtonData(
+        RibbonPanel projectPanel = app.CreateRibbonPanel(tabName, "Project");
+        projectPanel.AddItem(new PushButtonData(
             "ConnectProject",
-            "Connect",
+            "Connect\nProject",
             typeof(BimPhotoSyncApp).Assembly.Location,
             typeof(ConnectProjectCommand).FullName));
-        panel.AddItem(new PushButtonData(
+
+        RibbonPanel syncPanel = app.CreateRibbonPanel(tabName, "Sync");
+        syncPanel.AddItem(new PushButtonData(
             "SyncRooms",
-            "Sync Rooms",
+            "Rooms",
             typeof(BimPhotoSyncApp).Assembly.Location,
             typeof(SyncRoomsCommand).FullName));
-        panel.AddItem(new PushButtonData(
+        syncPanel.AddItem(new PushButtonData(
             "SyncCurrentView",
-            "Sync View",
+            "Current\nView",
             typeof(BimPhotoSyncApp).Assembly.Location,
             typeof(SyncCurrentViewCommand).FullName));
-        panel.AddItem(new PushButtonData(
+        syncPanel.AddItem(new PushButtonData(
             "SyncFloorPlans",
-            "Sync Floor Plans",
+            "Floor\nPlans",
             typeof(BimPhotoSyncApp).Assembly.Location,
             typeof(SyncFloorPlansCommand).FullName));
-        panel.AddItem(new PushButtonData(
+        syncPanel.AddItem(new PushButtonData(
             "SyncSheets",
-            "Sync Sheets",
+            "Sheets",
             typeof(BimPhotoSyncApp).Assembly.Location,
             typeof(SyncSheetsCommand).FullName));
+        syncPanel.AddItem(new PushButtonData(
+            "Sync3DModel",
+            "3D\nModel",
+            typeof(BimPhotoSyncApp).Assembly.Location,
+            typeof(Sync3DModelCommand).FullName));
 #if DEBUG
-        panel.AddItem(new PushButtonData(
+        syncPanel.AddItem(new PushButtonData(
             "CreateTestModel",
-            "Create Test",
+            "Create\nTest",
             typeof(BimPhotoSyncApp).Assembly.Location,
             typeof(CreateTestModelCommand).FullName));
 #endif
+
+        RibbonPanel photosPanel = app.CreateRibbonPanel(tabName, "Photos");
+        photosPanel.AddItem(new PushButtonData(
+            "ShowRoomPhotos",
+            "Room\nPhotos",
+            typeof(BimPhotoSyncApp).Assembly.Location,
+            typeof(ShowRoomPhotosCommand).FullName)
+        {
+            ToolTip = "Open or refresh the selected Room photo timeline in the BIM Photo Sync dockable panel."
+        });
 
         Pane = new PhotoDockPane();
         var paneId = new DockablePaneId(PaneGuid);

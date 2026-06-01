@@ -5,7 +5,7 @@ import { ConfigService } from "@nestjs/config";
 import { randomUUID } from "crypto";
 import { PrismaService } from "../prisma/prisma.service";
 import { ProjectsService } from "../projects/projects.service";
-import { PresignAvatarDto, PresignDrawingAssetDto, PresignPhotoDto } from "./dto";
+import { PresignAvatarDto, PresignDrawingAssetDto, PresignModelAssetDto, PresignPhotoDto } from "./dto";
 
 @Injectable()
 export class UploadsService {
@@ -87,6 +87,30 @@ export class UploadsService {
     };
   }
 
+  async presignModelAsset(user: { sub: string; companyId: string; role: string }, dto: PresignModelAssetDto) {
+    await this.projects.assertProjectRole(user, dto.project_id, ["BIM_MANAGER", "PROJECT_ADMIN", "COMPANY_ADMIN"]);
+    const uploadId = randomUUID();
+    const ext = mimeExtension(dto.mime_type);
+    const safeModel = dto.model_name?.replace(/[^a-zA-Z0-9_-]+/g, "-").replace(/(^-|-$)/g, "") || "model";
+    const objectKey = `models/${dto.project_id}/${new Date().toISOString().slice(0, 10)}/${safeModel}-${uploadId}.${ext}`;
+    const expiresAt = new Date(Date.now() + 10 * 60 * 1000);
+    const command = new PutObjectCommand({
+      Bucket: this.bucket,
+      Key: objectKey,
+      ContentType: dto.mime_type
+    });
+    const presignedUrl = await getSignedUrl(this.s3, command, { expiresIn: 600 });
+    return {
+      data: {
+        upload_id: uploadId,
+        presigned_url: presignedUrl,
+        method: "PUT",
+        object_key: objectKey,
+        expires_at: expiresAt
+      }
+    };
+  }
+
   async presignAvatar(user: { sub: string }, dto: PresignAvatarDto) {
     const uploadId = randomUUID();
     const ext = mimeExtension(dto.mime_type);
@@ -113,6 +137,7 @@ function mimeExtension(mime: string) {
   if (mime === "image/png") return "png";
   if (mime === "application/pdf") return "pdf";
   if (mime === "image/webp") return "webp";
+  if (mime === "text/plain" || mime === "model/obj") return "obj";
   return "jpg";
 }
 

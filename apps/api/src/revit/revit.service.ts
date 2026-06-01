@@ -1,12 +1,12 @@
 import { GetObjectCommand, S3Client } from "@aws-sdk/client-s3";
-import { Injectable, NotFoundException } from "@nestjs/common";
+import { BadRequestException, Injectable, NotFoundException } from "@nestjs/common";
 import { randomUUID } from "crypto";
 import { ConfigService } from "@nestjs/config";
 import { Prisma } from "@prisma/client";
 import { PrismaService } from "../prisma/prisma.service";
 import { ProjectsService } from "../projects/projects.service";
 import { toPhotoResponse } from "../photos/photos.service";
-import { RevitRoomOverlayDto, RevitSheetViewDto, RevitConnectDto, SyncFloorPlanDto, SyncRoomsDto, SyncSheetsDto } from "./dto";
+import { RevitRoomOverlayDto, RevitSheetViewDto, RevitConnectDto, SyncFloorPlanDto, SyncModelAssetDto, SyncRoomsDto, SyncSheetsDto } from "./dto";
 
 type RevitSheetWithRelations = Prisma.RevitSheetGetPayload<{ include: { views: true; overlays: { include: { room: true } } } }>;
 
@@ -259,6 +259,37 @@ export class RevitService {
     return { data: sheets.map((sheet) => toSheetResponse(sheet, this.config)) };
   }
 
+  async syncModelAsset(user: { sub: string; companyId: string; role: string }, dto: SyncModelAssetDto) {
+    await this.projects.assertProjectRole(user, dto.project_id, ["BIM_MANAGER", "PROJECT_ADMIN", "COMPANY_ADMIN"]);
+    const objectKey = dto.asset.object_key;
+    if (!objectKey) throw new BadRequestException("3D model asset object_key is required.");
+    const asset = await this.prisma.revitModelAsset.create({
+      data: {
+        projectId: dto.project_id,
+        revitModelId: dto.revit_model_id,
+        viewName: dto.view_name,
+        sourceViewId: dto.source_view_id,
+        exportFormat: dto.export_format ?? "OBJ",
+        assetObjectKey: objectKey,
+        assetMimeType: dto.asset.mime_type ?? "text/plain",
+        fileSize: dto.file_size,
+        checksumSha256: dto.checksum_sha256,
+        syncedAt: new Date()
+      }
+    });
+    return { data: toModelAssetResponse(asset, this.config) };
+  }
+
+  async modelAssets(user: { sub: string; companyId: string }, projectId: string) {
+    await this.projects.assertProjectAccess(user.sub, user.companyId, projectId);
+    const assets = await this.prisma.revitModelAsset.findMany({
+      where: { projectId },
+      orderBy: [{ syncedAt: "desc" }],
+      take: 20
+    });
+    return { data: assets.map((asset) => toModelAssetResponse(asset, this.config)) };
+  }
+
   async sheetAsset(user: { sub: string; companyId: string }, sheetId: string) {
     const sheet = await this.prisma.revitSheet.findUnique({ where: { id: sheetId } });
     if (!sheet || !sheet.assetObjectKey) throw new NotFoundException("Sheet asset not found.");
@@ -272,6 +303,22 @@ export class RevitService {
     return {
       buffer: Buffer.concat(chunks),
       contentType: object.ContentType ?? sheet.assetMimeType ?? "application/octet-stream"
+    };
+  }
+
+  async modelAsset(user: { sub: string; companyId: string }, modelAssetId: string) {
+    const asset = await this.prisma.revitModelAsset.findUnique({ where: { id: modelAssetId } });
+    if (!asset) throw new NotFoundException("3D model asset not found.");
+    await this.projects.assertProjectAccess(user.sub, user.companyId, asset.projectId);
+    const command = new GetObjectCommand({ Bucket: this.bucket, Key: asset.assetObjectKey });
+    const object = await this.s3.send(command);
+    const chunks: Buffer[] = [];
+    for await (const chunk of object.Body as AsyncIterable<Uint8Array>) {
+      chunks.push(Buffer.from(chunk));
+    }
+    return {
+      buffer: Buffer.concat(chunks),
+      contentType: object.ContentType ?? asset.assetMimeType ?? "application/octet-stream"
     };
   }
 
@@ -463,5 +510,39 @@ function toSheetResponse(sheet: {
       })) ?? [],
     synced_at: sheet.syncedAt,
     created_at: sheet.createdAt
+  };
+}
+
+function toModelAssetResponse(asset: {
+  id: string;
+  projectId: string;
+  revitModelId: string | null;
+  viewName: string;
+  sourceViewId: string | null;
+  exportFormat: string;
+  assetObjectKey: string;
+  assetMimeType: string;
+  fileSize: bigint | number | null;
+  checksumSha256: string | null;
+  syncedAt: Date;
+  createdAt: Date;
+}, config: ConfigService) {
+  const publicBase = config.get<string>("API_PUBLIC_URL", "http://localhost:4000");
+  return {
+    id: asset.id,
+    project_id: asset.projectId,
+    revit_model_id: asset.revitModelId,
+    view_name: asset.viewName,
+    source_view_id: asset.sourceViewId,
+    export_format: asset.exportFormat,
+    asset: {
+      object_key: asset.assetObjectKey,
+      mime_type: asset.assetMimeType,
+      file_size: asset.fileSize === null ? null : Number(asset.fileSize),
+      url: `${publicBase}/api/v1/revit/3d-models/${asset.id}/asset`
+    },
+    checksum_sha256: asset.checksumSha256,
+    synced_at: asset.syncedAt,
+    created_at: asset.createdAt
   };
 }

@@ -170,6 +170,33 @@ public sealed record PresignDrawingAssetData(
     [property: JsonPropertyName("object_key")] string Object_Key,
     [property: JsonPropertyName("expires_at")] string Expires_At);
 
+public sealed record PresignModelAssetRequest(
+    [property: JsonPropertyName("project_id")] string Project_Id,
+    [property: JsonPropertyName("mime_type")] string Mime_Type,
+    [property: JsonPropertyName("file_size")] long File_Size,
+    [property: JsonPropertyName("model_name")] string? Model_Name,
+    [property: JsonPropertyName("checksum_sha256")] string? Checksum_Sha256);
+
+public sealed record PresignModelAssetResponse(
+    [property: JsonPropertyName("data")] PresignDrawingAssetData Data);
+
+public sealed record SyncModelAssetRequest(
+    [property: JsonPropertyName("project_id")] string Project_Id,
+    [property: JsonPropertyName("revit_model_id")] string? Revit_Model_Id,
+    [property: JsonPropertyName("view_name")] string View_Name,
+    [property: JsonPropertyName("source_view_id")] string? Source_View_Id,
+    [property: JsonPropertyName("export_format")] string Export_Format,
+    [property: JsonPropertyName("asset")] SheetAssetDto Asset,
+    [property: JsonPropertyName("file_size")] long? File_Size,
+    [property: JsonPropertyName("checksum_sha256")] string? Checksum_Sha256);
+
+public sealed record SyncModelAssetResponse([property: JsonPropertyName("data")] SyncedModelAssetDto Data);
+
+public sealed record SyncedModelAssetDto(
+    [property: JsonPropertyName("id")] string Id,
+    [property: JsonPropertyName("view_name")] string View_Name,
+    [property: JsonPropertyName("export_format")] string Export_Format);
+
 public sealed record SyncSheetsRequest(
     [property: JsonPropertyName("project_id")] string Project_Id,
     [property: JsonPropertyName("revit_model_id")] string? Revit_Model_Id,

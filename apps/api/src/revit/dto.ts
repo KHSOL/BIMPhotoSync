@@ -316,3 +316,36 @@ export class SyncSheetsDto {
   sheets!: RevitSheetDto[];
 }
 
+export class SyncModelAssetDto {
+  @IsUUID()
+  project_id!: string;
+
+  @IsOptional()
+  @IsUUID()
+  revit_model_id?: string;
+
+  @IsString()
+  @IsNotEmpty()
+  view_name!: string;
+
+  @IsOptional()
+  @IsString()
+  source_view_id?: string;
+
+  @IsOptional()
+  @IsString()
+  export_format?: string;
+
+  @ValidateNested()
+  @Type(() => SheetAssetDto)
+  asset!: SheetAssetDto;
+
+  @IsOptional()
+  @IsNumber()
+  file_size?: number;
+
+  @IsOptional()
+  @IsString()
+  checksum_sha256?: string;
+}
+
