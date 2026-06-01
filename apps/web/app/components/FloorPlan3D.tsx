@@ -21,10 +21,10 @@ type ManagedResource =
   | import("three").Material
   | import("three").Texture;
 
-const ROOM_HEIGHT_RATIO = 0.072;
-const WALL_THICKNESS_RATIO = 0.0048;
-const SLAB_THICKNESS_RATIO = 0.012;
-const WALL_COLOR = 0xf8fafc;
+const ROOM_HEIGHT_RATIO = 0.028;
+const WALL_THICKNESS_RATIO = 0.0028;
+const SLAB_THICKNESS_RATIO = 0.004;
+const WALL_COLOR = 0xf5f6f7;
 const WALL_EDGE_COLOR = 0x334155;
 
 export function FloorPlan3D({
@@ -71,14 +71,12 @@ export function FloorPlan3D({
       if (disposed || !host) return;
 
       const scene = new THREE.Scene();
-      scene.background = new THREE.Color(0xf6f8fb);
-      scene.fog = new THREE.Fog(0xf6f8fb, 900, 3400);
+      scene.background = new THREE.Color(0xffffff);
 
       const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false, powerPreference: "high-performance" });
       renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
       renderer.setSize(host.clientWidth, host.clientHeight);
-      renderer.shadowMap.enabled = true;
-      renderer.shadowMap.type = THREE.PCFShadowMap;
+      renderer.shadowMap.enabled = false;
       renderer.outputColorSpace = THREE.SRGBColorSpace;
       renderer.domElement.className = "floor-plan-3d-canvas";
       host.appendChild(renderer.domElement);
@@ -89,9 +87,9 @@ export function FloorPlan3D({
       const maxDimension = Math.max(width, height);
       const centerX = bounds.min_x + width / 2;
       const centerY = bounds.min_y + height / 2;
-      const wallHeight = Math.max(maxDimension * ROOM_HEIGHT_RATIO, 4);
-      const wallThickness = Math.max(maxDimension * WALL_THICKNESS_RATIO, 0.35);
-      const slabThickness = Math.max(maxDimension * SLAB_THICKNESS_RATIO, 0.7);
+      const wallHeight = Math.max(maxDimension * ROOM_HEIGHT_RATIO, 1.8);
+      const wallThickness = Math.max(maxDimension * WALL_THICKNESS_RATIO, 0.18);
+      const slabThickness = Math.max(maxDimension * SLAB_THICKNESS_RATIO, 0.18);
       const selectableMeshes: SelectableMesh[] = [];
       const managedResources: ManagedResource[] = [];
       const labelPlanes: import("three").Mesh<import("three").PlaneGeometry, import("three").MeshBasicMaterial>[] = [];
@@ -120,22 +118,24 @@ export function FloorPlan3D({
         }
       }
 
-      const camera = new THREE.PerspectiveCamera(33, 1, 0.1, maxDimension * 12);
-      const cameraDistance = Math.max(width, height) * 1.18;
-      camera.position.set(centerX - maxDimension * 0.42, centerY - cameraDistance, maxDimension * 0.9);
-      camera.lookAt(centerX, centerY, wallHeight * 0.08);
+      const viewSize = maxDimension * 1.18;
+      const camera = new THREE.OrthographicCamera(-viewSize / 2, viewSize / 2, viewSize / 2, -viewSize / 2, -maxDimension * 4, maxDimension * 8);
+      camera.up.set(0, 0, 1);
+      camera.position.set(centerX - maxDimension * 0.72, centerY - maxDimension * 0.86, maxDimension * 0.95);
+      camera.zoom = 1.2;
+      camera.lookAt(centerX, centerY, wallHeight * 0.22);
 
       const controls = new OrbitControls(camera, renderer.domElement);
-      controls.target.set(centerX, centerY, wallHeight * 0.08);
+      controls.target.set(centerX, centerY, wallHeight * 0.22);
       controls.enableDamping = true;
       controls.dampingFactor = 0.08;
       controls.enablePan = true;
-      controls.minDistance = maxDimension * 0.28;
-      controls.maxDistance = maxDimension * 4.2;
-      controls.minPolarAngle = Math.PI * 0.16;
-      controls.maxPolarAngle = Math.PI * 0.47;
-      controls.rotateSpeed = 0.72;
-      controls.zoomSpeed = 0.82;
+      controls.minZoom = 0.78;
+      controls.maxZoom = 3.2;
+      controls.minPolarAngle = Math.PI * 0.2;
+      controls.maxPolarAngle = Math.PI * 0.42;
+      controls.rotateSpeed = 0.52;
+      controls.zoomSpeed = 0.72;
       controls.panSpeed = 0.78;
       controls.update();
 
@@ -159,7 +159,7 @@ export function FloorPlan3D({
             }
             material.emissive.set(isSelected ? 0x2563eb : isHovered ? 0x0f766e : 0x000000);
             material.emissiveIntensity = isSelected ? (isFloor ? 0.18 : 0.1) : isHovered ? 0.08 : 0;
-            material.opacity = isFloor ? (isSelected ? 0.64 : isHovered ? 0.48 : 0.32) : isSelected ? 0.96 : 0.9;
+            material.opacity = isFloor ? (isSelected ? 0.5 : isHovered ? 0.34 : 0.18) : isSelected ? 0.9 : 0.82;
           }
           mesh.position.z = isSelected ? slabThickness * 0.22 : isHovered ? slabThickness * 0.1 : 0;
         }
@@ -204,8 +204,12 @@ export function FloorPlan3D({
       const resize = () => {
         const nextWidth = Math.max(1, host.clientWidth);
         const nextHeight = Math.max(1, host.clientHeight);
+        const aspect = nextWidth / nextHeight;
         renderer.setSize(nextWidth, nextHeight);
-        camera.aspect = nextWidth / nextHeight;
+        camera.left = (-viewSize * aspect) / 2;
+        camera.right = (viewSize * aspect) / 2;
+        camera.top = viewSize / 2;
+        camera.bottom = -viewSize / 2;
         camera.updateProjectionMatrix();
       };
       const observer = new ResizeObserver(resize);
@@ -262,24 +266,15 @@ function addLighting(
   centerY: number,
   maxDimension: number
 ) {
-  const ambient = new THREE.HemisphereLight(0xffffff, 0xb8c2d8, 2.15);
+  const ambient = new THREE.HemisphereLight(0xffffff, 0xd8dee9, 2.35);
   scene.add(ambient);
 
-  const key = new THREE.DirectionalLight(0xffffff, 2.35);
-  key.position.set(centerX - maxDimension * 0.85, centerY - maxDimension * 0.95, maxDimension * 1.55);
-  key.castShadow = true;
-  key.shadow.mapSize.width = 2048;
-  key.shadow.mapSize.height = 2048;
-  key.shadow.camera.near = 0.1;
-  key.shadow.camera.far = maxDimension * 4;
-  key.shadow.camera.left = -maxDimension * 1.6;
-  key.shadow.camera.right = maxDimension * 1.6;
-  key.shadow.camera.top = maxDimension * 1.6;
-  key.shadow.camera.bottom = -maxDimension * 1.6;
+  const key = new THREE.DirectionalLight(0xffffff, 1.2);
+  key.position.set(centerX - maxDimension * 0.45, centerY - maxDimension * 0.55, maxDimension * 1.2);
   scene.add(key);
 
-  const fill = new THREE.DirectionalLight(0xdbeafe, 0.82);
-  fill.position.set(centerX + maxDimension, centerY + maxDimension * 0.25, maxDimension * 0.7);
+  const fill = new THREE.DirectionalLight(0xe0f2fe, 0.6);
+  fill.position.set(centerX + maxDimension * 0.7, centerY + maxDimension * 0.4, maxDimension * 0.8);
   scene.add(fill);
 }
 
@@ -294,22 +289,15 @@ function addGroundPlane(
   maxDimension: number
 ) {
   const geometry = new THREE.PlaneGeometry(width * 1.22, height * 1.22);
-  const material = new THREE.MeshStandardMaterial({
-    color: 0xe5eaf2,
-    roughness: 0.9,
-    metalness: 0.01
+  const material = new THREE.MeshBasicMaterial({
+    color: 0xffffff,
+    transparent: true,
+    opacity: 1
   });
   const ground = new THREE.Mesh(geometry, material);
-  ground.receiveShadow = true;
-  ground.position.set(centerX, centerY, -maxDimension * 0.018);
+  ground.position.set(centerX, centerY, -maxDimension * 0.014);
   scene.add(ground);
   resources.push(geometry, material);
-
-  const grid = new THREE.GridHelper(maxDimension * 1.35, 18, 0xb8c2d6, 0xd8dee9);
-  grid.rotation.x = Math.PI / 2;
-  grid.position.set(centerX, centerY, -maxDimension * 0.016);
-  scene.add(grid);
-  resources.push(grid.geometry, grid.material as import("three").Material);
 }
 
 function addPlanTexture(
@@ -326,16 +314,16 @@ function addPlanTexture(
   const loader = new THREE.TextureLoader();
   loader.load(assetUrl, (texture) => {
     texture.colorSpace = THREE.SRGBColorSpace;
-    texture.anisotropy = 8;
+    texture.anisotropy = 12;
     const geometry = new THREE.PlaneGeometry(width, height);
     const material = new THREE.MeshBasicMaterial({
       map: texture,
       transparent: true,
-      opacity: 0.3,
+      opacity: 0.58,
       depthWrite: false
     });
     const plane = new THREE.Mesh(geometry, material);
-    plane.position.set(centerX, centerY, slabThickness * 0.11);
+    plane.position.set(centerX, centerY, slabThickness * 0.04);
     plane.renderOrder = 0;
     scene.add(plane);
     resources.push(texture, geometry, material);
@@ -362,21 +350,18 @@ function createRoomObjects(
 
   const slabGeometry = new THREE.ExtrudeGeometry(shape, {
     depth: slabThickness,
-    bevelEnabled: true,
-    bevelSegments: 1,
-    bevelSize: slabThickness * 0.18,
-    bevelThickness: slabThickness * 0.12
+    bevelEnabled: false
   });
   const slabMaterial = new THREE.MeshStandardMaterial({
     color,
-    roughness: 0.84,
-    metalness: 0.02,
+    roughness: 0.9,
+    metalness: 0,
     transparent: true,
-    opacity: 0.32
+    opacity: 0.18
   });
   const slab = new THREE.Mesh(slabGeometry, slabMaterial) as unknown as SelectableMesh;
-  slab.castShadow = true;
-  slab.receiveShadow = true;
+  slab.castShadow = false;
+  slab.receiveShadow = false;
   slab.userData = { roomId: room.bim_photo_room_id, selectable: true, progressStatus, elementKind: "floor" };
   group.add(slab);
   selectableMeshes.push(slab);
@@ -434,14 +419,14 @@ function createWallMesh(
   const geometry = new THREE.BoxGeometry(length, wallThickness, wallHeight);
   const material = new THREE.MeshStandardMaterial({
     color: WALL_COLOR,
-    roughness: 0.88,
-    metalness: 0.02,
+    roughness: 0.92,
+    metalness: 0,
     transparent: true,
-    opacity: 0.9
+    opacity: 0.82
   });
   const mesh = new THREE.Mesh(geometry, material) as unknown as SelectableMesh;
-  mesh.castShadow = true;
-  mesh.receiveShadow = true;
+  mesh.castShadow = false;
+  mesh.receiveShadow = false;
   mesh.position.set((start.x + end.x) / 2, (start.y + end.y) / 2, wallHeight / 2);
   mesh.rotation.z = Math.atan2(dy, dx);
   mesh.userData = { roomId, selectable: true, progressStatus, elementKind: "wall" };
@@ -490,7 +475,7 @@ function createRoomLabel(
   });
   const roomArea = room.area_m2 ?? polygonArea(room.polygon);
   const areaScale = Math.sqrt(Math.max(roomArea, 1));
-  const labelWidth = Math.min(Math.max(areaScale * 0.52, maxDimension * 0.035), maxDimension * 0.085);
+  const labelWidth = Math.min(Math.max(areaScale * 0.9, maxDimension * 0.08), maxDimension * 0.22);
   const labelHeight = labelWidth * 0.375;
   const geometry = new THREE.PlaneGeometry(labelWidth, labelHeight);
   const mesh = new THREE.Mesh(geometry, material);

@@ -395,9 +395,11 @@ Add-in 사용 흐름:
 
 기존 Add-in을 이미 실행해 저장된 설정이 있다면 `%APPDATA%\BimPhotoSync\config.json`의 `ApiBaseUrl`이 기본값보다 우선합니다. Railway 프로젝트를 새로 연결한 뒤에는 Connect 창에서 Backend API URL을 위 Railway 주소로 다시 입력해 저장하거나, 해당 config 파일의 `ApiBaseUrl`을 직접 수정합니다.
 
-현재 웹 Floor Plan/Sheets는 export asset + Room overlay 방식입니다. Floor Plan은 Revit PDF page 여백과 view projection 좌표가 어긋나는 문제를 줄이기 위해 View PDF가 아니라 PNG view image를 업로드하고, Sheets는 PDF를 유지합니다. 3D 전환은 Three.js가 같은 Room polygon을 바닥 슬래브, 낮은 벽체, 외곽선, 라벨, 그림자, 사선 카메라가 있는 공간 모델로 렌더링합니다. 선택 이벤트는 기존 2D와 동일한 `BIM_PHOTO_ROOM_ID`를 반환하고, 3D 바닥에는 Floor Plan PNG를 반투명 참조 텍스처로 깔 수 있습니다. Room overlay는 도면을 가리지 않도록 투명도가 높은 클릭 영역으로 표시하고, Room 번호/이름/핀은 Floor Plan bounds 기준 비율로 계산해 Revit view scale에 따라 과도하게 커지지 않게 렌더링합니다. 장기 제품 단계에서 Autodesk Platform Services Viewer를 도입하더라도 같은 `RevitFloorPlan`, `RevitSheet`, Room overlay 데이터 모델을 유지하고 표시 엔진만 APS Viewer extension으로 바꾸는 방향입니다.
+현재 웹 Floor Plan/Sheets는 export asset + Room overlay 방식입니다. Floor Plan은 Revit PDF page 여백과 view projection 좌표가 어긋나는 문제를 줄이기 위해 View PDF가 아니라 PNG view image를 업로드하고, Sheets는 PDF를 유지합니다. 3D 전환은 Three.js가 같은 Room polygon을 바닥 슬래브, 낮은 회색 벽체, 외곽선, 바닥 라벨, 정투영 사선 카메라가 있는 건축 매스 모델로 렌더링합니다. 가구, 문, 창은 현재 데이터로 복원하지 않고, 선택 이벤트는 기존 2D와 동일한 `BIM_PHOTO_ROOM_ID`를 반환합니다. 3D 바닥에는 Floor Plan PNG를 반투명 참조 텍스처로 깔아 레퍼런스 도면 맥락을 유지합니다. Room overlay는 도면을 가리지 않도록 투명도가 높은 클릭 영역으로 표시하고, Room 번호/이름/핀은 Floor Plan bounds 기준 비율로 계산해 Revit view scale에 따라 과도하게 커지지 않게 렌더링합니다. 장기 제품 단계에서 Autodesk Platform Services Viewer를 도입하더라도 같은 `RevitFloorPlan`, `RevitSheet`, Room overlay 데이터 모델을 유지하고 표시 엔진만 APS Viewer extension으로 바꾸는 방향입니다.
 
-모바일 앱은 `apps/mobile`의 Expo React Native 앱입니다. monorepo에서 Expo entry가 루트 `App`을 찾지 않도록 `apps/mobile/index.js`를 진입점으로 사용합니다. 현장 테스트는 `npm --workspace apps/mobile run start:tunnel`을 실행한 뒤 휴대폰의 Expo Go로 QR을 스캔하는 방식이 가장 빠릅니다. Android 설치 파일 수준 검증은 `npx expo export --platform android --output-dir <temp-dir>`로 JS bundle export를 먼저 확인하고, 실제 배포용 APK/AAB는 EAS Build profile을 추가해 생성합니다.
+모바일 앱은 `apps/mobile`의 Expo React Native 앱입니다. monorepo에서 Expo entry가 루트 `App`을 찾지 않도록 `apps/mobile/index.js`를 진입점으로 사용합니다. 현장 개발 테스트는 `npm --workspace apps/mobile run start:tunnel`을 실행한 뒤 휴대폰의 Expo Go로 QR을 스캔하는 방식이 가장 빠릅니다. 터널 실행에 필요한 `@expo/ngrok`은 mobile workspace dev dependency에 고정되어 있으므로 `npm install` 후 별도 전역 설치 질문 없이 실행할 수 있습니다.
+
+다른 사람이 설치할 수 있는 Android 테스트 APK는 Expo 계정 로그인 후 `apps/mobile` 기준으로 `npm run build:android:preview`를 실행해 EAS internal distribution build로 생성합니다. 빌드가 끝나면 EAS가 제공하는 설치 URL/QR을 공유합니다. iOS는 Apple 정책상 TestFlight 또는 Ad Hoc/Enterprise 배포가 필요하므로 Apple Developer 계정과 기기 등록 또는 App Store Connect 설정이 필요합니다. 스토어 제출용 Android AAB는 `npm run build:android:production`, iOS 스토어 빌드는 `npm run build:ios:production`을 사용합니다.
 
 ## 운영 검증 기준
 

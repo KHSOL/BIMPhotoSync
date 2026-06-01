@@ -6,6 +6,9 @@
   "scripts": {
     "start": "expo start",
     "start:tunnel": "expo start --tunnel",
+    "build:android:preview": "npx eas-cli@latest build --platform android --profile preview",
+    "build:android:production": "npx eas-cli@latest build --platform android --profile production",
+    "build:ios:production": "npx eas-cli@latest build --platform ios --profile production",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
@@ -16,6 +19,7 @@
     "react-native": "0.81.5"
   },
   "devDependencies": {
+    "@expo/ngrok": "^4.1.3",
     "@types/react": "~19.1.10",
     "typescript": "^5.6.3"
   }
