@@ -282,8 +282,21 @@ export class RevitService {
 
   async modelAssets(user: { sub: string; companyId: string }, projectId: string) {
     await this.projects.assertProjectAccess(user.sub, user.companyId, projectId);
+    const floorPlans = await this.prisma.revitFloorPlan.findMany({
+      where: { projectId, sourceViewId: { not: null } },
+      select: { sourceViewId: true }
+    });
+    const floorPlanSourceViewIds = floorPlans
+      .map((plan) => plan.sourceViewId)
+      .filter(isPresentString);
+    if (floorPlanSourceViewIds.length === 0) return { data: [] };
+
     const assets = await this.prisma.revitModelAsset.findMany({
-      where: { projectId },
+      where: {
+        projectId,
+        sourceViewId: { in: floorPlanSourceViewIds },
+        NOT: [{ viewName: "{3D}" }, { viewName: "{3d}" }]
+      },
       orderBy: [{ syncedAt: "desc" }],
       take: 20
     });
@@ -353,6 +366,10 @@ function viewKey(view: Pick<RevitSheetViewDto, "source_view_id" | "viewport_elem
 
 function overlayKey(overlay: Pick<RevitRoomOverlayDto, "source_view_id" | "viewport_element_id">) {
   return `${overlay.source_view_id ?? ""}:${overlay.viewport_element_id ?? ""}`;
+}
+
+function isPresentString(value: string | null): value is string {
+  return typeof value === "string" && value.trim() !== "";
 }
 
 async function findExistingSheet(

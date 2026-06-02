@@ -396,7 +396,7 @@ Add-in 사용 흐름:
 
 기존 Add-in을 이미 실행해 저장된 설정이 있다면 `%APPDATA%\BimPhotoSync\config.json`의 `ApiBaseUrl`이 기본값보다 우선합니다. Railway 프로젝트를 새로 연결한 뒤에는 Connect 창에서 Backend API URL을 위 Railway 주소로 다시 입력해 저장하거나, 해당 config 파일의 `ApiBaseUrl`을 직접 수정합니다.
 
-현재 웹 Floor Plan/Sheets는 export asset + Room overlay 방식입니다. Floor Plan은 Revit PDF page 여백과 view projection 좌표가 어긋나는 문제를 줄이기 위해 View PDF가 아니라 PNG view image를 업로드하고, Sheets는 PDF를 유지합니다. 3D 전환은 Revit Add-in의 `3D Model` 동기화가 각 Floor Plan의 Room 경계를 기준으로 만든 임시 sectioned 3D view를 OBJ로 업로드하면 Three.js `OBJLoader`로 렌더링합니다. OBJ export는 벽, 바닥, 천장, 지붕, 문, 창, 계단, 난간, 기둥, 구조 프레임, 커튼월, 일반 모델 카테고리를 대상으로 하며 가구는 제외합니다. 3D 모델 자산은 `RevitModelAsset`으로 관리되고 R2/S3 object key, MIME type, file size, checksum, source view id를 저장합니다. 웹은 현재 선택된 Floor Plan과 `source_view_id`가 정확히 일치하는 3D 자산만 사용하며, 전체 `{3D}` 모델은 Floor Plan 3D 후보에서 제외합니다. 매칭되는 OBJ가 없으면 기존 Room polygon 기반 axonometric fallback과 최신 Add-in에서 `3D Model`을 다시 실행하라는 안내를 표시합니다. 새 Add-in 설치 후 Revit에서 `3D Model`을 다시 실행하면 기존 프로젝트에도 Floor Plan별 3D 자산이 추가 업로드됩니다.
+현재 웹 Floor Plan/Sheets는 export asset + Room overlay 방식입니다. Floor Plan은 Revit PDF page 여백과 view projection 좌표가 어긋나는 문제를 줄이기 위해 View PDF가 아니라 PNG view image를 업로드하고, Sheets는 PDF를 유지합니다. 3D 전환은 Revit Add-in의 `3D Model` 동기화가 각 Floor Plan의 Room 경계를 기준으로 만든 임시 sectioned 3D view를 OBJ로 업로드하면 Three.js `OBJLoader`로 렌더링합니다. OBJ export는 벽, 바닥, 천장, 지붕, 문, 창, 계단, 난간, 기둥, 구조 프레임, 커튼월, 일반 모델 카테고리를 대상으로 하며 가구는 제외합니다. 3D 모델 자산은 `RevitModelAsset`으로 관리되고 R2/S3 object key, MIME type, file size, checksum, source view id를 저장합니다. 웹과 API는 현재 선택된 Floor Plan과 `source_view_id`가 정확히 일치하는 3D 자산만 사용하며, 전체 `{3D}` 모델은 Floor Plan 3D 후보에서 제외합니다. 매칭되는 OBJ가 없으면 기존 Room polygon 기반 axonometric fallback과 최신 Add-in에서 `3D Model`을 다시 실행하라는 안내를 표시합니다. 새 Add-in 설치 후 Revit에서 `3D Model`을 다시 실행하면 기존 프로젝트에도 Floor Plan별 3D 자산이 추가 업로드됩니다. 정상 동기화 후 Revit 알림은 `Synced N Floor Plan section 3D models.` 형식이어야 하며, 웹 3D 모델 선택에는 `{3D}`가 아니라 `L2`, `L3`처럼 Floor Plan 이름이 표시되어야 합니다.
 
 모바일 앱은 `apps/mobile`의 Expo React Native 앱입니다. monorepo에서 Expo entry가 루트 `App`을 찾지 않도록 `apps/mobile/index.js`를 진입점으로 사용합니다. 현장 개발 테스트는 같은 Wi-Fi에서 `npm --workspace apps/mobile run start:lan`을 실행한 뒤 iPhone/Galaxy의 Expo Go로 QR을 스캔하는 방식이 가장 안정적입니다. 외부망 테스트가 필요하면 `npm --workspace apps/mobile run start:tunnel`을 사용할 수 있지만, ngrok 터널은 네트워크/방화벽 상태에 따라 시간 초과될 수 있습니다. 터널 실행에 필요한 `@expo/ngrok`은 mobile workspace dev dependency에 고정되어 있으므로 `npm install` 후 별도 전역 설치 질문 없이 실행할 수 있습니다.
 
@@ -408,6 +408,8 @@ Add-in 사용 흐름:
 - Connect Project가 API 연결과 인증을 통과합니다.
 - Sync Rooms가 Revit Room에 `BIM_PHOTO_ROOM_ID`를 기록합니다.
 - Sync Floor Plans가 Floor Plan PNG와 Room polygon을 백엔드에 업로드합니다.
+- 3D Model이 Floor Plan별 sectioned OBJ를 업로드하고 `%APPDATA%\BimPhotoSync\validation.log`에 `Synced N Floor Plan section 3D models.`를 남깁니다.
+- Floor Plan 3D 모델 선택에 전체 `{3D}` 모델이 보이지 않고 현재 평면도와 같은 이름의 3D 자산만 표시됩니다.
 - Sync Sheets가 Sheet PDF와 Room overlay polygon을 백엔드에 업로드합니다.
 - Floor Plan 탭에서 Room polygon을 클릭할 수 있습니다.
 - Sheets 탭에서 Sheet PDF 위 Room polygon을 클릭할 수 있습니다.

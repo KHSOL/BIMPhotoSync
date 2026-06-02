@@ -878,7 +878,8 @@ function pickModelAssetForPlan(modelAssets: RevitModel3D[], plan: RevitFloorPlan
 
 function modelAssetMatchesPlan(asset: RevitModel3D, plan: RevitFloorPlan) {
   if (!asset.source_view_id || !plan.source_view_id) return false;
-  if (asset.view_name.trim().toLowerCase() === "{3d}") return false;
+  const normalizedName = asset.view_name.trim().toLowerCase();
+  if (normalizedName === "{3d}" || normalizedName.includes("overall") || normalizedName.includes("전체")) return false;
   return asset.source_view_id === plan.source_view_id;
 }
 

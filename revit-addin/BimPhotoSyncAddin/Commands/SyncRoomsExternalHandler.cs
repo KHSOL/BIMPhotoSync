@@ -308,13 +308,7 @@ public sealed class SyncRoomsExternalHandler : IExternalEventHandler
 
         if (floorPlans.Count == 0)
         {
-            View3D? fallbackView = GetModelExportView(doc);
-            if (fallbackView == null)
-            {
-                return "Skipped 3D model sync: no Floor Plan or non-template 3D view was found.";
-            }
-
-            return SyncSingle3DModel(doc, fallbackView, fallbackView.Name, fallbackView.Id.Value.ToString());
+            return "Skipped 3D model sync: no canonical Floor Plan views were found.";
         }
 
         int syncedCount = 0;
@@ -541,22 +535,6 @@ public sealed class SyncRoomsExternalHandler : IExternalEventHandler
             .Where(elevation => elevation > currentElevation + 0.01)
             .OrderBy(elevation => elevation)
             .Cast<double?>()
-            .FirstOrDefault();
-    }
-
-    private static View3D? GetModelExportView(Document doc)
-    {
-        if (doc.ActiveView is View3D active3D && !active3D.IsTemplate && !active3D.IsPerspective)
-        {
-            return active3D;
-        }
-
-        return new FilteredElementCollector(doc)
-            .OfClass(typeof(View3D))
-            .Cast<View3D>()
-            .Where(view => !view.IsTemplate && !view.IsPerspective)
-            .OrderByDescending(view => view.Name.Equals("{3D}", StringComparison.OrdinalIgnoreCase))
-            .ThenBy(view => view.Name)
             .FirstOrDefault();
     }
 
