@@ -164,8 +164,26 @@ export default function RoomsPage() {
         <article className="panel ref-card room-table-card">
           <h2 className="section-title">전체 {rooms.length}개 방</h2>
           <p className="muted progress-help">
-            공정 진행률은 공사면별 상태를 기준으로 계산합니다. 사진 없음은 0점, 사진 1장 이상은 0.5점, 메모나 AI 검토에 "완료"가 있으면 1점으로 반영합니다.
+            공정 진행률은 방 안의 공사면별 상태 점수를 합산해 계산합니다. 방 상태는 전체 공사면이 완료일 때만 완료로 표시됩니다.
           </p>
+          <div className="progress-rule-grid" aria-label="공정 진행률 기준">
+            <div className="progress-rule-card">
+              <strong>시작 전: 0점</strong>
+              <span>해당 공사면에 업로드된 사진이 없으면 시작 전으로 계산합니다.</span>
+            </div>
+            <div className="progress-rule-card">
+              <strong>진행 중: 0.5점</strong>
+              <span>해당 공사면에 사진이 1장 이상 있고 완료 근거가 없으면 진행 중으로 계산합니다.</span>
+            </div>
+            <div className="progress-rule-card">
+              <strong>완료: 1점</strong>
+              <span>작업 내용, 메모, AI 검토에 완료 근거가 있으면 완료로 계산합니다.</span>
+            </div>
+            <div className="progress-rule-card">
+              <strong>방 진행률</strong>
+              <span>(공사면 점수 합계 / 공사면 수) x 100% 입니다.</span>
+            </div>
+          </div>
           <div className="status-summary-grid">
             {roomSummary.map(([label, value, percent, tone]) => (
               <div className="status-summary-card" key={label}>
@@ -260,8 +278,8 @@ export default function RoomsPage() {
 
 function roomProgressStatus(room: Room) {
   const values = Object.values(room.progress_by_surface ?? {});
-  if (values.some((item) => item.status === "COMPLETED")) return { label: "완료", badgeClass: "badge green" };
-  if (values.some((item) => item.status === "IN_PROGRESS")) return { label: "진행중", badgeClass: "badge orange" };
+  if (values.length > 0 && values.every((item) => item.status === "COMPLETED")) return { label: "완료", badgeClass: "badge green" };
+  if (values.some((item) => item.status === "IN_PROGRESS" || item.status === "COMPLETED")) return { label: "진행중", badgeClass: "badge orange" };
   return { label: "시작 전", badgeClass: "badge red" };
 }
 

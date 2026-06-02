@@ -1,6 +1,6 @@
 "use client";
 
-import { Bot, CalendarDays, Download, Eye, FileSpreadsheet, FileText, Filter, KeyRound, MessageSquare, Plus, Search, Send } from "lucide-react";
+import { CalendarDays, Download, Eye, FileSpreadsheet, FileText, Filter, KeyRound, Plus, Search } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import {
   API_BASE,
@@ -27,16 +27,6 @@ type ReportList = { data: GeneratedReport[] };
 type ReportResult = { data: GeneratedReport };
 type TradeCategoryList = { data: TradeCategory[] };
 type ExportFormat = "JSON" | "XLSX" | "DOCX" | "PDF" | "HWP";
-type ChatMessage = { role: "user" | "ai"; text: string; provider?: string };
-type ReportChatResult = {
-  data: {
-    provider: string;
-    model_name: string;
-    answer: string;
-    suggested_prompt: string;
-    error_message?: string;
-  };
-};
 
 export default function ReportsPage() {
   const [token, setToken] = useState("");
@@ -49,14 +39,6 @@ export default function ReportsPage() {
   const [selectedId, setSelectedId] = useState("");
   const [status, setStatus] = useState("로그인 후 프로젝트를 선택하세요.");
   const [generating, setGenerating] = useState(false);
-  const [chatMessage, setChatMessage] = useState("");
-  const [chatLoading, setChatLoading] = useState(false);
-  const [chatLog, setChatLog] = useState<ChatMessage[]>([
-    {
-      role: "ai",
-      text: "보고서 작성 기준을 입력하면 AI가 지시문으로 정리합니다. 예: 지난 7일간 완료 근거와 지연 원인을 중심으로 작성해줘."
-    }
-  ]);
   const [filters, setFilters] = useState({
     room_id: "",
     work_surface: "",
@@ -158,33 +140,6 @@ export default function ReportsPage() {
       date_to: filters.date_to || undefined,
       worker_name: filters.worker_name || undefined
     };
-  }
-
-  async function sendReportChat() {
-    const message = chatMessage.trim();
-    if (!message || !projectId) return;
-    setChatLoading(true);
-    setChatMessage("");
-    setChatLog((rows) => [...rows, { role: "user", text: message }]);
-    try {
-      const json = await apiJson<ReportChatResult>("/reports/chat", {
-        method: "POST",
-        headers: { ...authHeaders(token), "Content-Type": "application/json" },
-        body: JSON.stringify({ ...reportRequestBase(), message })
-      });
-      setFilters((current) => ({
-        ...current,
-        ai_prompt: current.ai_prompt ? `${current.ai_prompt}\n${json.data.suggested_prompt}` : json.data.suggested_prompt
-      }));
-      setChatLog((rows) => [...rows, { role: "ai", text: json.data.answer, provider: json.data.provider }]);
-      setStatus("AI 지시문을 보고서 생성 조건에 반영했습니다.");
-    } catch (err) {
-      const messageText = err instanceof Error ? err.message : "AI 채팅 요청에 실패했습니다.";
-      setChatLog((rows) => [...rows, { role: "ai", text: messageText }]);
-      setStatus(messageText);
-    } finally {
-      setChatLoading(false);
-    }
   }
 
   async function generateReport() {
@@ -346,35 +301,6 @@ export default function ReportsPage() {
           />
         </label>
         <button className="filter-button" type="button" onClick={resetFilters}><Filter size={16} />전체보기</button>
-      </section>
-
-      <section className="panel ref-card report-chat-panel">
-        <div className="panel-header">
-          <h2 className="section-title"><MessageSquare size={18} /> AI 보고서 채팅</h2>
-          <span className="badge blue">지시문 생성</span>
-        </div>
-        <div className="report-chat-log">
-          {chatLog.map((message, index) => (
-            <div className={`report-chat-message ${message.role}`} key={`${message.role}-${index}`}>
-              {message.role === "ai" ? <Bot size={16} /> : <MessageSquare size={16} />}
-              <p>{message.text}</p>
-            </div>
-          ))}
-        </div>
-        <div className="report-chat-input">
-          <input
-            className="input"
-            value={chatMessage}
-            onChange={(event) => setChatMessage(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === "Enter") void sendReportChat();
-            }}
-            placeholder="AI에게 보고서 기준을 지시하세요"
-          />
-          <button className="button" type="button" disabled={chatLoading || !chatMessage.trim()} onClick={() => void sendReportChat()}>
-            <Send size={16} /> {chatLoading ? "전송 중" : "전송"}
-          </button>
-        </div>
       </section>
 
       <section className="metric-grid five">

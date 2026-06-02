@@ -333,8 +333,8 @@ export default function PhotosPage() {
       ) : null}
 
       {activeTab === "list" ? (
-        <div className="dashboard-grid">
-          <section className="panel">
+        <div className="dashboard-grid photo-dashboard-grid">
+          <section className="panel photo-list-panel">
             <div className="panel-header">
               <div><h1 className="panel-title">사진 조회</h1><div className="muted">사진 {photos.length}개</div></div>
               <span className="badge blue">방 기준</span>
@@ -352,7 +352,7 @@ export default function PhotosPage() {
             )}
           </section>
 
-          <section className="panel">
+          <section className="panel photo-detail-panel">
             <div className="panel-header"><h2 className="panel-title">선택 사진 상세</h2><span className="badge orange">{progressStatusLabel(selectedPhoto?.progress_status)}</span></div>
             {selectedPhoto ? (
               <>
@@ -399,7 +399,7 @@ export default function PhotosPage() {
             ) : <div className="empty">사진을 선택하세요.</div>}
           </section>
 
-          <aside className="panel">
+          <aside className="panel photo-query-panel">
             <div className="panel-header"><h2 className="panel-title">조회 기준</h2></div>
             <div className="status-card"><span className="muted">선택 방</span><strong>{selectedRoom ? `${selectedRoom.room_number ?? ""} ${selectedRoom.room_name}` : "전체 방"}</strong><code>{selectedRoom?.bim_photo_room_id ?? "BIM_PHOTO_ROOM_ID"}</code></div>
             <div style={{ height: 12 }} />

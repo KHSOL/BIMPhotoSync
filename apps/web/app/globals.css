@@ -2009,66 +2009,6 @@ a {
   margin-top: 22px;
 }
 
-.report-chat-panel {
-  display: grid;
-  gap: 14px;
-}
-
-.report-chat-log {
-  min-height: 180px;
-  max-height: 300px;
-  overflow-y: auto;
-  display: grid;
-  align-content: start;
-  gap: 10px;
-  padding: 12px;
-  border: 1px solid var(--gray-200);
-  border-radius: 8px;
-  background: var(--gray-50);
-}
-
-.report-chat-message {
-  max-width: 92%;
-  padding: 10px 12px;
-  border: 1px solid var(--gray-200);
-  border-radius: 8px;
-  background: #fff;
-  color: var(--gray-700);
-  font-size: 13px;
-  line-height: 1.55;
-  white-space: pre-wrap;
-}
-
-.report-chat-message.user {
-  justify-self: end;
-  border-color: var(--blue-100);
-  background: var(--blue-50);
-  color: var(--gray-900);
-}
-
-.report-chat-message.ai {
-  justify-self: start;
-}
-
-.report-chat-message small {
-  display: block;
-  margin-bottom: 4px;
-  color: var(--gray-500);
-  font-weight: 700;
-}
-
-.report-chat-input {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 10px;
-  align-items: start;
-}
-
-.report-chat-input textarea {
-  min-height: 86px;
-  resize: vertical;
-}
-
 .badge.red { background: #fef2f2; color: #ef4444; }
 .badge.sky { background: #eff6ff; color: #0284c7; }
 .badge.purple { background: #f5f3ff; color: #8b5cf6; }
@@ -4013,33 +3953,6 @@ body {
   text-overflow: ellipsis;
 }
 
-.room-table-wrap {
-  max-width: 100%;
-  overflow-x: clip;
-}
-
-.room-table {
-  table-layout: fixed;
-}
-
-.ref-table {
-  min-width: 0;
-  width: 100%;
-}
-
-.ref-table th,
-.ref-table td {
-  min-width: 0;
-  max-width: 1px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.ref-table td:first-child {
-  display: table-cell;
-}
-
 .rooms-progress-table .room-col-select {
   width: 62px;
 }
@@ -4092,11 +4005,35 @@ body {
   justify-content: center;
 }
 
-.ref-table .audit-detail-cell {
+.audit-log-table {
+  min-width: 980px;
+  table-layout: auto;
+}
+
+.audit-log-table th,
+.audit-log-table td {
+  white-space: normal;
+  vertical-align: top;
+  line-height: 1.45;
+}
+
+.audit-log-table .audit-time-cell {
+  min-width: 166px;
+}
+
+.audit-log-table .audit-project-cell {
+  min-width: 140px;
+}
+
+.audit-log-table .audit-detail-cell {
   white-space: normal;
   overflow-wrap: anywhere;
   line-height: 1.45;
   max-width: none;
+}
+
+.audit-log-table .audit-ip-cell {
+  min-width: 96px;
 }
 
 .table-actions {
@@ -4118,10 +4055,6 @@ body {
   grid-template-columns: repeat(auto-fit, minmax(min(100%, 176px), 1fr));
 }
 
-.dashboard-grid {
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr));
-}
-
 .bottom-grid,
 .dashboard-panels,
 .dashboard-panels.bottom,
@@ -4136,13 +4069,69 @@ body {
   grid-template-columns: minmax(0, 1fr);
 }
 
-.reports-layout,
-.audit-layout {
-  grid-template-columns: minmax(0, 1fr) minmax(min(100%, 320px), 0.42fr);
-}
-
 .rooms-layout {
   grid-template-columns: minmax(0, 1fr);
+}
+
+.photo-dashboard-grid {
+  grid-template-columns: minmax(360px, 1.05fr) minmax(430px, 1.18fr) minmax(300px, 0.9fr);
+}
+
+.photo-detail-panel {
+  min-width: 0;
+}
+
+.photo-detail-panel .detail-layout {
+  grid-template-columns: minmax(180px, 260px) minmax(190px, 1fr);
+}
+
+.photo-detail-panel .meta-list {
+  grid-template-columns: 78px minmax(0, 1fr);
+}
+
+.photo-detail-panel .meta-list dd,
+.photo-detail-panel .callout p,
+.report-detail dd,
+.report-detail p {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.photo-detail-panel .filter-manager-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.report-detail {
+  min-width: 0;
+}
+
+.report-detail .report-preview {
+  grid-template-columns: minmax(128px, 170px) minmax(0, 1fr);
+}
+
+.progress-rule-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  margin: 10px 0 14px;
+}
+
+.progress-rule-card {
+  border: 1px solid var(--gray-200);
+  border-radius: 8px;
+  padding: 10px 12px;
+  background: #fff;
+}
+
+.progress-rule-card strong {
+  display: block;
+  margin-bottom: 4px;
+}
+
+.progress-rule-card span {
+  color: var(--gray-500);
+  font-size: 13px;
+  line-height: 1.45;
 }
 
 .viewer-layout {
@@ -4164,8 +4153,13 @@ body {
   .rooms-layout,
   .reports-layout,
   .audit-layout,
-  .viewer-layout {
+  .viewer-layout,
+  .photo-dashboard-grid {
     grid-template-columns: 1fr;
+  }
+
+  .progress-rule-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 

@@ -170,18 +170,27 @@ export default function AuditPage() {
         <article className="panel ref-card audit-table-card">
           <h2 className="section-title">활동 로그</h2>
           <div className="room-table-wrap">
-            <table className="room-table ref-table">
+            <table className="room-table ref-table audit-log-table">
+              <colgroup>
+                <col style={{ width: 176 }} />
+                <col style={{ width: 124 }} />
+                <col style={{ width: 148 }} />
+                <col style={{ width: 96 }} />
+                <col style={{ width: 104 }} />
+                <col />
+                <col style={{ width: 104 }} />
+              </colgroup>
               <thead><tr><th>시간</th><th>사용자</th><th>프로젝트</th><th>작업</th><th>리소스</th><th>상세 정보</th><th>IP 주소</th></tr></thead>
               <tbody>
                 {filteredEvents.map((event) => (
                   <tr key={event.id}>
-                    <td>{new Date(event.created_at).toLocaleString("ko-KR")}</td>
+                    <td className="audit-time-cell">{new Date(event.created_at).toLocaleString("ko-KR")}</td>
                     <td>{event.actor?.name ?? "-"}</td>
-                    <td>{event.project?.name ?? "-"}</td>
+                    <td className="audit-project-cell">{event.project?.name ?? "-"}</td>
                     <td><span className={`badge ${event.action === "DELETE" ? "red" : event.action === "UPDATE" ? "blue" : "green"}`}>{actionLabel(event.action)}</span></td>
                     <td>{resourceTypeLabel(event.resource_type)}</td>
                     <td className="audit-detail-cell">{event.detail ?? event.resource_id ?? "-"}</td>
-                    <td>{event.ip_address ?? "-"}</td>
+                    <td className="audit-ip-cell">{event.ip_address ?? "-"}</td>
                   </tr>
                 ))}
               </tbody>

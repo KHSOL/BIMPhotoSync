@@ -164,26 +164,29 @@ export function ObjModelViewer({
             disposables.push(material);
           }
         });
-        scene.add(object);
 
-        const bounds = new Box3().setFromObject(object);
+        const rawBounds = new Box3().setFromObject(object);
+        const rawSize = rawBounds.getSize(new Vector3());
+        hideDetachedDetailMeshes(object, rawBounds, rawSize);
+        const bounds = visibleMeshBounds(object);
         const size = bounds.getSize(new Vector3());
         const center = bounds.getCenter(new Vector3());
         const maxDimension = Math.max(size.x, size.y, size.z, 1);
-        object.position.sub(center);
+        object.position.set(-center.x, -bounds.min.y, -center.z);
+        scene.add(object);
 
-        addModelEdges(object, scene, disposables);
+        addModelEdges(object, disposables, maxDimension);
         if (plan) {
           const roomGroup = createRoomOverlay(plan, center, maxDimension, roomProgressByBimId ?? {}, roomMeshes, disposables);
           scene.add(roomGroup);
         }
 
         const grid = new GridHelper(maxDimension * 1.2, 24, 0xcbd5e1, 0xeef2ff);
-        grid.position.y = bounds.min.y - center.y - maxDimension * 0.006;
+        grid.position.y = -maxDimension * 0.006;
         scene.add(grid);
 
         camera.position.set(maxDimension * 0.64, maxDimension * 0.58, maxDimension * 0.78);
-        controls.target.set(0, 0, 0);
+        controls.target.set(0, size.y * 0.18, 0);
         controls.minDistance = maxDimension * 0.05;
         controls.maxDistance = maxDimension * 2.5;
         controls.update();
@@ -242,19 +245,70 @@ export function ObjModelViewer({
   );
 }
 
-function addModelEdges(object: Group, scene: Scene, disposables: DisposableResource[]) {
+function addModelEdges(object: Group, disposables: DisposableResource[], maxDimension: number) {
   object.traverse((child) => {
-    if (!(child instanceof Mesh)) return;
+    if (!(child instanceof Mesh) || !child.visible) return;
+    const childBounds = new Box3().setFromObject(child);
+    const childSize = childBounds.getSize(new Vector3());
+    if (shouldSkipEdgeMesh(childSize, maxDimension)) return;
 
-    const geometry = new EdgesGeometry(child.geometry, 32);
-    const material = new LineBasicMaterial({ color: 0x64748b, transparent: true, opacity: 0.42 });
+    const geometry = new EdgesGeometry(child.geometry, 55);
+    const material = new LineBasicMaterial({ color: 0x334155, transparent: true, opacity: 0.3 });
     const edges = new LineSegments(geometry, material);
-    edges.position.copy(child.position);
-    edges.rotation.copy(child.rotation);
-    edges.scale.copy(child.scale);
-    scene.add(edges);
+    edges.renderOrder = 3;
+    child.add(edges);
     disposables.push(geometry, material);
   });
+}
+
+function hideDetachedDetailMeshes(object: Group, modelBounds: Box3, modelSize: Vector3) {
+  const modelMaxDimension = Math.max(modelSize.x, modelSize.y, modelSize.z, 1);
+  const horizontalSpan = Math.max(modelSize.x, modelSize.z, 1);
+  const floorY = modelBounds.min.y;
+  const modelHeight = Math.max(modelSize.y, 1);
+
+  object.traverse((child) => {
+    if (!(child instanceof Mesh)) return;
+    const bounds = new Box3().setFromObject(child);
+    if (bounds.isEmpty()) return;
+
+    const size = bounds.getSize(new Vector3());
+    const maxSide = Math.max(size.x, size.y, size.z);
+    const minSide = Math.min(size.x, size.y, size.z);
+    const center = bounds.getCenter(new Vector3());
+    const highDetachedSmallPart =
+      center.y > floorY + modelHeight * 0.42 &&
+      maxSide < horizontalSpan * 0.09 &&
+      size.y < modelHeight * 0.22;
+    const tinyPart = maxSide < modelMaxDimension * 0.012;
+    const flatFloatingPart =
+      minSide < modelMaxDimension * 0.0015 &&
+      maxSide < horizontalSpan * 0.075 &&
+      center.y > floorY + modelHeight * 0.22;
+
+    if (highDetachedSmallPart || tinyPart || flatFloatingPart) {
+      child.visible = false;
+    }
+  });
+}
+
+function visibleMeshBounds(object: Group) {
+  const bounds = new Box3();
+  let hasVisibleMesh = false;
+  object.traverse((child) => {
+    if (!(child instanceof Mesh) || !child.visible) return;
+    const childBounds = new Box3().setFromObject(child);
+    if (childBounds.isEmpty()) return;
+    bounds.union(childBounds);
+    hasVisibleMesh = true;
+  });
+  return hasVisibleMesh ? bounds : new Box3().setFromObject(object);
+}
+
+function shouldSkipEdgeMesh(size: Vector3, maxDimension: number) {
+  const maxSide = Math.max(size.x, size.y, size.z);
+  const minSide = Math.min(size.x, size.y, size.z);
+  return maxSide < maxDimension * 0.018 || (minSide < maxDimension * 0.0008 && maxSide < maxDimension * 0.08);
 }
 
 function createRoomOverlay(
@@ -266,7 +320,7 @@ function createRoomOverlay(
   disposables: DisposableResource[]
 ) {
   const group = new Group();
-  const overlayY = -center.y + maxDimension * 0.012;
+  const overlayY = maxDimension * 0.014;
 
   for (const room of plan.rooms) {
     const shape = createRoomShape(room);
