@@ -295,7 +295,12 @@ export class RevitService {
       where: {
         projectId,
         sourceViewId: { in: floorPlanSourceViewIds },
-        NOT: [{ viewName: "{3D}" }, { viewName: "{3d}" }]
+        NOT: [
+          { viewName: { equals: "{3D}" } },
+          { viewName: { equals: "{3d}" } },
+          { viewName: { contains: "overall", mode: "insensitive" } },
+          { viewName: { contains: "전체" } }
+        ]
       },
       orderBy: [{ syncedAt: "desc" }],
       take: 20
