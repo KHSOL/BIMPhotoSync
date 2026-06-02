@@ -408,6 +408,7 @@ public sealed class SyncRoomsExternalHandler : IExternalEventHandler
         view.IsSectionBoxActive = true;
         TryConfigure3DExportView(view);
         transaction.Commit();
+        doc.Regenerate();
         return view;
     }
 
@@ -545,6 +546,7 @@ public sealed class SyncRoomsExternalHandler : IExternalEventHandler
         builder.AppendLine($"# Document: {doc.Title}");
         builder.AppendLine($"# View: {view.Name}");
         builder.AppendLine("s off");
+        BoundingBoxXYZ? sectionBox = view.IsSectionBoxActive ? view.GetSectionBox() : null;
 
         Options options = new()
         {
@@ -558,6 +560,7 @@ public sealed class SyncRoomsExternalHandler : IExternalEventHandler
         foreach (Element element in new FilteredElementCollector(doc, view.Id).WhereElementIsNotElementType())
         {
             if (!ShouldExportModelElement(element)) continue;
+            if (sectionBox != null && !ElementIntersectsSectionBox(element, sectionBox)) continue;
 
             try
             {
@@ -588,6 +591,47 @@ public sealed class SyncRoomsExternalHandler : IExternalEventHandler
         return builder.ToString();
     }
 
+    private static bool ElementIntersectsSectionBox(Element element, BoundingBoxXYZ sectionBox)
+    {
+        BoundingBoxXYZ? elementBox = element.get_BoundingBox(null);
+        if (elementBox == null) return true;
+
+        Transform elementTransform = elementBox.Transform ?? Transform.Identity;
+        Transform sectionTransform = sectionBox.Transform ?? Transform.Identity;
+        Transform sectionInverse = sectionTransform.Inverse;
+        List<XYZ> elementCornersInSection = GetBoundingBoxCorners(elementBox)
+            .Select(point => sectionInverse.OfPoint(elementTransform.OfPoint(point)))
+            .ToList();
+
+        XYZ min = new(
+            elementCornersInSection.Min(point => point.X),
+            elementCornersInSection.Min(point => point.Y),
+            elementCornersInSection.Min(point => point.Z));
+        XYZ max = new(
+            elementCornersInSection.Max(point => point.X),
+            elementCornersInSection.Max(point => point.Y),
+            elementCornersInSection.Max(point => point.Z));
+
+        return max.X >= sectionBox.Min.X &&
+               min.X <= sectionBox.Max.X &&
+               max.Y >= sectionBox.Min.Y &&
+               min.Y <= sectionBox.Max.Y &&
+               max.Z >= sectionBox.Min.Z &&
+               min.Z <= sectionBox.Max.Z;
+    }
+
+    private static IEnumerable<XYZ> GetBoundingBoxCorners(BoundingBoxXYZ box)
+    {
+        yield return new XYZ(box.Min.X, box.Min.Y, box.Min.Z);
+        yield return new XYZ(box.Max.X, box.Min.Y, box.Min.Z);
+        yield return new XYZ(box.Min.X, box.Max.Y, box.Min.Z);
+        yield return new XYZ(box.Max.X, box.Max.Y, box.Min.Z);
+        yield return new XYZ(box.Min.X, box.Min.Y, box.Max.Z);
+        yield return new XYZ(box.Max.X, box.Min.Y, box.Max.Z);
+        yield return new XYZ(box.Min.X, box.Max.Y, box.Max.Z);
+        yield return new XYZ(box.Max.X, box.Max.Y, box.Max.Z);
+    }
+
     private static bool ShouldExportModelElement(Element element)
     {
         Category? category = element.Category;
@@ -604,16 +648,11 @@ public sealed class SyncRoomsExternalHandler : IExternalEventHandler
         (long)BuiltInCategory.OST_Floors,
         (long)BuiltInCategory.OST_Ceilings,
         (long)BuiltInCategory.OST_Roofs,
-        (long)BuiltInCategory.OST_Doors,
-        (long)BuiltInCategory.OST_Windows,
         (long)BuiltInCategory.OST_Stairs,
         (long)BuiltInCategory.OST_Railings,
         (long)BuiltInCategory.OST_Columns,
         (long)BuiltInCategory.OST_StructuralColumns,
-        (long)BuiltInCategory.OST_StructuralFraming,
-        (long)BuiltInCategory.OST_CurtainWallPanels,
-        (long)BuiltInCategory.OST_CurtainWallMullions,
-        (long)BuiltInCategory.OST_GenericModel
+        (long)BuiltInCategory.OST_StructuralFraming
     };
 
     private static void AppendGeometry(StringBuilder builder, GeometryElement geometry, Transform transform, ref int vertexOffset)

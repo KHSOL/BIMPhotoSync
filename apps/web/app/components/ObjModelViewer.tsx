@@ -168,11 +168,13 @@ export function ObjModelViewer({
         const rawBounds = new Box3().setFromObject(object);
         const rawSize = rawBounds.getSize(new Vector3());
         hideDetachedDetailMeshes(object, rawBounds, rawSize);
-        const bounds = visibleMeshBounds(object);
+        const stableBounds = visibleMeshBounds(object, Math.max(rawSize.x, rawSize.y, rawSize.z, 1) * 0.025);
+        const bounds = stableBounds ?? visibleMeshBounds(object) ?? new Box3().setFromObject(object);
         const size = bounds.getSize(new Vector3());
         const center = bounds.getCenter(new Vector3());
         const maxDimension = Math.max(size.x, size.y, size.z, 1);
-        object.position.set(-center.x, -bounds.min.y, -center.z);
+        const floorBaseY = estimateFloorBaseY(object, bounds, maxDimension);
+        object.position.set(-center.x, -floorBaseY, -center.z);
         scene.add(object);
 
         addModelEdges(object, disposables, maxDimension);
@@ -186,7 +188,7 @@ export function ObjModelViewer({
         scene.add(grid);
 
         camera.position.set(maxDimension * 0.64, maxDimension * 0.58, maxDimension * 0.78);
-        controls.target.set(0, size.y * 0.18, 0);
+        controls.target.set(0, Math.max(size.y * 0.18, maxDimension * 0.025), 0);
         controls.minDistance = maxDimension * 0.05;
         controls.maxDistance = maxDimension * 2.5;
         controls.update();
@@ -252,8 +254,8 @@ function addModelEdges(object: Group, disposables: DisposableResource[], maxDime
     const childSize = childBounds.getSize(new Vector3());
     if (shouldSkipEdgeMesh(childSize, maxDimension)) return;
 
-    const geometry = new EdgesGeometry(child.geometry, 55);
-    const material = new LineBasicMaterial({ color: 0x334155, transparent: true, opacity: 0.3 });
+    const geometry = new EdgesGeometry(child.geometry, 68);
+    const material = new LineBasicMaterial({ color: 0x334155, transparent: true, opacity: 0.18 });
     const edges = new LineSegments(geometry, material);
     edges.renderOrder = 3;
     child.add(edges);
@@ -292,17 +294,50 @@ function hideDetachedDetailMeshes(object: Group, modelBounds: Box3, modelSize: V
   });
 }
 
-function visibleMeshBounds(object: Group) {
+function visibleMeshBounds(object: Group, minimumMaxSide = 0) {
   const bounds = new Box3();
   let hasVisibleMesh = false;
   object.traverse((child) => {
     if (!(child instanceof Mesh) || !child.visible) return;
     const childBounds = new Box3().setFromObject(child);
     if (childBounds.isEmpty()) return;
+    const childSize = childBounds.getSize(new Vector3());
+    if (Math.max(childSize.x, childSize.y, childSize.z) < minimumMaxSide) return;
     bounds.union(childBounds);
     hasVisibleMesh = true;
   });
-  return hasVisibleMesh ? bounds : new Box3().setFromObject(object);
+  return hasVisibleMesh ? bounds : null;
+}
+
+function estimateFloorBaseY(object: Group, fallbackBounds: Box3, maxDimension: number) {
+  const floorCandidates: number[] = [];
+  const structuralCandidates: number[] = [];
+
+  object.traverse((child) => {
+    if (!(child instanceof Mesh) || !child.visible) return;
+    const childBounds = new Box3().setFromObject(child);
+    if (childBounds.isEmpty()) return;
+
+    const size = childBounds.getSize(new Vector3());
+    const horizontalSpan = Math.max(size.x, size.z);
+    const horizontalArea = Math.max(size.x, 0.001) * Math.max(size.z, 0.001);
+    const isBroadHorizontal =
+      horizontalArea > maxDimension * maxDimension * 0.004 &&
+      size.y < maxDimension * 0.08;
+    const isStructural =
+      horizontalSpan > maxDimension * 0.08 &&
+      Math.max(size.x, size.y, size.z) > maxDimension * 0.1;
+
+    if (isBroadHorizontal) floorCandidates.push(childBounds.min.y);
+    if (isStructural) structuralCandidates.push(childBounds.min.y);
+  });
+
+  const candidates = floorCandidates.length > 0 ? floorCandidates : structuralCandidates;
+  if (candidates.length === 0) return fallbackBounds.min.y;
+
+  candidates.sort((left, right) => left - right);
+  const index = Math.min(candidates.length - 1, Math.floor(candidates.length * 0.15));
+  return candidates[index];
 }
 
 function shouldSkipEdgeMesh(size: Vector3, maxDimension: number) {
@@ -339,7 +374,7 @@ function createRoomOverlay(
     });
     const mesh = new Mesh(geometry, material) as SelectableRoomMesh;
     mesh.rotation.x = -Math.PI / 2;
-    mesh.position.set(-center.x, overlayY, center.z);
+    mesh.position.set(-center.x, overlayY, -center.z);
     mesh.renderOrder = 10;
     mesh.userData = {
       selectableRoom: true,
@@ -359,9 +394,9 @@ function createRoomShape(room: FloorPlanRoom) {
   if (polygon.length < 3) return null;
 
   const shape = new Shape();
-  shape.moveTo(polygon[0].x, -polygon[0].y);
+  shape.moveTo(polygon[0].x, polygon[0].y);
   for (const point of polygon.slice(1)) {
-    shape.lineTo(point.x, -point.y);
+    shape.lineTo(point.x, point.y);
   }
   shape.closePath();
   return shape;
