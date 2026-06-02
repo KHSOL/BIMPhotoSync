@@ -1,22 +1,71 @@
 "use client";
 
-import { Box3, Color, DirectionalLight, GridHelper, HemisphereLight, Mesh, PerspectiveCamera, Scene, Vector3, WebGLRenderer } from "three";
+import {
+  Box3,
+  BufferGeometry,
+  Color,
+  DirectionalLight,
+  DoubleSide,
+  EdgesGeometry,
+  GridHelper,
+  Group,
+  HemisphereLight,
+  LineBasicMaterial,
+  LineSegments,
+  Mesh,
+  MeshStandardMaterial,
+  PerspectiveCamera,
+  Raycaster,
+  Scene,
+  Shape,
+  ShapeGeometry,
+  Vector2,
+  Vector3,
+  WebGLRenderer
+} from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { OBJLoader } from "three/examples/jsm/loaders/OBJLoader.js";
 import { useEffect, useRef, useState } from "react";
-import { authHeaders } from "../client";
+import { authHeaders, type FloorPlanRoom, type RevitFloorPlan, type Room } from "../client";
+
+type RoomProgressStatus = "not-started" | "in-progress" | "completed";
+
+type SelectableRoomMesh = Mesh<ShapeGeometry, MeshStandardMaterial> & {
+  userData: {
+    selectableRoom: true;
+    roomId: string;
+    progressStatus: RoomProgressStatus;
+  };
+};
+
+type DisposableResource = BufferGeometry | MeshStandardMaterial | LineBasicMaterial;
 
 export function ObjModelViewer({
   assetUrl,
   token,
-  label
+  label,
+  plan,
+  selectedRoomId,
+  roomProgressByBimId,
+  onSelect
 }: {
   assetUrl: string;
   token: string;
   label: string;
+  plan?: RevitFloorPlan;
+  selectedRoomId?: string;
+  roomProgressByBimId?: Record<string, Room["progress_by_surface"]>;
+  onSelect?: (roomId: string) => void;
 }) {
   const hostRef = useRef<HTMLDivElement | null>(null);
+  const selectedRoomIdRef = useRef(selectedRoomId ?? "");
+  const onSelectRef = useRef(onSelect);
   const [state, setState] = useState<"loading" | "ready" | "error">("loading");
+
+  useEffect(() => {
+    selectedRoomIdRef.current = selectedRoomId ?? "";
+    onSelectRef.current = onSelect;
+  }, [onSelect, selectedRoomId]);
 
   useEffect(() => {
     const host = hostRef.current;
@@ -24,8 +73,11 @@ export function ObjModelViewer({
 
     let disposed = false;
     let frame = 0;
+    let hoveredRoomId = "";
+    const roomMeshes: SelectableRoomMesh[] = [];
+    const disposables: DisposableResource[] = [];
     const scene = new Scene();
-    scene.background = new Color(0xf8fafc);
+    scene.background = new Color(0xffffff);
 
     const renderer = new WebGLRenderer({ antialias: true, alpha: false, powerPreference: "high-performance" });
     renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
@@ -33,19 +85,22 @@ export function ObjModelViewer({
     renderer.domElement.className = "obj-model-canvas";
     host.appendChild(renderer.domElement);
 
-    const camera = new PerspectiveCamera(42, Math.max(1, host.clientWidth) / Math.max(1, host.clientHeight), 0.1, 100000);
+    const camera = new PerspectiveCamera(34, Math.max(1, host.clientWidth) / Math.max(1, host.clientHeight), 0.1, 100000);
     const controls = new OrbitControls(camera, renderer.domElement);
     controls.enableDamping = true;
     controls.dampingFactor = 0.08;
     controls.screenSpacePanning = true;
+    controls.rotateSpeed = 0.48;
+    controls.zoomSpeed = 0.7;
+    controls.panSpeed = 0.72;
 
-    const hemi = new HemisphereLight(0xffffff, 0xcbd5e1, 2.2);
+    const hemi = new HemisphereLight(0xffffff, 0xdbeafe, 2.4);
     scene.add(hemi);
-    const key = new DirectionalLight(0xffffff, 1.8);
-    key.position.set(-30, 60, 80);
+    const key = new DirectionalLight(0xffffff, 2.2);
+    key.position.set(-60, 80, 90);
     scene.add(key);
-    const fill = new DirectionalLight(0xe0f2fe, 0.8);
-    fill.position.set(70, -40, 45);
+    const fill = new DirectionalLight(0xe0f2fe, 1.1);
+    fill.position.set(80, -50, 50);
     scene.add(fill);
 
     const resize = () => {
@@ -59,6 +114,33 @@ export function ObjModelViewer({
     observer.observe(host);
     resize();
 
+    const raycaster = new Raycaster();
+    const pointer = new Vector2();
+    const pickRoom = (event: PointerEvent) => {
+      const rect = renderer.domElement.getBoundingClientRect();
+      pointer.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
+      pointer.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
+      raycaster.setFromCamera(pointer, camera);
+      return raycaster.intersectObjects(roomMeshes, false)[0]?.object as SelectableRoomMesh | undefined;
+    };
+
+    const onPointerMove = (event: PointerEvent) => {
+      const hit = pickRoom(event);
+      hoveredRoomId = hit?.userData.roomId ?? "";
+      renderer.domElement.style.cursor = hoveredRoomId ? "pointer" : "grab";
+    };
+    const onPointerLeave = () => {
+      hoveredRoomId = "";
+      renderer.domElement.style.cursor = "grab";
+    };
+    const onPointerDown = (event: PointerEvent) => {
+      const hit = pickRoom(event);
+      if (hit?.userData.roomId) onSelectRef.current?.(hit.userData.roomId);
+    };
+    renderer.domElement.addEventListener("pointermove", onPointerMove);
+    renderer.domElement.addEventListener("pointerleave", onPointerLeave);
+    renderer.domElement.addEventListener("pointerdown", onPointerDown);
+
     async function loadModel() {
       setState("loading");
       try {
@@ -69,10 +151,17 @@ export function ObjModelViewer({
 
         const object = new OBJLoader().parse(text);
         object.traverse((child) => {
-          if (child instanceof Mesh && child.material && !Array.isArray(child.material)) {
-            child.material.color?.set?.(0xe5e7eb);
-            child.material.transparent = false;
-            child.material.needsUpdate = true;
+          if (child instanceof Mesh) {
+            const material = new MeshStandardMaterial({
+              color: 0xf8fafc,
+              roughness: 0.72,
+              metalness: 0.02,
+              transparent: true,
+              opacity: 0.84,
+              side: DoubleSide
+            });
+            child.material = material;
+            disposables.push(material);
           }
         });
         scene.add(object);
@@ -83,14 +172,20 @@ export function ObjModelViewer({
         const maxDimension = Math.max(size.x, size.y, size.z, 1);
         object.position.sub(center);
 
-        const grid = new GridHelper(maxDimension * 1.35, 24, 0x94a3b8, 0xe2e8f0);
-        grid.position.y = bounds.min.y - center.y;
+        addModelEdges(object, scene, disposables);
+        if (plan) {
+          const roomGroup = createRoomOverlay(plan, center, maxDimension, roomProgressByBimId ?? {}, roomMeshes, disposables);
+          scene.add(roomGroup);
+        }
+
+        const grid = new GridHelper(maxDimension * 1.2, 24, 0xcbd5e1, 0xeef2ff);
+        grid.position.y = bounds.min.y - center.y - maxDimension * 0.006;
         scene.add(grid);
 
-        camera.position.set(maxDimension * 0.75, maxDimension * 0.62, maxDimension * 0.82);
+        camera.position.set(maxDimension * 0.64, maxDimension * 0.58, maxDimension * 0.78);
         controls.target.set(0, 0, 0);
         controls.minDistance = maxDimension * 0.05;
-        controls.maxDistance = maxDimension * 3;
+        controls.maxDistance = maxDimension * 2.5;
         controls.update();
         setState("ready");
       } catch {
@@ -98,9 +193,21 @@ export function ObjModelViewer({
       }
     }
 
+    const applySelection = () => {
+      for (const mesh of roomMeshes) {
+        const isSelected = mesh.userData.roomId === selectedRoomIdRef.current;
+        const isHovered = mesh.userData.roomId === hoveredRoomId;
+        mesh.material.color.set(isSelected ? 0xbfdbfe : isHovered ? 0xccfbf1 : progressColor(mesh.userData.progressStatus));
+        mesh.material.opacity = isSelected ? 0.5 : isHovered ? 0.38 : 0.22;
+        mesh.material.emissive.set(isSelected ? 0x2563eb : isHovered ? 0x0f766e : 0x000000);
+        mesh.material.emissiveIntensity = isSelected ? 0.16 : isHovered ? 0.08 : 0;
+      }
+    };
+
     const animate = () => {
       frame = window.requestAnimationFrame(animate);
       controls.update();
+      applySelection();
       renderer.render(scene, camera);
     };
     void loadModel();
@@ -109,6 +216,9 @@ export function ObjModelViewer({
     return () => {
       disposed = true;
       window.cancelAnimationFrame(frame);
+      renderer.domElement.removeEventListener("pointermove", onPointerMove);
+      renderer.domElement.removeEventListener("pointerleave", onPointerLeave);
+      renderer.domElement.removeEventListener("pointerdown", onPointerDown);
       observer.disconnect();
       controls.dispose();
       scene.traverse((child) => {
@@ -118,10 +228,11 @@ export function ObjModelViewer({
           for (const material of materials) material.dispose();
         }
       });
+      for (const resource of disposables) resource.dispose();
       renderer.dispose();
       renderer.domElement.remove();
     };
-  }, [assetUrl, token]);
+  }, [assetUrl, plan, roomProgressByBimId, token]);
 
   return (
     <div className="obj-model-viewer" ref={hostRef} aria-label={label}>
@@ -129,4 +240,88 @@ export function ObjModelViewer({
       {state === "error" ? <div className="model-viewer-status error">3D 모델을 표시하지 못했습니다.</div> : null}
     </div>
   );
+}
+
+function addModelEdges(object: Group, scene: Scene, disposables: DisposableResource[]) {
+  object.traverse((child) => {
+    if (!(child instanceof Mesh)) return;
+
+    const geometry = new EdgesGeometry(child.geometry, 32);
+    const material = new LineBasicMaterial({ color: 0x64748b, transparent: true, opacity: 0.42 });
+    const edges = new LineSegments(geometry, material);
+    edges.position.copy(child.position);
+    edges.rotation.copy(child.rotation);
+    edges.scale.copy(child.scale);
+    scene.add(edges);
+    disposables.push(geometry, material);
+  });
+}
+
+function createRoomOverlay(
+  plan: RevitFloorPlan,
+  center: Vector3,
+  maxDimension: number,
+  roomProgressByBimId: Record<string, Room["progress_by_surface"]>,
+  roomMeshes: SelectableRoomMesh[],
+  disposables: DisposableResource[]
+) {
+  const group = new Group();
+  const overlayY = -center.y + maxDimension * 0.012;
+
+  for (const room of plan.rooms) {
+    const shape = createRoomShape(room);
+    if (!shape) continue;
+
+    const status = roomDisplayProgress(roomProgressByBimId[room.bim_photo_room_id]);
+    const geometry = new ShapeGeometry(shape);
+    const material = new MeshStandardMaterial({
+      color: progressColor(status),
+      roughness: 0.9,
+      metalness: 0,
+      transparent: true,
+      opacity: 0.22,
+      side: DoubleSide,
+      depthTest: false
+    });
+    const mesh = new Mesh(geometry, material) as SelectableRoomMesh;
+    mesh.rotation.x = -Math.PI / 2;
+    mesh.position.set(-center.x, overlayY, center.z);
+    mesh.renderOrder = 10;
+    mesh.userData = {
+      selectableRoom: true,
+      roomId: room.bim_photo_room_id,
+      progressStatus: status
+    };
+    group.add(mesh);
+    roomMeshes.push(mesh);
+    disposables.push(geometry, material);
+  }
+
+  return group;
+}
+
+function createRoomShape(room: FloorPlanRoom) {
+  const polygon = room.polygon.filter((point) => Number.isFinite(point.x) && Number.isFinite(point.y));
+  if (polygon.length < 3) return null;
+
+  const shape = new Shape();
+  shape.moveTo(polygon[0].x, -polygon[0].y);
+  for (const point of polygon.slice(1)) {
+    shape.lineTo(point.x, -point.y);
+  }
+  shape.closePath();
+  return shape;
+}
+
+function roomDisplayProgress(progress: Room["progress_by_surface"] | undefined): RoomProgressStatus {
+  const wall = progress?.WALL;
+  if (wall?.status === "COMPLETED") return "completed";
+  if (wall?.status === "IN_PROGRESS" || (wall?.photo_count ?? 0) > 0) return "in-progress";
+  return "not-started";
+}
+
+function progressColor(status: RoomProgressStatus) {
+  if (status === "completed") return 0x22c55e;
+  if (status === "in-progress") return 0xf59e0b;
+  return 0xef4444;
 }

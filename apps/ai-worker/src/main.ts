@@ -61,12 +61,15 @@ async function analyze(photo: PhotoForAnalysis): Promise<AnalysisResult> {
   try {
     const image = await readImageInlineData(photo);
     const modelName = process.env.GEMINI_VISION_MODEL ?? "gemini-3.1-flash-lite";
+    const reviewExamples = await loadReviewExamples();
     const prompt = [
       "너는 BIM 현장 사진 분석 담당자다.",
-      "아래 사진과 메타데이터를 근거로 한국어 JSON만 반환한다. Markdown 금지.",
+      "아래 사진과 메타데이터를 근거로 한국어 JSON만 반환한다. Markdown은 금지한다.",
       "JSON 필드: summary, detected_trade, detected_surface, progress_status, confidence, observations.",
       "enum 값은 반드시 허용 목록 중 하나만 사용한다.",
       "공정 상태 규칙: 작업 흔적이 명확하면 IN_PROGRESS, 메모나 시각적 근거가 완료이면 COMPLETED, 문제/중단/차단이면 BLOCKED, 확신이 낮으면 PENDING_REVIEW.",
+      "관리자 검토 완료 사례가 있으면 같은 기준을 우선 적용한다.",
+      `관리자 검토 사례:\n${reviewExamples}`,
       `방: ${photo.room?.levelName ?? "-"} / ${photo.room?.roomNumber ?? ""} ${photo.room?.roomName ?? ""}`,
       `입력 공종: ${photo.trade}`,
       `입력 공사면: ${photo.workSurface}`,
@@ -111,11 +114,12 @@ async function analyze(photo: PhotoForAnalysis): Promise<AnalysisResult> {
         detected_surface: detectedSurface,
         progress_status: progressStatus,
         confidence,
-        observations: Array.isArray(parsed.observations) ? parsed.observations : []
+        observations: Array.isArray(parsed.observations) ? parsed.observations : [],
+        review_examples_used: reviewExamples !== "검토 사례 없음"
       },
       modelProvider: AiProvider.GEMINI,
       modelName,
-      promptVersion: "gemini-vision-v1",
+      promptVersion: "gemini-vision-v2-review-examples",
       requiresHumanReview: confidence < 0.82
     };
   } catch (error) {
@@ -133,6 +137,27 @@ async function readImageInlineData(photo: PhotoForAnalysis): Promise<GeminiInlin
     mime_type: object.ContentType ?? photo.mimeType,
     data: Buffer.concat(chunks).toString("base64")
   };
+}
+
+async function loadReviewExamples() {
+  const rows = await prisma.photoAiAnalysis.findMany({
+    where: { reviewedAt: { not: null } },
+    orderBy: { reviewedAt: "desc" },
+    take: 6,
+    select: {
+      summary: true,
+      detectedTrade: true,
+      detectedSurface: true,
+      progressStatus: true
+    }
+  });
+  if (rows.length === 0) return "검토 사례 없음";
+  return rows
+    .map(
+      (row, index) =>
+        `${index + 1}. summary=${row.summary}; detected_trade=${row.detectedTrade ?? "-"}; detected_surface=${row.detectedSurface ?? "-"}; progress_status=${row.progressStatus}`
+    )
+    .join("\n");
 }
 
 function inferHeuristic(photo: PhotoForAnalysis, fallbackReason?: string): AnalysisResult {

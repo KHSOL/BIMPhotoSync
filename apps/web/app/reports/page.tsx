@@ -1,6 +1,6 @@
 "use client";
 
-import { CalendarDays, Download, Eye, FileSpreadsheet, FileText, Filter, KeyRound, Plus, Search } from "lucide-react";
+import { Bot, CalendarDays, Download, Eye, FileSpreadsheet, FileText, Filter, KeyRound, MessageSquare, Plus, Search, Send } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import {
   API_BASE,
@@ -27,6 +27,16 @@ type ReportList = { data: GeneratedReport[] };
 type ReportResult = { data: GeneratedReport };
 type TradeCategoryList = { data: TradeCategory[] };
 type ExportFormat = "JSON" | "XLSX" | "DOCX" | "PDF" | "HWP";
+type ChatMessage = { role: "user" | "ai"; text: string; provider?: string };
+type ReportChatResult = {
+  data: {
+    provider: string;
+    model_name: string;
+    answer: string;
+    suggested_prompt: string;
+    error_message?: string;
+  };
+};
 
 export default function ReportsPage() {
   const [token, setToken] = useState("");
@@ -39,6 +49,14 @@ export default function ReportsPage() {
   const [selectedId, setSelectedId] = useState("");
   const [status, setStatus] = useState("로그인 후 프로젝트를 선택하세요.");
   const [generating, setGenerating] = useState(false);
+  const [chatMessage, setChatMessage] = useState("");
+  const [chatLoading, setChatLoading] = useState(false);
+  const [chatLog, setChatLog] = useState<ChatMessage[]>([
+    {
+      role: "ai",
+      text: "보고서 작성 기준을 입력하면 AI가 지시문으로 정리합니다. 예: 지난 7일간 완료 근거와 지연 원인을 중심으로 작성해줘."
+    }
+  ]);
   const [filters, setFilters] = useState({
     room_id: "",
     work_surface: "",
@@ -61,7 +79,7 @@ export default function ReportsPage() {
       setStatus("보고서 보드는 관리자 계정에서만 사용할 수 있습니다.");
       return;
     }
-    void loadProjects(session.token).catch((err) => setStatus(err.message));
+    void loadProjects(session.token).catch((err: Error) => setStatus(err.message));
   }, []);
 
   async function loadProjects(nextToken = token) {
@@ -72,11 +90,7 @@ export default function ReportsPage() {
     setProjectId(nextProjectId);
     if (nextProjectId) {
       saveProjectId(nextProjectId);
-      await Promise.all([
-        loadRooms(nextToken, nextProjectId),
-        loadTradeCategories(nextToken, nextProjectId),
-        loadReports(nextToken, nextProjectId)
-      ]);
+      await Promise.all([loadRooms(nextToken, nextProjectId), loadTradeCategories(nextToken, nextProjectId), loadReports(nextToken, nextProjectId)]);
     }
   }
 
@@ -88,9 +102,7 @@ export default function ReportsPage() {
 
   async function loadTradeCategories(nextToken = token, nextProjectId = projectId) {
     if (!nextProjectId) return;
-    const json = await apiJson<TradeCategoryList>(`/projects/${nextProjectId}/trade-categories`, {
-      headers: authHeaders(nextToken)
-    });
+    const json = await apiJson<TradeCategoryList>(`/projects/${nextProjectId}/trade-categories`, { headers: authHeaders(nextToken) });
     setTradeCategories(json.data);
   }
 
@@ -107,21 +119,13 @@ export default function ReportsPage() {
     saveProjectId(nextProjectId);
     setSelectedId("");
     setFilters((current) => ({ ...current, room_id: "", trade: "", trade_category_id: "" }));
-    void Promise.all([
-      loadRooms(token, nextProjectId),
-      loadTradeCategories(token, nextProjectId),
-      loadReports(token, nextProjectId)
-    ]).catch((err) => setStatus(err.message));
+    void Promise.all([loadRooms(token, nextProjectId), loadTradeCategories(token, nextProjectId), loadReports(token, nextProjectId)]).catch((err: Error) => setStatus(err.message));
   }
 
   function changeTrade(value: string) {
     if (tradeCategories.some((category) => category.id === value)) {
       const category = tradeCategories.find((item) => item.id === value);
-      setFilters((current) => ({
-        ...current,
-        trade_category_id: value,
-        trade: legacyTradeValue(category?.code ?? "OTHER")
-      }));
+      setFilters((current) => ({ ...current, trade_category_id: value, trade: legacyTradeValue(category?.code ?? "OTHER") }));
       return;
     }
     setFilters((current) => ({ ...current, trade_category_id: "", trade: value }));
@@ -143,6 +147,46 @@ export default function ReportsPage() {
     setStatus("보고서 생성 필터를 초기화했습니다.");
   }
 
+  function reportRequestBase() {
+    return {
+      project_id: projectId,
+      room_id: filters.room_id || undefined,
+      work_surface: filters.work_surface || undefined,
+      trade: filters.trade || undefined,
+      trade_category_id: filters.trade_category_id || undefined,
+      date_from: filters.date_from || undefined,
+      date_to: filters.date_to || undefined,
+      worker_name: filters.worker_name || undefined
+    };
+  }
+
+  async function sendReportChat() {
+    const message = chatMessage.trim();
+    if (!message || !projectId) return;
+    setChatLoading(true);
+    setChatMessage("");
+    setChatLog((rows) => [...rows, { role: "user", text: message }]);
+    try {
+      const json = await apiJson<ReportChatResult>("/reports/chat", {
+        method: "POST",
+        headers: { ...authHeaders(token), "Content-Type": "application/json" },
+        body: JSON.stringify({ ...reportRequestBase(), message })
+      });
+      setFilters((current) => ({
+        ...current,
+        ai_prompt: current.ai_prompt ? `${current.ai_prompt}\n${json.data.suggested_prompt}` : json.data.suggested_prompt
+      }));
+      setChatLog((rows) => [...rows, { role: "ai", text: json.data.answer, provider: json.data.provider }]);
+      setStatus("AI 지시문을 보고서 생성 조건에 반영했습니다.");
+    } catch (err) {
+      const messageText = err instanceof Error ? err.message : "AI 채팅 요청에 실패했습니다.";
+      setChatLog((rows) => [...rows, { role: "ai", text: messageText }]);
+      setStatus(messageText);
+    } finally {
+      setChatLoading(false);
+    }
+  }
+
   async function generateReport() {
     if (!projectId) {
       setStatus("프로젝트를 먼저 선택하세요.");
@@ -150,24 +194,16 @@ export default function ReportsPage() {
     }
     setGenerating(true);
     try {
-      const body = {
-        project_id: projectId,
-        room_id: filters.room_id || undefined,
-        work_surface: filters.work_surface || undefined,
-        trade: filters.trade || undefined,
-        trade_category_id: filters.trade_category_id || undefined,
-        date_from: filters.date_from || undefined,
-        date_to: filters.date_to || undefined,
-        worker_name: filters.worker_name || undefined,
-        title: filters.title || undefined,
-        memo: filters.memo || undefined,
-        ai_prompt: filters.ai_prompt || undefined,
-        format: "JSON"
-      };
       const json = await apiJson<ReportResult>("/reports/generate", {
         method: "POST",
         headers: { ...authHeaders(token), "Content-Type": "application/json" },
-        body: JSON.stringify(body)
+        body: JSON.stringify({
+          ...reportRequestBase(),
+          title: filters.title || undefined,
+          memo: filters.memo || undefined,
+          ai_prompt: filters.ai_prompt || undefined,
+          format: "JSON"
+        })
       });
       await loadReports(token, projectId);
       setSelectedId(json.data.id);
@@ -187,25 +223,21 @@ export default function ReportsPage() {
     }
     const res = await fetch(`${API_BASE}/reports/${report.id}/export?format=${format}`, { headers: authHeaders(token) });
     if (!res.ok) {
-      const json = await res.json().catch(() => ({}));
-      const message = json?.error?.message ?? json?.message ?? `API error ${res.status}`;
-      throw new Error(Array.isArray(message) ? message.join(", ") : message);
+      const json: unknown = await res.json().catch(() => ({}));
+      throw new Error(errorMessage(json, `API error ${res.status}`));
     }
-    const disposition = res.headers.get("content-disposition");
     const fallbackByFormat: Record<ExportFormat, string> = {
       JSON: `${report.title}.json`,
-      XLSX: `${report.title}.xls`,
-      DOCX: `${report.title}.doc`,
-      PDF: `${report.title}.html`,
-      HWP: `${report.title}.hwp`
+      XLSX: `${report.title}.xlsx`,
+      DOCX: `${report.title}.docx`,
+      PDF: `${report.title}.pdf`,
+      HWP: `${report.title}.hwpx`
     };
-    const fallbackName = fallbackByFormat[format];
-    const filename = filenameFromDisposition(disposition) ?? fallbackName;
-    downloadBlob(await res.blob(), filename);
+    downloadBlob(await res.blob(), filenameFromDisposition(res.headers.get("content-disposition")) ?? fallbackByFormat[format]);
   }
 
   function requestDownload(report: GeneratedReport, format: ExportFormat) {
-    void downloadReportFile(report, format).catch((err) => setStatus(err.message));
+    void downloadReportFile(report, format).catch((err: Error) => setStatus(err.message));
   }
 
   const canGenerate = isUpperManager(user);
@@ -316,18 +348,47 @@ export default function ReportsPage() {
         <button className="filter-button" type="button" onClick={resetFilters}><Filter size={16} />전체보기</button>
       </section>
 
+      <section className="panel ref-card report-chat-panel">
+        <div className="panel-header">
+          <h2 className="section-title"><MessageSquare size={18} /> AI 보고서 채팅</h2>
+          <span className="badge blue">지시문 생성</span>
+        </div>
+        <div className="report-chat-log">
+          {chatLog.map((message, index) => (
+            <div className={`report-chat-message ${message.role}`} key={`${message.role}-${index}`}>
+              {message.role === "ai" ? <Bot size={16} /> : <MessageSquare size={16} />}
+              <p>{message.text}</p>
+            </div>
+          ))}
+        </div>
+        <div className="report-chat-input">
+          <input
+            className="input"
+            value={chatMessage}
+            onChange={(event) => setChatMessage(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") void sendReportChat();
+            }}
+            placeholder="AI에게 보고서 기준을 지시하세요"
+          />
+          <button className="button" type="button" disabled={chatLoading || !chatMessage.trim()} onClick={() => void sendReportChat()}>
+            <Send size={16} /> {chatLoading ? "전송 중" : "전송"}
+          </button>
+        </div>
+      </section>
+
       <section className="metric-grid five">
         <Metric icon={<FileText />} label="전체 보고서" value={String(reports.length)} sub="현재 프로젝트" tone="blue" />
         <Metric icon={<Eye />} label="생성 완료" value={String(reports.filter((r) => r.status === "GENERATED").length)} sub="저장된 보고서" tone="green" />
         <Metric icon={<CalendarDays />} label="최근 생성" value={selectedReport ? new Date(selectedReport.created_at).toLocaleDateString("ko-KR") : "-"} sub="선택 보고서" tone="orange" />
         <Metric icon={<Download />} label="사진 근거" value={String(selectedReport?.photo_ids.length ?? 0)} sub="선택 보고서" tone="purple" />
-        <Metric icon={<FileSpreadsheet />} label="내보내기" value="5" sub="JSON / 엑셀 / 워드 / PDF / HWP" tone="sky" />
+        <Metric icon={<FileSpreadsheet />} label="내보내기" value="5" sub="JSON / XLSX / DOCX / PDF / HWPX" tone="sky" />
       </section>
 
       <section className="reports-layout">
         <article className="panel ref-card">
           <div className="tab-row">
-            <button className="active" type="button" onClick={() => loadReports().catch((err) => setStatus(err.message))}>전체</button>
+            <button className="active" type="button" onClick={() => loadReports().catch((err: Error) => setStatus(err.message))}>전체</button>
             <button type="button" onClick={() => setReports((rows) => rows.filter((report) => report.created_by.id === user.id))}>내 보고서</button>
           </div>
           <div className="room-table-wrap">
@@ -401,10 +462,10 @@ export default function ReportsPage() {
               {selectedReport.error_message ? <p className="muted">Gemini 대체 결과: {selectedReport.error_message}</p> : null}
               <div className="report-actions">
                 <button className="button" type="button" onClick={() => requestDownload(selectedReport, "JSON")}><Download size={16} />JSON</button>
-                <button className="button secondary" type="button" onClick={() => requestDownload(selectedReport, "XLSX")}><FileSpreadsheet size={16} />엑셀</button>
-                <button className="button secondary" type="button" onClick={() => requestDownload(selectedReport, "DOCX")}><FileText size={16} />워드</button>
+                <button className="button secondary" type="button" onClick={() => requestDownload(selectedReport, "XLSX")}><FileSpreadsheet size={16} />XLSX</button>
+                <button className="button secondary" type="button" onClick={() => requestDownload(selectedReport, "DOCX")}><FileText size={16} />DOCX</button>
                 <button className="button secondary" type="button" onClick={() => requestDownload(selectedReport, "PDF")}><FileText size={16} />PDF</button>
-                <button className="button secondary" type="button" onClick={() => requestDownload(selectedReport, "HWP")}><FileText size={16} />HWP</button>
+                <button className="button secondary" type="button" onClick={() => requestDownload(selectedReport, "HWP")}><FileText size={16} />HWPX</button>
               </div>
             </>
           ) : (
@@ -427,8 +488,17 @@ function downloadBlob(blob: Blob, filename: string) {
 
 function filenameFromDisposition(disposition: string | null) {
   if (!disposition) return null;
-  const match = /filename="?([^"]+)"?/i.exec(disposition);
+  const match = /filename="?([^"]+)"?/i.exec(decodeURIComponent(disposition));
   return match?.[1] ?? null;
+}
+
+function errorMessage(value: unknown, fallback: string) {
+  if (!value || typeof value !== "object") return fallback;
+  const record = value as Record<string, unknown>;
+  const message = record.message ?? (record.error && typeof record.error === "object" ? (record.error as Record<string, unknown>).message : undefined);
+  if (Array.isArray(message)) return message.map(String).join(", ");
+  if (typeof message === "string") return message;
+  return fallback;
 }
 
 function reportStatusLabel(status: string) {
@@ -439,13 +509,13 @@ function reportStatusLabel(status: string) {
 
 function Metric({ icon, label, value, sub, tone }: { icon: React.ReactNode; label: string; value: string; sub: string; tone: string }) {
   return (
-    <article className="metric-card">
-      <div className={`metric-icon ${tone}`}>{icon}</div>
+    <div className={`metric-card ${tone}`}>
+      <span className="metric-icon">{icon}</span>
       <div>
         <span>{label}</span>
         <strong>{value}</strong>
         <small>{sub}</small>
       </div>
-    </article>
+    </div>
   );
 }

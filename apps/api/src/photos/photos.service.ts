@@ -165,33 +165,89 @@ export class PhotosService {
   async reviewAnalysis(user: { sub: string; companyId: string; role: string }, photoId: string, dto: ReviewAnalysisDto) {
     const photo = await this.prisma.photo.findUnique({ where: { id: photoId } });
     if (!photo) throw new NotFoundException("Photo not found.");
-    await this.projects.assertProjectRole(user, photo.projectId, ["MANAGER", "PROJECT_ADMIN", "BIM_MANAGER", "COMPANY_ADMIN"]);
+    const project = await this.projects.assertProjectRole(user, photo.projectId, ["MANAGER", "PROJECT_ADMIN", "BIM_MANAGER", "COMPANY_ADMIN"]);
     const analysis = await this.prisma.photoAiAnalysis.findFirst({ where: { photoId }, orderBy: { createdAt: "desc" } });
-    if (!analysis) throw new NotFoundException("Analysis not found.");
-    const updated = await this.prisma.photoAiAnalysis.update({
-      where: { id: analysis.id },
-      data: {
-        summary: dto.summary,
-        detectedTrade: dto.detected_trade,
-        detectedSurface: dto.detected_surface,
-        progressStatus: dto.progress_status,
-        requiresHumanReview: false,
-        reviewedById: user.sub,
-        reviewedAt: new Date()
+    const summary = dto.summary ?? analysis?.summary ?? photo.aiDescription ?? photo.description ?? "관리자 검토";
+    const detectedTrade = dto.detected_trade ?? analysis?.detectedTrade ?? photo.trade;
+    const detectedSurface = dto.detected_surface ?? analysis?.detectedSurface ?? photo.workSurface;
+    const progressStatus = dto.progress_status ?? analysis?.progressStatus ?? photo.progressStatus;
+    const reviewedAt = new Date();
+    const resultJson = {
+      ...(isRecord(analysis?.resultJson) ? analysis.resultJson : {}),
+      human_review: {
+        summary,
+        detected_trade: detectedTrade,
+        detected_surface: detectedSurface,
+        progress_status: progressStatus,
+        reviewed_by: user.sub,
+        reviewed_at: reviewedAt.toISOString()
       }
-    });
-    if (dto.summary || dto.progress_status) {
-      await this.prisma.photo.update({
+    };
+
+    const updated = await this.prisma.$transaction(async (tx) => {
+      const nextAnalysis = analysis
+        ? await tx.photoAiAnalysis.update({
+            where: { id: analysis.id },
+            data: {
+              summary,
+              detectedTrade,
+              detectedSurface,
+              progressStatus,
+              resultJson,
+              requiresHumanReview: false,
+              reviewedById: user.sub,
+              reviewedAt
+            }
+          })
+        : await tx.photoAiAnalysis.create({
+            data: {
+              photoId,
+              modelProvider: "HEURISTIC",
+              modelName: "human-review-v1",
+              promptVersion: "human-review-v1",
+              resultJson,
+              summary,
+              detectedTrade,
+              detectedSurface,
+              progressStatus,
+              confidence: new Prisma.Decimal(1),
+              requiresHumanReview: false,
+              reviewedById: user.sub,
+              reviewedAt
+            }
+          });
+
+      await tx.photo.update({
         where: { id: photoId },
-        data: { aiDescription: dto.summary, progressStatus: dto.progress_status }
+        data: {
+          aiDescription: summary,
+          progressStatus,
+          trade: detectedTrade,
+          workSurface: detectedSurface
+        }
       });
-    }
+
+      return nextAnalysis;
+    });
+    await this.projects.recordAuditEvent({
+      companyId: project.companyId,
+      projectId: photo.projectId,
+      actorUserId: user.sub,
+      action: "REVIEW",
+      resourceType: "PHOTO_AI_ANALYSIS",
+      resourceId: updated.id,
+      detail: "AI 분석 검토"
+    });
     return { data: updated };
   }
 }
 
 function inferInitialProgressStatus(description: string | undefined) {
   return description?.includes("완료") ? ProgressStatus.COMPLETED : ProgressStatus.PENDING_REVIEW;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 export function toPhotoResponse(photo: Photo & { room?: unknown; tradeCategory?: { id: string; code: string; label: string } | null; analyses?: unknown[] }, config: ConfigService) {

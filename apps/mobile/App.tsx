@@ -13,8 +13,7 @@ import {
 import * as ImagePicker from "expo-image-picker";
 import { StatusBar } from "expo-status-bar";
 
-const API_BASE =
-  process.env.EXPO_PUBLIC_API_BASE_URL ?? "https://api-production-1d018.up.railway.app/api/v1";
+const API_BASE = process.env.EXPO_PUBLIC_API_BASE_URL ?? "https://api-production-1d018.up.railway.app/api/v1";
 
 const trades = [
   ["WATERPROOF", "방수"],
@@ -45,13 +44,15 @@ type Project = {
   member_role?: string | null;
 };
 
+type RoomProgressStatus = "NOT_STARTED" | "IN_PROGRESS" | "COMPLETED";
+
 type Room = {
   id: string;
   bim_photo_room_id: string;
   room_name: string;
   room_number?: string | null;
   level_name?: string | null;
-  progress_by_surface?: Record<string, { status: "NOT_STARTED" | "IN_PROGRESS" | "COMPLETED"; photo_count: number }>;
+  progress_by_surface?: Record<string, { status: RoomProgressStatus; photo_count: number }>;
 };
 
 type User = {
@@ -123,7 +124,7 @@ export default function App() {
     const nextProjectId = nextProjects[0]?.id ?? "";
     setProjectId(nextProjectId);
     if (nextProjectId) await loadRooms(nextToken, nextProjectId);
-    else setStatus("참여 중인 프로젝트가 없습니다. 접근키로 프로젝트에 참여하세요.");
+    else setStatus("참여 중인 프로젝트가 없습니다. 관리자에게 받은 접근키로 프로젝트에 참여하세요.");
   }
 
   async function previewJoinProject() {
@@ -148,7 +149,7 @@ export default function App() {
       {
         text: "참여하기",
         onPress: () => {
-          joinProject(accessKey).catch((err) => Alert.alert("오류", err.message));
+          joinProject(accessKey).catch((err: Error) => Alert.alert("오류", err.message));
         }
       }
     ]);
@@ -274,15 +275,15 @@ export default function App() {
         </View>
 
         <View style={styles.heroCard}>
-          <Text style={styles.heroTitle}>사진 촬영부터 업로드까지</Text>
+          <Text style={styles.heroTitle}>촬영하고 방을 지정한 뒤 바로 업로드</Text>
           <Text style={styles.heroMeta}>
-            {selectedProject ? selectedProject.name : "프로젝트 미선택"} · {selectedRoom ? roomTitle(selectedRoom) : "방 미선택"}
+            {selectedProject ? selectedProject.name : "프로젝트 미선택"} / {selectedRoom ? roomTitle(selectedRoom) : "방 미선택"}
           </Text>
           <View style={styles.quickRow}>
-            <Pressable style={styles.primaryButton} onPress={() => takePhoto().catch((err) => Alert.alert("오류", err.message))}>
+            <Pressable style={styles.primaryButton} onPress={() => takePhoto().catch((err: Error) => Alert.alert("오류", err.message))}>
               <Text style={styles.primaryButtonText}>바로 촬영</Text>
             </Pressable>
-            <Pressable style={styles.secondaryButton} onPress={() => pickImages().catch((err) => Alert.alert("오류", err.message))}>
+            <Pressable style={styles.secondaryButton} onPress={() => pickImages().catch((err: Error) => Alert.alert("오류", err.message))}>
               <Text style={styles.secondaryButtonText}>앨범 선택</Text>
             </Pressable>
           </View>
@@ -293,7 +294,7 @@ export default function App() {
           <Pressable
             style={[styles.uploadButton, !readyToUpload && styles.disabledButton]}
             disabled={!readyToUpload}
-            onPress={() => upload().catch((err) => Alert.alert("오류", err.message))}
+            onPress={() => upload().catch((err: Error) => Alert.alert("오류", err.message))}
           >
             <Text style={styles.primaryButtonText}>{uploading ? "업로드 중" : "선택한 방에 업로드"}</Text>
           </Pressable>
@@ -310,7 +311,9 @@ export default function App() {
                     {roomTitle(room)}
                   </Text>
                 </View>
-                <Text style={styles.caption}>{room.level_name ?? "-"} · {roomProgressLabel(room)}</Text>
+                <Text style={styles.caption}>
+                  {room.level_name ?? "-"} / {roomProgressLabel(room)}
+                </Text>
               </Pressable>
             ))}
           </View>
@@ -359,7 +362,7 @@ export default function App() {
               <Input label="회사명" value={companyName} onChangeText={setCompanyName} />
             </>
           ) : null}
-          <Pressable style={styles.primaryButtonWide} onPress={() => authenticate().catch((err) => Alert.alert("오류", err.message))}>
+          <Pressable style={styles.primaryButtonWide} onPress={() => authenticate().catch((err: Error) => Alert.alert("오류", err.message))}>
             <Text style={styles.primaryButtonText}>{user ? `${user.name} 연결됨` : "계정 연결"}</Text>
           </Pressable>
         </Section>
@@ -372,7 +375,7 @@ export default function App() {
                 style={[styles.projectChip, projectId === project.id && styles.chipActive]}
                 onPress={() => {
                   setProjectId(project.id);
-                  loadRooms(token, project.id).catch((err) => Alert.alert("오류", err.message));
+                  loadRooms(token, project.id).catch((err: Error) => Alert.alert("오류", err.message));
                 }}
               >
                 <Text style={[styles.chipText, projectId === project.id && styles.chipTextActive]}>{project.name}</Text>
@@ -381,7 +384,7 @@ export default function App() {
             ))}
           </View>
           <Input label="프로젝트 접근키" value={joinKey} onChangeText={setJoinKey} autoCapitalize="none" />
-          <Pressable style={styles.secondaryButtonWide} onPress={() => previewJoinProject().catch((err) => Alert.alert("오류", err.message))}>
+          <Pressable style={styles.secondaryButtonWide} onPress={() => previewJoinProject().catch((err: Error) => Alert.alert("오류", err.message))}>
             <Text style={styles.secondaryButtonText}>프로젝트 확인 및 참여</Text>
           </Pressable>
         </Section>

@@ -89,10 +89,14 @@ export default function DrawingViewer({ mode }: { mode: DrawingViewerMode }) {
     () => (!isFloorPlanMode ? sheets.find((sheet) => sheet.id === sheetId) ?? sheets[0] : undefined),
     [isFloorPlanMode, sheetId, sheets]
   );
-  const selectedModelAsset = useMemo(
-    () => modelAssets.find((asset) => asset.id === modelAssetId) ?? modelAssets[0],
-    [modelAssetId, modelAssets]
+  const matchingModelAssets = useMemo(
+    () => (selectedPlan ? modelAssets.filter((asset) => modelAssetMatchesPlan(asset, selectedPlan)) : []),
+    [modelAssets, selectedPlan]
   );
+  const selectedModelAsset = useMemo(() => {
+    const selectedAsset = matchingModelAssets.find((asset) => asset.id === modelAssetId);
+    return selectedAsset ?? matchingModelAssets[0];
+  }, [matchingModelAssets, modelAssetId]);
   const allPlanRooms = useMemo(() => plans.flatMap((plan) => plan.rooms), [plans]);
   const selectedPlanRoom = useMemo(
     () => (isFloorPlanMode ? allPlanRooms.find((room) => room.bim_photo_room_id === selectedRoomId) : undefined),
@@ -230,7 +234,7 @@ export default function DrawingViewer({ mode }: { mode: DrawingViewerMode }) {
       }, {})
     );
     setPlanId(nextPlans[0]?.id ?? "");
-    setModelAssetId(nextModelAssets[0]?.id ?? "");
+    setModelAssetId(pickModelAssetForPlan(nextModelAssets, nextPlans[0])?.id ?? "");
     setSheetId(nextSheets[0]?.id ?? "");
     setSelectedRoomId(
       isFloorPlanMode
@@ -292,6 +296,7 @@ export default function DrawingViewer({ mode }: { mode: DrawingViewerMode }) {
   function selectPlan(nextPlanId: string) {
     const nextPlan = plans.find((plan) => plan.id === nextPlanId);
     setPlanId(nextPlanId);
+    setModelAssetId(pickModelAssetForPlan(modelAssets, nextPlan)?.id ?? "");
     setSelectedRoomId(nextPlan?.rooms[0]?.bim_photo_room_id ?? "");
   }
 
@@ -344,11 +349,11 @@ export default function DrawingViewer({ mode }: { mode: DrawingViewerMode }) {
             </select>
           </label>
         )}
-        {isFloorPlanMode && floorPlanViewMode === "3d" && modelAssets.length > 0 ? (
+        {isFloorPlanMode && floorPlanViewMode === "3d" && matchingModelAssets.length > 0 ? (
           <label className="field compact">
             <span className="label">3D 모델</span>
             <select className="input" value={selectedModelAsset?.id ?? ""} onChange={(event) => setModelAssetId(event.target.value)}>
-              {modelAssets.map((model) => (
+              {matchingModelAssets.map((model) => (
                 <option key={model.id} value={model.id}>
                   {model.view_name} · {new Date(model.synced_at).toLocaleDateString("ko-KR")}
                 </option>
@@ -422,15 +427,24 @@ export default function DrawingViewer({ mode }: { mode: DrawingViewerMode }) {
               assetUrl={selectedModelAsset.asset.url}
               token={token}
               label={`${selectedModelAsset.view_name} Revit 3D model`}
-            />
-          ) : isFloorPlanMode && selectedPlan && floorPlanViewMode === "3d" ? (
-            <FloorPlan3D
               plan={selectedPlan}
-              assetUrl={floorPlanAssetUrl}
               selectedRoomId={selectedRoomId}
               roomProgressByBimId={roomProgressByBimId}
               onSelect={setSelectedRoomId}
             />
+          ) : isFloorPlanMode && selectedPlan && floorPlanViewMode === "3d" ? (
+            <div className="floor-plan-3d-fallback">
+              <FloorPlan3D
+                plan={selectedPlan}
+                assetUrl={floorPlanAssetUrl}
+                selectedRoomId={selectedRoomId}
+                roomProgressByBimId={roomProgressByBimId}
+                onSelect={setSelectedRoomId}
+              />
+              <div className="model-viewer-status warning">
+                이 평면도와 연결된 Revit 3D 모델이 없습니다. 최신 add-in에서 3D Model을 다시 실행하면 평면도별 3D가 표시됩니다.
+              </div>
+            </div>
           ) : isFloorPlanMode && selectedPlan ? (
             <FloorPlanSvg
               plan={selectedPlan}
@@ -855,6 +869,18 @@ function getNormalizedPolygonCenter(overlay: RevitRoomOverlay) {
     x: total.x / overlay.normalized_polygon.length,
     y: total.y / overlay.normalized_polygon.length
   };
+}
+
+function pickModelAssetForPlan(modelAssets: RevitModel3D[], plan: RevitFloorPlan | undefined) {
+  if (!plan) return undefined;
+  return modelAssets.find((asset) => modelAssetMatchesPlan(asset, plan));
+}
+
+function modelAssetMatchesPlan(asset: RevitModel3D, plan: RevitFloorPlan) {
+  if (!asset.source_view_id || !plan.source_view_id) return false;
+  const normalizedName = asset.view_name.trim().toLowerCase();
+  if (normalizedName === "{3d}" || normalizedName.includes("overall") || normalizedName.includes("전체")) return false;
+  return asset.source_view_id === plan.source_view_id;
 }
 
 function formatRoomTitle(room: FloorPlanRoom | RevitRoomOverlay) {

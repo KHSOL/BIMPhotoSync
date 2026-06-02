@@ -163,6 +163,9 @@ export default function RoomsPage() {
       <section className="rooms-layout">
         <article className="panel ref-card room-table-card">
           <h2 className="section-title">전체 {rooms.length}개 방</h2>
+          <p className="muted progress-help">
+            공정 진행률은 공사면별 상태를 기준으로 계산합니다. 사진 없음은 0점, 사진 1장 이상은 0.5점, 메모나 AI 검토에 "완료"가 있으면 1점으로 반영합니다.
+          </p>
           <div className="status-summary-grid">
             {roomSummary.map(([label, value, percent, tone]) => (
               <div className="status-summary-card" key={label}>
@@ -175,7 +178,18 @@ export default function RoomsPage() {
           </div>
 
           <div className="room-table-wrap">
-            <table className="room-table ref-table">
+            <table className="room-table ref-table rooms-progress-table">
+              <colgroup>
+                <col className="room-col-select" />
+                <col className="room-col-number" />
+                <col className="room-col-name" />
+                <col className="room-col-level" />
+                <col className="room-col-progress" />
+                <col className="room-col-status" />
+                <col className="room-col-photo" />
+                <col className="room-col-bim" />
+                <col className="room-col-action" />
+              </colgroup>
               <thead>
                 <tr>
                   <th>선택</th>
@@ -199,13 +213,13 @@ export default function RoomsPage() {
                       <td>{room.room_number ?? "-"}</td>
                       <td>{room.room_name}</td>
                       <td>{room.level_name ?? "-"}</td>
-                      <td>
+                      <td className="progress-cell">
                         <div className="inline-progress">
                           <span><i style={{ "--value": `${progress}%` } as React.CSSProperties} /></span>
                           <b>{progress}%</b>
                         </div>
                       </td>
-                      <td><span className={progressStatus.badgeClass}>{progressStatus.label}</span></td>
+                      <td className="status-cell"><span className={progressStatus.badgeClass}>{progressStatus.label}</span></td>
                       <td><div className="mini-photo"><div className="photo-fallback" /></div></td>
                       <td><code>{room.bim_photo_room_id}</code></td>
                       <td><a href={`/photos?project_id=${projectId}&room_id=${room.id}`}>사진</a></td>
