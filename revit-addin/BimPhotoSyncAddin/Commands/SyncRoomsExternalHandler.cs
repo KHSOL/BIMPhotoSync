@@ -298,15 +298,65 @@ public sealed class SyncRoomsExternalHandler : IExternalEventHandler
             return "Skipped 3D model sync: Project ID is not configured.";
         }
 
-        View3D? view = GetModelExportView(doc);
-        if (view == null)
+        List<ViewPlan> floorPlans = new FilteredElementCollector(doc)
+            .OfClass(typeof(ViewPlan))
+            .Cast<ViewPlan>()
+            .Where(view => IsCanonicalFloorPlanView(doc, view))
+            .OrderBy(view => view.GenLevel?.Elevation ?? 0)
+            .ThenBy(view => view.Name)
+            .ToList();
+
+        if (floorPlans.Count == 0)
         {
-            return "Skipped 3D model sync: no non-template 3D view was found.";
+            View3D? fallbackView = GetModelExportView(doc);
+            if (fallbackView == null)
+            {
+                return "Skipped 3D model sync: no Floor Plan or non-template 3D view was found.";
+            }
+
+            return SyncSingle3DModel(doc, fallbackView, fallbackView.Name, fallbackView.Id.Value.ToString());
         }
 
+        int syncedCount = 0;
+        foreach (ViewPlan floorPlan in floorPlans)
+        {
+            View3D? exportView = null;
+            try
+            {
+                exportView = CreateFloorPlanSection3DView(doc, floorPlan);
+                if (exportView == null)
+                {
+                    ValidationLog.Write($"Skipped 3D model sync for {floorPlan.Name}: no bounded Room section box.");
+                    continue;
+                }
+
+                string result = SyncSingle3DModel(doc, exportView, floorPlan.Name, floorPlan.Id.Value.ToString());
+                ValidationLog.Write(result);
+                syncedCount++;
+            }
+            catch (Exception ex)
+            {
+                ValidationLog.Write($"Skipped 3D model sync for {floorPlan.Name}: {ex.Message}");
+            }
+            finally
+            {
+                if (exportView != null)
+                {
+                    DeleteTemporaryView(doc, exportView.Id);
+                }
+            }
+        }
+
+        return syncedCount == 0
+            ? "Skipped 3D model sync: no Floor Plan section models could be exported."
+            : $"Synced {syncedCount} Floor Plan section 3D models.";
+    }
+
+    private static string SyncSingle3DModel(Document doc, View3D view, string displayViewName, string sourceViewId)
+    {
         byte[] bytes = Encoding.UTF8.GetBytes(ExportObj(doc, view));
         string checksum = Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant();
-        string assetName = $"{doc.Title}_{view.Name}_3d";
+        string assetName = $"{doc.Title}_{displayViewName}_3d";
         PresignModelAssetResponse? presign = new ApiClient()
             .PresignModelAssetAsync(new PresignModelAssetRequest(
                 AddinSettings.ProjectId,
@@ -331,8 +381,8 @@ public sealed class SyncRoomsExternalHandler : IExternalEventHandler
             .SyncModelAssetAsync(new SyncModelAssetRequest(
                 AddinSettings.ProjectId,
                 AddinSettings.RevitModelId,
-                view.Name,
-                view.Id.Value.ToString(),
+                displayViewName,
+                sourceViewId,
                 "OBJ",
                 new SheetAssetDto(presign.Data.Object_Key, "text/plain", null, null),
                 bytes.LongLength,
@@ -342,7 +392,156 @@ public sealed class SyncRoomsExternalHandler : IExternalEventHandler
 
         return response == null
             ? "3D model uploaded but metadata sync returned no response."
-            : $"Synced 3D model {view.Name} ({Math.Round(bytes.LongLength / 1024.0 / 1024.0, 2)} MB).";
+            : $"Synced 3D model {displayViewName} ({Math.Round(bytes.LongLength / 1024.0 / 1024.0, 2)} MB).";
+    }
+
+    private static View3D? CreateFloorPlanSection3DView(Document doc, ViewPlan floorPlan)
+    {
+        BoundingBoxXYZ? sectionBox = BuildFloorPlanSectionBox(doc, floorPlan);
+        if (sectionBox == null) return null;
+
+        ViewFamilyType? viewFamilyType = new FilteredElementCollector(doc)
+            .OfClass(typeof(ViewFamilyType))
+            .Cast<ViewFamilyType>()
+            .FirstOrDefault(type => type.ViewFamily == ViewFamily.ThreeDimensional);
+        if (viewFamilyType == null) return null;
+
+        using Transaction transaction = new(doc, "BIM Photo Sync 3D floor section");
+        transaction.Start();
+        View3D view = View3D.CreateIsometric(doc, viewFamilyType.Id);
+        view.Name = UniqueViewName(doc, $"BPS 3D - {floorPlan.Name}");
+        view.SetSectionBox(sectionBox);
+        view.IsSectionBoxActive = true;
+        TryConfigure3DExportView(view);
+        transaction.Commit();
+        return view;
+    }
+
+    private static void TryConfigure3DExportView(View3D view)
+    {
+        try
+        {
+            if (view.ViewTemplateId != ElementId.InvalidElementId)
+            {
+                view.ViewTemplateId = ElementId.InvalidElementId;
+            }
+
+            view.DetailLevel = ViewDetailLevel.Medium;
+            view.DisplayStyle = DisplayStyle.Shading;
+        }
+        catch (Exception ex) when (ex is Autodesk.Revit.Exceptions.ApplicationException or InvalidOperationException)
+        {
+            ValidationLog.Write($"3D export view display settings skipped for {view.Name}: {ex.Message}");
+        }
+    }
+
+    private static void DeleteTemporaryView(Document doc, ElementId viewId)
+    {
+        try
+        {
+            using Transaction transaction = new(doc, "BIM Photo Sync cleanup 3D floor section");
+            transaction.Start();
+            if (doc.GetElement(viewId) != null)
+            {
+                doc.Delete(viewId);
+            }
+            transaction.Commit();
+        }
+        catch (Exception ex)
+        {
+            ValidationLog.Write($"Could not delete temporary 3D view {viewId.Value}: {ex.Message}");
+        }
+    }
+
+    private static string UniqueViewName(Document doc, string desiredName)
+    {
+        string baseName = desiredName.Length > 80 ? desiredName[..80] : desiredName;
+        HashSet<string> existingNames = new FilteredElementCollector(doc)
+            .OfClass(typeof(View))
+            .Cast<View>()
+            .Select(view => view.Name)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        if (!existingNames.Contains(baseName)) return baseName;
+
+        for (int i = 1; i < 1000; i++)
+        {
+            string candidate = $"{baseName} {i}";
+            if (!existingNames.Contains(candidate)) return candidate;
+        }
+
+        return $"{baseName} {DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()}";
+    }
+
+    private static BoundingBoxXYZ? BuildFloorPlanSectionBox(Document doc, ViewPlan floorPlan)
+    {
+        List<SpatialElement> rooms = new FilteredElementCollector(doc, floorPlan.Id)
+            .OfCategory(BuiltInCategory.OST_Rooms)
+            .WhereElementIsNotElementType()
+            .Cast<SpatialElement>()
+            .Where(room => GetRoomAreaM2(room) > 0)
+            .ToList();
+        if (rooms.Count == 0) return null;
+
+        BoundingBoxXYZ? roomBounds = null;
+        foreach (SpatialElement room in rooms)
+        {
+            BoundingBoxXYZ? box = room.get_BoundingBox(null);
+            if (box == null) continue;
+
+            roomBounds = roomBounds == null
+                ? CloneBoundingBox(box)
+                : ExpandBoundingBox(roomBounds, box);
+        }
+
+        if (roomBounds == null) return null;
+
+        double padding = UnitUtils.ConvertToInternalUnits(2.5, UnitTypeId.Meters);
+        double baseElevation = floorPlan.GenLevel?.Elevation ?? roomBounds.Min.Z;
+        double topElevation = FindNextLevelElevation(doc, baseElevation)
+            ?? baseElevation + UnitUtils.ConvertToInternalUnits(4.2, UnitTypeId.Meters);
+
+        BoundingBoxXYZ sectionBox = new()
+        {
+            Transform = Transform.Identity,
+            Min = new XYZ(roomBounds.Min.X - padding, roomBounds.Min.Y - padding, baseElevation - UnitUtils.ConvertToInternalUnits(0.35, UnitTypeId.Meters)),
+            Max = new XYZ(roomBounds.Max.X + padding, roomBounds.Max.Y + padding, topElevation + UnitUtils.ConvertToInternalUnits(0.35, UnitTypeId.Meters))
+        };
+        return sectionBox;
+    }
+
+    private static BoundingBoxXYZ CloneBoundingBox(BoundingBoxXYZ source)
+    {
+        return new BoundingBoxXYZ
+        {
+            Transform = source.Transform,
+            Min = source.Min,
+            Max = source.Max
+        };
+    }
+
+    private static BoundingBoxXYZ ExpandBoundingBox(BoundingBoxXYZ target, BoundingBoxXYZ source)
+    {
+        target.Min = new XYZ(
+            Math.Min(target.Min.X, source.Min.X),
+            Math.Min(target.Min.Y, source.Min.Y),
+            Math.Min(target.Min.Z, source.Min.Z));
+        target.Max = new XYZ(
+            Math.Max(target.Max.X, source.Max.X),
+            Math.Max(target.Max.Y, source.Max.Y),
+            Math.Max(target.Max.Z, source.Max.Z));
+        return target;
+    }
+
+    private static double? FindNextLevelElevation(Document doc, double currentElevation)
+    {
+        return new FilteredElementCollector(doc)
+            .OfClass(typeof(Level))
+            .Cast<Level>()
+            .Select(level => level.Elevation)
+            .Where(elevation => elevation > currentElevation + 0.01)
+            .OrderBy(elevation => elevation)
+            .Cast<double?>()
+            .FirstOrDefault();
     }
 
     private static View3D? GetModelExportView(Document doc)
@@ -372,7 +571,6 @@ public sealed class SyncRoomsExternalHandler : IExternalEventHandler
         Options options = new()
         {
             View = view,
-            DetailLevel = ViewDetailLevel.Fine,
             ComputeReferences = false,
             IncludeNonVisibleObjects = false
         };
@@ -383,14 +581,29 @@ public sealed class SyncRoomsExternalHandler : IExternalEventHandler
         {
             if (!ShouldExportModelElement(element)) continue;
 
-            GeometryElement? geometry = element.get_Geometry(options);
-            if (geometry == null) continue;
+            try
+            {
+                GeometryElement? geometry = element.get_Geometry(options);
+                if (geometry == null) continue;
 
-            int before = vertexOffset;
-            string safeName = SanitizeObjName(element.Category?.Name ?? element.GetType().Name);
-            builder.AppendLine($"o {safeName}_{element.Id.Value}");
-            AppendGeometry(builder, geometry, Transform.Identity, ref vertexOffset);
-            if (vertexOffset > before) exportedElements++;
+                int before = vertexOffset;
+                string safeName = SanitizeObjName(element.Category?.Name ?? element.GetType().Name);
+                builder.AppendLine($"o {safeName}_{element.Id.Value}");
+                AppendGeometry(builder, geometry, Transform.Identity, ref vertexOffset);
+                if (vertexOffset > before) exportedElements++;
+            }
+            catch (Autodesk.Revit.Exceptions.ApplicationException ex)
+            {
+                ValidationLog.Write($"Skipped 3D element {element.Id.Value}: {ex.Message}");
+            }
+            catch (InvalidOperationException ex)
+            {
+                ValidationLog.Write($"Skipped 3D element {element.Id.Value}: {ex.Message}");
+            }
+            catch (NullReferenceException ex)
+            {
+                ValidationLog.Write($"Skipped 3D element {element.Id.Value}: {ex.Message}");
+            }
         }
 
         builder.AppendLine($"# Exported elements: {exportedElements}");
@@ -427,6 +640,8 @@ public sealed class SyncRoomsExternalHandler : IExternalEventHandler
 
     private static void AppendGeometry(StringBuilder builder, GeometryElement geometry, Transform transform, ref int vertexOffset)
     {
+        if (geometry == null) return;
+
         foreach (GeometryObject geometryObject in geometry)
         {
             switch (geometryObject)
@@ -435,7 +650,11 @@ public sealed class SyncRoomsExternalHandler : IExternalEventHandler
                     AppendSolid(builder, solid, transform, ref vertexOffset);
                     break;
                 case GeometryInstance instance:
-                    AppendGeometry(builder, instance.GetInstanceGeometry(), transform.Multiply(instance.Transform), ref vertexOffset);
+                    GeometryElement instanceGeometry = instance.GetInstanceGeometry();
+                    if (instanceGeometry == null) break;
+
+                    Transform instanceTransform = instance.Transform ?? Transform.Identity;
+                    AppendGeometry(builder, instanceGeometry, transform.Multiply(instanceTransform), ref vertexOffset);
                     break;
             }
         }
@@ -443,13 +662,31 @@ public sealed class SyncRoomsExternalHandler : IExternalEventHandler
 
     private static void AppendSolid(StringBuilder builder, Solid solid, Transform transform, ref int vertexOffset)
     {
-        if (solid.Faces.Size == 0 || solid.Volume <= 0) return;
+        if (solid.Faces == null || solid.Faces.Size == 0) return;
 
         foreach (Face face in solid.Faces)
         {
-            Mesh mesh = face.Triangulate();
+            if (face == null) continue;
+
+            Mesh? mesh;
+            try
+            {
+                mesh = face.Triangulate();
+            }
+            catch (Autodesk.Revit.Exceptions.ApplicationException)
+            {
+                continue;
+            }
+            catch (InvalidOperationException)
+            {
+                continue;
+            }
+
+            if (mesh?.Vertices == null || mesh.Vertices.Count < 3 || mesh.NumTriangles <= 0) continue;
+
             int faceVertexStart = vertexOffset + 1;
-            for (int i = 0; i < mesh.Vertices.Count; i++)
+            int vertexCount = mesh.Vertices.Count;
+            for (int i = 0; i < vertexCount; i++)
             {
                 XYZ point = transform.OfPoint(mesh.Vertices[i]);
                 builder.Append("v ");
@@ -464,16 +701,23 @@ public sealed class SyncRoomsExternalHandler : IExternalEventHandler
             for (int i = 0; i < mesh.NumTriangles; i++)
             {
                 MeshTriangle triangle = mesh.get_Triangle(i);
+                if (triangle == null) continue;
+
+                uint index0 = triangle.get_Index(0);
+                uint index1 = triangle.get_Index(1);
+                uint index2 = triangle.get_Index(2);
+                if (index0 >= vertexCount || index1 >= vertexCount || index2 >= vertexCount) continue;
+
                 builder.Append("f ");
-                builder.Append(faceVertexStart + (int)triangle.get_Index(0));
+                builder.Append(faceVertexStart + (int)index0);
                 builder.Append(' ');
-                builder.Append(faceVertexStart + (int)triangle.get_Index(1));
+                builder.Append(faceVertexStart + (int)index1);
                 builder.Append(' ');
-                builder.Append(faceVertexStart + (int)triangle.get_Index(2));
+                builder.Append(faceVertexStart + (int)index2);
                 builder.AppendLine();
             }
 
-            vertexOffset += mesh.Vertices.Count;
+            vertexOffset += vertexCount;
         }
     }
 

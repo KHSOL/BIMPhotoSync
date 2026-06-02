@@ -2,7 +2,7 @@ import { Body, Controller, Get, Param, Post, Query, Res, UseGuards } from "@nest
 import { Response } from "express";
 import { CurrentUser, JwtUser } from "../common/current-user";
 import { JwtAuthGuard } from "../common/jwt-auth.guard";
-import { GenerateReportDto, ReportQueryDto } from "./dto";
+import { GenerateReportDto, ReportChatDto, ReportQueryDto } from "./dto";
 import { ReportsService } from "./reports.service";
 
 @Controller("reports")
@@ -31,5 +31,10 @@ export class ReportsController {
   @Post("generate")
   generate(@CurrentUser() user: JwtUser, @Body() dto: GenerateReportDto) {
     return this.reports.generate(user, dto);
+  }
+
+  @Post("chat")
+  chat(@CurrentUser() user: JwtUser, @Body() dto: ReportChatDto) {
+    return this.reports.chat(user, dto);
   }
 }

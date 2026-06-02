@@ -59,3 +59,41 @@ export class GenerateReportDto {
   @MaxLength(3000)
   ai_prompt?: string;
 }
+
+export class ReportChatDto {
+  @IsUUID()
+  project_id!: string;
+
+  @IsOptional()
+  @IsUUID()
+  room_id?: string;
+
+  @IsOptional()
+  @IsEnum(WorkSurface)
+  work_surface?: WorkSurface;
+
+  @IsOptional()
+  @IsEnum(Trade)
+  trade?: Trade;
+
+  @IsOptional()
+  @IsUUID()
+  trade_category_id?: string;
+
+  @IsOptional()
+  @IsDateString()
+  date_from?: string;
+
+  @IsOptional()
+  @IsDateString()
+  date_to?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(100)
+  worker_name?: string;
+
+  @IsString()
+  @MaxLength(3000)
+  message!: string;
+}
