@@ -263,19 +263,32 @@ export class RevitService {
     await this.projects.assertProjectRole(user, dto.project_id, ["BIM_MANAGER", "PROJECT_ADMIN", "COMPANY_ADMIN"]);
     const objectKey = dto.asset.object_key;
     if (!objectKey) throw new BadRequestException("3D model asset object_key is required.");
-    const asset = await this.prisma.revitModelAsset.create({
-      data: {
-        projectId: dto.project_id,
-        revitModelId: dto.revit_model_id,
-        viewName: dto.view_name,
-        sourceViewId: dto.source_view_id,
-        exportFormat: dto.export_format ?? "OBJ",
-        assetObjectKey: objectKey,
-        assetMimeType: dto.asset.mime_type ?? "text/plain",
-        fileSize: dto.file_size,
-        checksumSha256: dto.checksum_sha256,
-        syncedAt: new Date()
+    const exportFormat = dto.export_format ?? "OBJ";
+    const asset = await this.prisma.$transaction(async (tx) => {
+      if (dto.source_view_id) {
+        await tx.revitModelAsset.deleteMany({
+          where: {
+            projectId: dto.project_id,
+            sourceViewId: dto.source_view_id,
+            exportFormat
+          }
+        });
       }
+
+      return tx.revitModelAsset.create({
+        data: {
+          projectId: dto.project_id,
+          revitModelId: dto.revit_model_id,
+          viewName: dto.view_name,
+          sourceViewId: dto.source_view_id,
+          exportFormat,
+          assetObjectKey: objectKey,
+          assetMimeType: dto.asset.mime_type ?? "text/plain",
+          fileSize: dto.file_size,
+          checksumSha256: dto.checksum_sha256,
+          syncedAt: new Date()
+        }
+      });
     });
     return { data: toModelAssetResponse(asset, this.config) };
   }
@@ -303,9 +316,14 @@ export class RevitService {
         ]
       },
       orderBy: [{ syncedAt: "desc" }],
-      take: 20
+      take: 200
     });
-    return { data: assets.map((asset) => toModelAssetResponse(asset, this.config)) };
+    const latestBySourceViewId = new Map<string, (typeof assets)[number]>();
+    for (const asset of assets) {
+      if (!asset.sourceViewId || latestBySourceViewId.has(asset.sourceViewId)) continue;
+      latestBySourceViewId.set(asset.sourceViewId, asset);
+    }
+    return { data: Array.from(latestBySourceViewId.values()).map((asset) => toModelAssetResponse(asset, this.config)) };
   }
 
   async sheetAsset(user: { sub: string; companyId: string }, sheetId: string) {
