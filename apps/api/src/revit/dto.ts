@@ -123,6 +123,17 @@ export class FloorPlanRoomDto {
   @ValidateNested({ each: true })
   @Type(() => PlanPointDto)
   polygon!: PlanPointDto[];
+
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => PlanPointDto)
+  model_center?: PlanPointDto;
+
+  @IsOptional()
+  @IsArray()
+  @ValidateNested({ each: true })
+  @Type(() => PlanPointDto)
+  model_polygon?: PlanPointDto[];
 }
 
 export class SheetAssetDto {

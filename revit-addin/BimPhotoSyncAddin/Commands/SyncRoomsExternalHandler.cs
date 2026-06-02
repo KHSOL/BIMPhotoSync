@@ -220,9 +220,11 @@ public sealed class SyncRoomsExternalHandler : IExternalEventHandler
             if (!mappingsByElementId.TryGetValue(elementId, out RoomMappingDto? mapping)) continue;
 
             IReadOnlyList<PlanPointDto> polygon = GetRoomBoundary(room, modelToViewTransform);
-            if (polygon.Count < 3) continue;
+            IReadOnlyList<PlanPointDto> modelPolygon = GetRoomBoundary(room);
+            if (polygon.Count < 3 || modelPolygon.Count < 3) continue;
 
             PlanPointDto center = GetRoomCenter(room, polygon, modelToViewTransform);
+            PlanPointDto modelCenter = GetRoomCenter(room, modelPolygon);
             planRooms.Add(new FloorPlanRoomDto(
                 Room_Id: mapping.Room_Id,
                 Bim_Photo_Room_Id: mapping.Bim_Photo_Room_Id,
@@ -233,7 +235,9 @@ public sealed class SyncRoomsExternalHandler : IExternalEventHandler
                 Level_Name: doc.GetElement(room.LevelId)?.Name ?? levelName,
                 Area_M2: GetRoomAreaM2(room),
                 Center: center,
-                Polygon: polygon));
+                Polygon: polygon,
+                Model_Center: modelCenter,
+                Model_Polygon: modelPolygon));
         }
 
         if (planRooms.Count == 0)
@@ -477,7 +481,7 @@ public sealed class SyncRoomsExternalHandler : IExternalEventHandler
             .ToList();
         if (rooms.Count == 0) return null;
 
-        BoundingBoxXYZ? roomBounds = null;
+        BoundingBoxXYZ? roomBounds = TryGetFloorPlanCropModelBounds(floorPlan);
         foreach (SpatialElement room in rooms)
         {
             BoundingBoxXYZ? box = room.get_BoundingBox(null);
@@ -502,6 +506,30 @@ public sealed class SyncRoomsExternalHandler : IExternalEventHandler
             Max = new XYZ(roomBounds.Max.X + padding, roomBounds.Max.Y + padding, topElevation + UnitUtils.ConvertToInternalUnits(0.35, UnitTypeId.Meters))
         };
         return sectionBox;
+    }
+
+    private static BoundingBoxXYZ? TryGetFloorPlanCropModelBounds(ViewPlan floorPlan)
+    {
+        try
+        {
+            BoundingBoxXYZ? cropBox = floorPlan.CropBox;
+            if (cropBox == null) return null;
+
+            List<XYZ> corners = GetCropBoxModelCorners(cropBox).ToList();
+            if (corners.Count == 0) return null;
+
+            return new BoundingBoxXYZ
+            {
+                Transform = Transform.Identity,
+                Min = new XYZ(corners.Min(point => point.X), corners.Min(point => point.Y), corners.Min(point => point.Z)),
+                Max = new XYZ(corners.Max(point => point.X), corners.Max(point => point.Y), corners.Max(point => point.Z))
+            };
+        }
+        catch (Exception ex)
+        {
+            ValidationLog.Write($"Could not use crop bounds for 3D section {floorPlan.Name}: {ex.Message}");
+            return null;
+        }
     }
 
     private static BoundingBoxXYZ CloneBoundingBox(BoundingBoxXYZ source)

@@ -143,7 +143,9 @@ public sealed record FloorPlanRoomDto(
     [property: JsonPropertyName("level_name")] string? Level_Name,
     [property: JsonPropertyName("area_m2")] double? Area_M2,
     [property: JsonPropertyName("center")] PlanPointDto Center,
-    [property: JsonPropertyName("polygon")] IReadOnlyList<PlanPointDto> Polygon);
+    [property: JsonPropertyName("polygon")] IReadOnlyList<PlanPointDto> Polygon,
+    [property: JsonPropertyName("model_center")] PlanPointDto Model_Center,
+    [property: JsonPropertyName("model_polygon")] IReadOnlyList<PlanPointDto> Model_Polygon);
 
 public sealed record SyncFloorPlanResponse([property: JsonPropertyName("data")] SyncedFloorPlanDto Data);
 

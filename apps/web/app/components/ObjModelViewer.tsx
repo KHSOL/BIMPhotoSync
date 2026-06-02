@@ -203,7 +203,7 @@ export function ObjModelViewer({
         const isSelected = mesh.userData.roomId === selectedRoomIdRef.current;
         const isHovered = mesh.userData.roomId === hoveredRoomId;
         mesh.material.color.set(isSelected ? 0xbfdbfe : isHovered ? 0xccfbf1 : progressColor(mesh.userData.progressStatus));
-        mesh.material.opacity = isSelected ? 0.5 : isHovered ? 0.38 : 0.22;
+        mesh.material.opacity = isSelected ? 0.58 : isHovered ? 0.48 : 0.36;
         mesh.material.emissive.set(isSelected ? 0x2563eb : isHovered ? 0x0f766e : 0x000000);
         mesh.material.emissiveIntensity = isSelected ? 0.16 : isHovered ? 0.08 : 0;
       }
@@ -368,7 +368,7 @@ function createRoomOverlay(
       roughness: 0.9,
       metalness: 0,
       transparent: true,
-      opacity: 0.22,
+      opacity: 0.36,
       side: DoubleSide,
       depthTest: false
     });
@@ -390,7 +390,8 @@ function createRoomOverlay(
 }
 
 function createRoomShape(room: FloorPlanRoom) {
-  const polygon = room.polygon.filter((point) => Number.isFinite(point.x) && Number.isFinite(point.y));
+  const sourcePolygon = room.model_polygon && room.model_polygon.length >= 3 ? room.model_polygon : room.polygon;
+  const polygon = sourcePolygon.filter((point) => Number.isFinite(point.x) && Number.isFinite(point.y));
   if (polygon.length < 3) return null;
 
   const shape = new Shape();

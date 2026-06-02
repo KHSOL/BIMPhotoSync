@@ -120,6 +120,8 @@ export type FloorPlanRoom = {
   area_m2?: number | null;
   center: PlanPoint;
   polygon: PlanPoint[];
+  model_center?: PlanPoint | null;
+  model_polygon?: PlanPoint[] | null;
 };
 
 export type RevitFloorPlan = {
