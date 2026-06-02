@@ -180,7 +180,7 @@ export default function AuditPage() {
                     <td>{event.project?.name ?? "-"}</td>
                     <td><span className={`badge ${event.action === "DELETE" ? "red" : event.action === "UPDATE" ? "blue" : "green"}`}>{actionLabel(event.action)}</span></td>
                     <td>{resourceTypeLabel(event.resource_type)}</td>
-                    <td>{event.detail ?? event.resource_id ?? "-"}</td>
+                    <td className="audit-detail-cell">{event.detail ?? event.resource_id ?? "-"}</td>
                     <td>{event.ip_address ?? "-"}</td>
                   </tr>
                 ))}

@@ -44,6 +44,8 @@ export default function PhotosPage() {
   const [reviewSurface, setReviewSurface] = useState("");
   const [reviewProgress, setReviewProgress] = useState("");
   const [reviewing, setReviewing] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [uploadNotice, setUploadNotice] = useState("");
   const [uploadMeta, setUploadMeta] = useState({
     work_surface: "FLOOR",
     trade: "WATERPROOF",
@@ -184,30 +186,45 @@ export default function PhotosPage() {
       setStatus("사진, 프로젝트, 방을 모두 선택하세요.");
       return;
     }
-    const mime = file.type || "image/jpeg";
-    const presign = await apiJson<PresignResult>("/uploads/photos/presign", {
-      method: "POST",
-      headers: { ...authHeaders(token), "Content-Type": "application/json" },
-      body: JSON.stringify({ project_id: projectId, mime_type: mime, file_size: file.size })
-    });
-    const putRes = await fetch(presign.data.presigned_url, { method: presign.data.method, headers: { "Content-Type": mime }, body: file });
-    if (!putRes.ok) throw new Error(`파일 업로드 실패: ${putRes.status}`);
-    await apiJson<CommitResult>("/photos", {
-      method: "POST",
-      headers: { ...authHeaders(token), "Content-Type": "application/json" },
-      body: JSON.stringify({
-        project_id: projectId,
-        room_id: roomId,
-        upload_id: presign.data.upload_id,
-        ...uploadMeta,
-        trade: legacyTradeValue(uploadMeta.trade),
-        trade_category_id: uploadMeta.trade_category_id || undefined,
-        worker_name: uploadMeta.worker_name || user?.name || undefined
-      })
-    });
-    setFile(null);
-    setStatus("사진 업로드가 완료됐고 AI 분석 큐에 등록됐습니다.");
-    await loadPhotos();
+    setUploading(true);
+    setUploadNotice("");
+    setStatus("사진을 업로드하는 중입니다.");
+    try {
+      const mime = file.type || "image/jpeg";
+      const presign = await apiJson<PresignResult>("/uploads/photos/presign", {
+        method: "POST",
+        headers: { ...authHeaders(token), "Content-Type": "application/json" },
+        body: JSON.stringify({ project_id: projectId, mime_type: mime, file_size: file.size })
+      });
+      const putRes = await fetch(presign.data.presigned_url, { method: presign.data.method, headers: { "Content-Type": mime }, body: file });
+      if (!putRes.ok) throw new Error(`파일 업로드 실패: ${putRes.status}`);
+      const committed = await apiJson<CommitResult>("/photos", {
+        method: "POST",
+        headers: { ...authHeaders(token), "Content-Type": "application/json" },
+        body: JSON.stringify({
+          project_id: projectId,
+          room_id: roomId,
+          upload_id: presign.data.upload_id,
+          ...uploadMeta,
+          trade: legacyTradeValue(uploadMeta.trade),
+          trade_category_id: uploadMeta.trade_category_id || undefined,
+          worker_name: uploadMeta.worker_name || user?.name || undefined
+        })
+      });
+      setFile(null);
+      setFilterTrade("");
+      setFilterSurface("");
+      setDateFrom("");
+      setDateTo("");
+      setActiveTab("list");
+      await loadPhotos(token, projectId, roomId, { trade: "", surface: "", from: "", to: "" });
+      setSelectedId(committed.data.id);
+      setUploadNotice("사진 업로드가 완료됐습니다. AI 분석 큐에 등록했고, 아래 사진 조회 목록에서 바로 확인할 수 있습니다.");
+      setStatus("사진 업로드가 완료됐고 AI 분석 큐에 등록됐습니다.");
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    } finally {
+      setUploading(false);
+    }
   }
 
   async function reviewAnalysis() {
@@ -307,6 +324,13 @@ export default function PhotosPage() {
           </>
         ) : null}
       </section>
+
+      {uploadNotice ? (
+        <div className="success-notice" role="status">
+          <CheckCircle2 size={18} />
+          <span>{uploadNotice}</span>
+        </div>
+      ) : null}
 
       {activeTab === "list" ? (
         <div className="dashboard-grid">
@@ -417,7 +441,9 @@ export default function PhotosPage() {
             <label className="field upload-note"><span className="label">내용</span><textarea className="input textarea" value={uploadMeta.description} onChange={(event) => setUploadMeta({ ...uploadMeta, description: event.target.value })} /></label>
             <Field label="작업자"><input className="input" value={uploadMeta.worker_name} onChange={(event) => setUploadMeta({ ...uploadMeta, worker_name: event.target.value })} placeholder="예: 최반장" /></Field>
             <Field label="사진"><input className="input file-input" type="file" accept="image/*" onChange={(event) => setFile(event.target.files?.[0] ?? null)} /></Field>
-            <button className="button upload-button" onClick={() => uploadPhoto().catch((err: Error) => setStatus(err.message))} type="button"><UploadCloud size={16} /> 업로드</button>
+            <button className="button upload-button" disabled={uploading} onClick={() => uploadPhoto().catch((err: Error) => setStatus(err.message))} type="button">
+              <UploadCloud size={16} /> {uploading ? "업로드 중" : "업로드"}
+            </button>
           </div>
         </section>
       ) : null}

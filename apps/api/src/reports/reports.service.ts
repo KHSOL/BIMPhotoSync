@@ -56,6 +56,13 @@ type ZipEntry = {
   content: Buffer;
 };
 
+type SheetDefinition = {
+  name: string;
+  rows: string[][];
+  merges: string[];
+  columnWidths: number[];
+};
+
 @Injectable()
 export class ReportsService {
   private readonly s3: S3Client;
@@ -254,6 +261,7 @@ export class ReportsService {
   }
 
   private async findPhotos(dto: GenerateReportDto | ReportChatDto) {
+    const inferredRange = inferDateRange(dto);
     const where: Prisma.PhotoWhereInput = {
       projectId: dto.project_id,
       status: "ACTIVE",
@@ -262,11 +270,11 @@ export class ReportsService {
       ...(dto.trade ? { trade: dto.trade } : {}),
       ...(dto.trade_category_id ? { tradeCategoryId: dto.trade_category_id } : {}),
       ...(dto.worker_name ? { workerName: { contains: dto.worker_name, mode: "insensitive" } } : {}),
-      ...(dto.date_from || dto.date_to
+      ...(inferredRange.from || inferredRange.to
         ? {
             workDate: {
-              ...(dto.date_from ? { gte: new Date(dto.date_from) } : {}),
-              ...(dto.date_to ? { lte: new Date(dto.date_to) } : {})
+              ...(inferredRange.from ? { gte: inferredRange.from } : {}),
+              ...(inferredRange.to ? { lte: inferredRange.to } : {})
             }
           }
         : {})
@@ -349,7 +357,7 @@ function buildTitle(dto: GenerateReportDto, photos: PhotoForReport[]) {
     firstRoom ? `${firstRoom.roomNumber ?? ""}${firstRoom.roomName}`.trim() : "현장전체",
     dto.work_surface ?? null,
     dto.trade ?? null,
-    dto.date_from || dto.date_to ? `${dto.date_from ?? "시작"}~${dto.date_to ?? "현재"}` : null,
+    dateRangeLabel(dto)?.replace(/\s/g, "") ?? null,
     dto.worker_name ?? null
   ].filter((part): part is string => typeof part === "string" && part.length > 0);
   const generatedDate = new Date().toISOString().slice(0, 10);
@@ -391,7 +399,7 @@ function buildHeuristicReport(title: string, generatedBy: string, dto: GenerateR
       room: first ? roomLabel(first) : null,
       work_surface: dto.work_surface ?? null,
       trade: dto.trade ?? null,
-      date_range: dto.date_from || dto.date_to ? `${dto.date_from ?? "시작"} ~ ${dto.date_to ?? "현재"}` : null,
+      date_range: dateRangeLabel(dto),
       worker_name: dto.worker_name ?? null
     },
     comparison_photos: sorted.map(photoSummary),
@@ -402,7 +410,7 @@ function buildHeuristicReport(title: string, generatedBy: string, dto: GenerateR
 }
 
 function buildHeuristicChatAnswer(message: string, dto: ReportChatDto, photos: PhotoForReport[]) {
-  const dateText = dto.date_from || dto.date_to ? `${dto.date_from ?? "시작"}부터 ${dto.date_to ?? "현재"}까지` : "전체 기간";
+  const dateText = dateRangeLabel(dto) ?? "전체 기간";
   const scope = [
     dto.room_id ? "선택한 실" : "현장 전체",
     dto.work_surface ? `${dto.work_surface} 공사면` : null,
@@ -431,17 +439,66 @@ function sortPhotosForReport(photos: PhotoForReport[]) {
 }
 
 function reportFilters(dto: GenerateReportDto | ReportChatDto) {
+  const inferred = !dto.date_from && !dto.date_to ? inferMonthRange(promptTextForDto(dto)) : null;
   return {
     project_id: dto.project_id,
     room_id: dto.room_id ?? null,
     work_surface: dto.work_surface ?? null,
     trade: dto.trade ?? null,
     trade_category_id: dto.trade_category_id ?? null,
-    date_from: dto.date_from ?? null,
-    date_to: dto.date_to ?? null,
+    date_from: dto.date_from ?? inferred?.from ?? null,
+    date_to: dto.date_to ?? inferred?.to ?? null,
     worker_name: dto.worker_name ?? null,
     ai_prompt: "ai_prompt" in dto ? dto.ai_prompt ?? null : null
   };
+}
+
+function inferDateRange(dto: GenerateReportDto | ReportChatDto) {
+  const promptText = promptTextForDto(dto);
+  const fromText = dto.date_from ?? null;
+  const toText = dto.date_to ?? null;
+  const inferred = !fromText && !toText ? inferMonthRange(promptText) : null;
+  return {
+    from: dateAtStartOfDay(fromText ?? inferred?.from ?? null),
+    to: dateAtEndOfDay(toText ?? inferred?.to ?? null)
+  };
+}
+
+function promptTextForDto(dto: GenerateReportDto | ReportChatDto) {
+  return "message" in dto ? dto.message : dto.ai_prompt ?? "";
+}
+
+function dateRangeLabel(dto: GenerateReportDto | ReportChatDto) {
+  const filters = reportFilters(dto);
+  return filters.date_from || filters.date_to ? `${filters.date_from ?? "시작"} ~ ${filters.date_to ?? "현재"}` : null;
+}
+
+function inferMonthRange(text: string) {
+  const match = text.match(/(?:(20\d{2})\s*년\s*)?(\d{1,2})\s*월/);
+  if (!match) return null;
+  const year = match[1] ? Number(match[1]) : new Date().getFullYear();
+  const month = Number(match[2]);
+  if (!Number.isInteger(year) || month < 1 || month > 12) return null;
+  const from = `${year}-${String(month).padStart(2, "0")}-01`;
+  const end = new Date(Date.UTC(year, month, 0));
+  const to = `${year}-${String(month).padStart(2, "0")}-${String(end.getUTCDate()).padStart(2, "0")}`;
+  return { from, to };
+}
+
+function dateAtStartOfDay(value: string | null) {
+  if (!value) return null;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  date.setUTCHours(0, 0, 0, 0);
+  return date;
+}
+
+function dateAtEndOfDay(value: string | null) {
+  if (!value) return null;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  date.setUTCHours(23, 59, 59, 999);
+  return date;
 }
 
 function photoSummary(photo: PhotoForReport) {
@@ -610,31 +667,154 @@ function renderDocx(content: ReportContent) {
 }
 
 function renderXlsx(content: ReportContent) {
-  const rows = [
-    ["제목", content.title],
-    ["생성일", content.generated_at],
-    ["생성자", content.generated_by],
-    ["상황분석", content.analysis_result],
-    ["메모", content.memo ?? ""],
-    [],
-    ["작업일자", "Room", "공사면", "공종", "작업자", "내용", "AI 요약"],
-    ...content.comparison_photos.map((photo) => [
-      photo.work_date,
-      photo.room,
-      photo.work_surface,
-      photo.trade,
-      photo.worker_name ?? "",
-      photo.description ?? "",
-      photo.ai_description ?? ""
-    ])
-  ];
+  const sheets = buildReportTemplateSheets(content);
   return zipStore([
-    { path: "[Content_Types].xml", content: textBuffer(contentTypesXlsx()) },
+    { path: "[Content_Types].xml", content: textBuffer(contentTypesXlsx(sheets.length)) },
     { path: "_rels/.rels", content: textBuffer(rootRels("officeDocument", "xl/workbook.xml")) },
-    { path: "xl/workbook.xml", content: textBuffer(`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="보고서" sheetId="1" r:id="rId1"/></sheets></workbook>`) },
-    { path: "xl/_rels/workbook.xml.rels", content: textBuffer(`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/></Relationships>`) },
-    { path: "xl/worksheets/sheet1.xml", content: textBuffer(worksheetXml(rows)) }
+    { path: "xl/workbook.xml", content: textBuffer(workbookXml(sheets)) },
+    { path: "xl/_rels/workbook.xml.rels", content: textBuffer(workbookRels(sheets.length)) },
+    ...sheets.map((sheet, index) => ({
+      path: `xl/worksheets/sheet${index + 1}.xml`,
+      content: textBuffer(worksheetXml(sheet.rows, sheet.merges, sheet.columnWidths))
+    }))
   ]);
+}
+
+function buildReportTemplateSheets(content: ReportContent): SheetDefinition[] {
+  const generatedDate = formatKoreanDate(content.generated_at);
+  const dateRange = content.situation.date_range ?? photoDateRange(content.comparison_photos) ?? generatedDate;
+  const siteName = content.situation.room ?? "현장 전체";
+  const companyName = "BIM Photo Sync";
+  const photoSheets = [0, 1, 2].map((sheetIndex) => buildPhotoSheet(content, sheetIndex));
+
+  return [
+    {
+      name: "표지(감리단)",
+      rows: withCells(blankRows(29, 13), [
+        [4, 1, "주간공정계획 및 실적보고"],
+        [16, 1, `■ ${content.title}`],
+        [20, 1, dateRange],
+        [28, 3, companyName]
+      ]),
+      merges: ["A4:M7", "A16:M17", "A20:M20", "A22:M22", "C28:G29"],
+      columnWidths: Array(13).fill(12)
+    },
+    {
+      name: "표지",
+      rows: withCells(blankRows(39, 13), [
+        [4, 1, "주간공정계획 및 실적보고"],
+        [17, 1, content.title],
+        [29, 1, dateRange],
+        [36, 1, companyName]
+      ]),
+      merges: ["A4:H7", "A17:H18", "A29:H29", "A36:H36"],
+      columnWidths: Array(13).fill(12)
+    },
+    {
+      name: "주간공정보고(xx월 x주)",
+      rows: withCells(blankRows(43, 21), [
+        [1, 1, "주 간 공 정 회 의 자 료"],
+        [2, 1, `■ 공사명  : ${content.title}`],
+        [3, 1, "날짜"],
+        [3, 3, "위치"],
+        [3, 5, "작성자"],
+        [3, 7, "공정명"],
+        [3, 9, `생성자 : ${content.generated_by}`],
+        [4, 1, "작업내용"],
+        [4, 3, content.progress_timeline.slice(0, 6).join("\n") || "등록된 작업 사진 기준의 작업내용이 없습니다."],
+        [9, 1, "특기사항 및 문제점"],
+        [9, 3, content.analysis_result],
+        [14, 1, "조치 내용"],
+        [14, 3, content.memo ?? "추가 조치 내용은 현장 관리자 검토 후 입력합니다."],
+        [19, 1, "종합판단"],
+        [19, 3, content.comparison_photos.length > 0 ? `${content.comparison_photos.length}장의 사진 근거를 기준으로 방(실) → 공사면 → 일자 → 공종 순서로 분석했습니다.` : "선택한 조건에 해당하는 사진 데이터가 없습니다."],
+        [24, 1, "후속관리사항"],
+        [24, 3, "완료/진행중/시작 전 상태와 누락 사진을 다음 점검 시 재확인합니다."]
+      ]),
+      merges: ["A1:J1", "A2:J2", "A3:B3", "C3:D3", "E3:F3", "G3:H3", "I3:J3", "A4:B8", "C4:J8", "A9:B13", "C9:J13", "A14:B18", "C14:J18", "A19:B23", "C19:J23", "A24:B28", "C24:J28"],
+      columnWidths: Array(21).fill(13)
+    },
+    ...photoSheets,
+    {
+      name: "전경사진",
+      rows: withCells(blankRows(24, 14), [
+        [1, 1, "전경사진"],
+        [2, 1, `현장명: ${siteName}`],
+        [2, 12, `일자 : ${generatedDate}`],
+        [3, 1, content.comparison_photos[0] ? photoEvidenceText(content.comparison_photos[0]) : "등록된 전경 사진이 없습니다."],
+        [3, 8, content.comparison_photos[1] ? photoEvidenceText(content.comparison_photos[1]) : "추가 전경 사진이 없습니다."],
+        [11, 1, content.comparison_photos[2] ? photoEvidenceText(content.comparison_photos[2]) : ""],
+        [11, 8, content.comparison_photos[3] ? photoEvidenceText(content.comparison_photos[3]) : ""]
+      ]),
+      merges: ["A1:N1", "L2:N2", "A3:G10", "H3:N10", "A11:G18", "H11:N18"],
+      columnWidths: Array(14).fill(13)
+    }
+  ];
+}
+
+function buildPhotoSheet(content: ReportContent, sheetIndex: number): SheetDefinition {
+  const siteName = content.situation.room ?? "현장 전체";
+  const rows = withCells(blankRows(37, 14), [
+    [1, 1, "사 진 대 지"],
+    [2, 1, `현장명: ${siteName}`]
+  ]);
+  const slots = [
+    { row: 11, labelCol: 1, valueCol: 3 },
+    { row: 11, labelCol: 8, valueCol: 10 },
+    { row: 20, labelCol: 1, valueCol: 3 },
+    { row: 20, labelCol: 8, valueCol: 10 },
+    { row: 29, labelCol: 1, valueCol: 3 },
+    { row: 29, labelCol: 8, valueCol: 10 }
+  ];
+  slots.forEach((slot, slotIndex) => {
+    const photo = content.comparison_photos[sheetIndex * slots.length + slotIndex];
+    setCell(rows, slot.row, slot.labelCol, "내 용");
+    setCell(rows, slot.row, slot.valueCol, photo ? photoEvidenceText(photo) : slotIndex === 0 && sheetIndex === 0 ? "선택한 조건에 해당하는 사진 데이터가 없습니다." : "");
+  });
+  return {
+    name: `사진대지 (${sheetIndex + 1})`,
+    rows,
+    merges: ["A1:N1", "A2:N2", "A11:B11", "C11:G11", "H11:I11", "J11:N11", "A20:B20", "C20:G20", "H20:I20", "J20:N20", "A29:B29", "C29:G29", "H29:I29", "J29:N29"],
+    columnWidths: Array(14).fill(13)
+  };
+}
+
+function photoEvidenceText(photo: ReportContent["comparison_photos"][number]) {
+  return [
+    `날짜: ${photo.work_date}`,
+    `위치: ${photo.room}`,
+    `공사면/공종: ${photo.work_surface} / ${photo.trade}`,
+    `작성자: ${photo.worker_name ?? "-"}`,
+    `작업내용: ${photo.description ?? "-"}`,
+    `AI 요약: ${photo.ai_description ?? "분석 대기"}`
+  ].join("\n");
+}
+
+function photoDateRange(photos: ReportContent["comparison_photos"]) {
+  const dates = photos.map((photo) => photo.work_date).filter((value): value is string => value.length > 0).sort();
+  if (dates.length === 0) return null;
+  return dates[0] === dates[dates.length - 1] ? dates[0] : `${dates[0]} ~ ${dates[dates.length - 1]}`;
+}
+
+function formatKoreanDate(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return `${date.getFullYear()}년 ${date.getMonth() + 1}월 ${date.getDate()}일`;
+}
+
+function blankRows(rowCount: number, columnCount: number) {
+  return Array.from({ length: rowCount }, () => Array.from({ length: columnCount }, () => ""));
+}
+
+function withCells(rows: string[][], cells: Array<[number, number, string]>) {
+  cells.forEach(([row, column, value]) => setCell(rows, row, column, value));
+  return rows;
+}
+
+function setCell(rows: string[][], row: number, column: number, value: string) {
+  const targetRow = rows[row - 1];
+  if (!targetRow) return;
+  targetRow[column - 1] = value;
 }
 
 function renderHwpx(content: ReportContent) {
@@ -698,15 +878,35 @@ function renderPdf(content: ReportContent) {
   return buildPdf(objects);
 }
 
-function worksheetXml(rows: string[][]) {
+function workbookXml(sheets: SheetDefinition[]) {
+  const sheetXml = sheets.map((sheet, index) => {
+    return `<sheet name="${xmlEscape(sheet.name)}" sheetId="${index + 1}" r:id="rId${index + 1}"/>`;
+  }).join("");
+  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets>${sheetXml}</sheets></workbook>`;
+}
+
+function workbookRels(sheetCount: number) {
+  const relationships = Array.from({ length: sheetCount }, (_, index) => {
+    return `<Relationship Id="rId${index + 1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet${index + 1}.xml"/>`;
+  }).join("");
+  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">${relationships}</Relationships>`;
+}
+
+function worksheetXml(rows: string[][], merges: string[], columnWidths: number[]) {
+  const cols = columnWidths.length > 0
+    ? `<cols>${columnWidths.map((width, index) => `<col min="${index + 1}" max="${index + 1}" width="${width}" customWidth="1"/>`).join("")}</cols>`
+    : "";
   const body = rows.map((row, rowIndex) => {
     const cells = row.map((cell, colIndex) => {
       const ref = `${columnName(colIndex + 1)}${rowIndex + 1}`;
       return `<c r="${ref}" t="inlineStr"><is><t>${xmlEscape(cell)}</t></is></c>`;
     }).join("");
-    return `<row r="${rowIndex + 1}">${cells}</row>`;
+    return `<row r="${rowIndex + 1}" ht="28" customHeight="1">${cells}</row>`;
   }).join("");
-  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>${body}</sheetData></worksheet>`;
+  const mergeXml = merges.length > 0
+    ? `<mergeCells count="${merges.length}">${merges.map((ref) => `<mergeCell ref="${ref}"/>`).join("")}</mergeCells>`
+    : "";
+  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><dimension ref="A1:${columnName(Math.max(...rows.map((row) => row.length), 1))}${rows.length}"/>${cols}<sheetData>${body}</sheetData>${mergeXml}</worksheet>`;
 }
 
 function columnName(index: number) {
@@ -733,8 +933,11 @@ function contentTypesDocx() {
   return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/><Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/></Types>`;
 }
 
-function contentTypesXlsx() {
-  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/></Types>`;
+function contentTypesXlsx(sheetCount: number) {
+  const sheetOverrides = Array.from({ length: sheetCount }, (_, index) => {
+    return `<Override PartName="/xl/worksheets/sheet${index + 1}.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>`;
+  }).join("");
+  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>${sheetOverrides}</Types>`;
 }
 
 function rootRels(kind: string, target: string) {
