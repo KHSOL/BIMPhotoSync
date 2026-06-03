@@ -598,7 +598,7 @@ public sealed class SyncRoomsExternalHandler : IExternalEventHandler
                 int before = vertexOffset;
                 string safeName = SanitizeObjName(element.Category?.Name ?? element.GetType().Name);
                 builder.AppendLine($"o {safeName}_{element.Id.Value}");
-                AppendGeometry(builder, geometry, Transform.Identity, ref vertexOffset);
+                AppendGeometry(builder, geometry, Transform.Identity, sectionBox, ref vertexOffset);
                 if (vertexOffset > before) exportedElements++;
             }
             catch (Autodesk.Revit.Exceptions.ApplicationException ex)
@@ -683,7 +683,12 @@ public sealed class SyncRoomsExternalHandler : IExternalEventHandler
         (long)BuiltInCategory.OST_StructuralFraming
     };
 
-    private static void AppendGeometry(StringBuilder builder, GeometryElement geometry, Transform transform, ref int vertexOffset)
+    private static void AppendGeometry(
+        StringBuilder builder,
+        GeometryElement geometry,
+        Transform transform,
+        BoundingBoxXYZ? sectionBox,
+        ref int vertexOffset)
     {
         if (geometry == null) return;
 
@@ -692,20 +697,25 @@ public sealed class SyncRoomsExternalHandler : IExternalEventHandler
             switch (geometryObject)
             {
                 case Solid solid:
-                    AppendSolid(builder, solid, transform, ref vertexOffset);
+                    AppendSolid(builder, solid, transform, sectionBox, ref vertexOffset);
                     break;
                 case GeometryInstance instance:
                     GeometryElement instanceGeometry = instance.GetInstanceGeometry();
                     if (instanceGeometry == null) break;
 
                     Transform instanceTransform = instance.Transform ?? Transform.Identity;
-                    AppendGeometry(builder, instanceGeometry, transform.Multiply(instanceTransform), ref vertexOffset);
+                    AppendGeometry(builder, instanceGeometry, transform.Multiply(instanceTransform), sectionBox, ref vertexOffset);
                     break;
             }
         }
     }
 
-    private static void AppendSolid(StringBuilder builder, Solid solid, Transform transform, ref int vertexOffset)
+    private static void AppendSolid(
+        StringBuilder builder,
+        Solid solid,
+        Transform transform,
+        BoundingBoxXYZ? sectionBox,
+        ref int vertexOffset)
     {
         if (solid.Faces == null || solid.Faces.Size == 0) return;
 
@@ -753,6 +763,11 @@ public sealed class SyncRoomsExternalHandler : IExternalEventHandler
                 uint index2 = triangle.get_Index(2);
                 if (index0 >= vertexCount || index1 >= vertexCount || index2 >= vertexCount) continue;
 
+                XYZ point0 = transform.OfPoint(mesh.Vertices[(int)index0]);
+                XYZ point1 = transform.OfPoint(mesh.Vertices[(int)index1]);
+                XYZ point2 = transform.OfPoint(mesh.Vertices[(int)index2]);
+                if (!TriangleInsideSectionBox(point0, point1, point2, sectionBox)) continue;
+
                 builder.Append("f ");
                 builder.Append(faceVertexStart + (int)index0);
                 builder.Append(' ');
@@ -764,6 +779,28 @@ public sealed class SyncRoomsExternalHandler : IExternalEventHandler
 
             vertexOffset += vertexCount;
         }
+    }
+
+    private static bool TriangleInsideSectionBox(XYZ point0, XYZ point1, XYZ point2, BoundingBoxXYZ? sectionBox)
+    {
+        if (sectionBox == null) return true;
+
+        return PointInsideSectionBox(point0, sectionBox) &&
+               PointInsideSectionBox(point1, sectionBox) &&
+               PointInsideSectionBox(point2, sectionBox);
+    }
+
+    private static bool PointInsideSectionBox(XYZ point, BoundingBoxXYZ sectionBox)
+    {
+        Transform sectionTransform = sectionBox.Transform ?? Transform.Identity;
+        XYZ local = sectionTransform.Inverse.OfPoint(point);
+        const double tolerance = 0.01;
+        return local.X >= sectionBox.Min.X - tolerance &&
+               local.X <= sectionBox.Max.X + tolerance &&
+               local.Y >= sectionBox.Min.Y - tolerance &&
+               local.Y <= sectionBox.Max.Y + tolerance &&
+               local.Z >= sectionBox.Min.Z - tolerance &&
+               local.Z <= sectionBox.Max.Z + tolerance;
     }
 
     private static string ObjNumber(double value)
