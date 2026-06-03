@@ -173,18 +173,19 @@ export function ObjModelViewer({
         const size = bounds.getSize(new Vector3());
         const center = bounds.getCenter(new Vector3());
         const maxDimension = Math.max(size.x, size.y, size.z, 1);
-        const floorBaseY = estimateFloorBaseY(object, bounds, maxDimension);
+        const floorBaseY = bounds.min.y;
         object.position.set(-center.x, -floorBaseY, -center.z);
         scene.add(object);
 
         addModelEdges(object, disposables, maxDimension);
         if (plan) {
           const roomGroup = createRoomOverlay(plan, center, maxDimension, roomProgressByBimId ?? {}, roomMeshes, disposables);
+          roomGroup.position.y = Math.max(maxDimension * 0.006, 0.04);
           scene.add(roomGroup);
         }
 
         const grid = new GridHelper(maxDimension * 1.2, 24, 0xcbd5e1, 0xeef2ff);
-        grid.position.y = -maxDimension * 0.006;
+        grid.position.y = 0;
         scene.add(grid);
 
         camera.position.set(maxDimension * 0.64, maxDimension * 0.58, maxDimension * 0.78);
@@ -254,8 +255,8 @@ function addModelEdges(object: Group, disposables: DisposableResource[], maxDime
     const childSize = childBounds.getSize(new Vector3());
     if (shouldSkipEdgeMesh(childSize, maxDimension)) return;
 
-    const geometry = new EdgesGeometry(child.geometry, 68);
-    const material = new LineBasicMaterial({ color: 0x334155, transparent: true, opacity: 0.18 });
+    const geometry = new EdgesGeometry(child.geometry, 78);
+    const material = new LineBasicMaterial({ color: 0x334155, transparent: true, opacity: 0.13 });
     const edges = new LineSegments(geometry, material);
     edges.renderOrder = 3;
     child.add(edges);
@@ -309,41 +310,10 @@ function visibleMeshBounds(object: Group, minimumMaxSide = 0) {
   return hasVisibleMesh ? bounds : null;
 }
 
-function estimateFloorBaseY(object: Group, fallbackBounds: Box3, maxDimension: number) {
-  const floorCandidates: number[] = [];
-  const structuralCandidates: number[] = [];
-
-  object.traverse((child) => {
-    if (!(child instanceof Mesh) || !child.visible) return;
-    const childBounds = new Box3().setFromObject(child);
-    if (childBounds.isEmpty()) return;
-
-    const size = childBounds.getSize(new Vector3());
-    const horizontalSpan = Math.max(size.x, size.z);
-    const horizontalArea = Math.max(size.x, 0.001) * Math.max(size.z, 0.001);
-    const isBroadHorizontal =
-      horizontalArea > maxDimension * maxDimension * 0.004 &&
-      size.y < maxDimension * 0.08;
-    const isStructural =
-      horizontalSpan > maxDimension * 0.08 &&
-      Math.max(size.x, size.y, size.z) > maxDimension * 0.1;
-
-    if (isBroadHorizontal) floorCandidates.push(childBounds.min.y);
-    if (isStructural) structuralCandidates.push(childBounds.min.y);
-  });
-
-  const candidates = floorCandidates.length > 0 ? floorCandidates : structuralCandidates;
-  if (candidates.length === 0) return fallbackBounds.min.y;
-
-  candidates.sort((left, right) => left - right);
-  const index = Math.min(candidates.length - 1, Math.floor(candidates.length * 0.15));
-  return candidates[index];
-}
-
 function shouldSkipEdgeMesh(size: Vector3, maxDimension: number) {
   const maxSide = Math.max(size.x, size.y, size.z);
   const minSide = Math.min(size.x, size.y, size.z);
-  return maxSide < maxDimension * 0.018 || (minSide < maxDimension * 0.0008 && maxSide < maxDimension * 0.08);
+  return maxSide < maxDimension * 0.025 || (minSide < maxDimension * 0.0008 && maxSide < maxDimension * 0.1);
 }
 
 function createRoomOverlay(
@@ -355,8 +325,6 @@ function createRoomOverlay(
   disposables: DisposableResource[]
 ) {
   const group = new Group();
-  const overlayY = maxDimension * 0.014;
-
   for (const room of plan.rooms) {
     const shape = createRoomShape(room);
     if (!shape) continue;
@@ -368,13 +336,13 @@ function createRoomOverlay(
       roughness: 0.9,
       metalness: 0,
       transparent: true,
-      opacity: 0.36,
+      opacity: 0.42,
       side: DoubleSide,
       depthTest: false
     });
     const mesh = new Mesh(geometry, material) as SelectableRoomMesh;
     mesh.rotation.x = -Math.PI / 2;
-    mesh.position.set(-center.x, overlayY, -center.z);
+    mesh.position.set(-center.x, 0, -center.z);
     mesh.renderOrder = 10;
     mesh.userData = {
       selectableRoom: true,
@@ -407,6 +375,9 @@ function roomDisplayProgress(progress: Room["progress_by_surface"] | undefined):
   const wall = progress?.WALL;
   if (wall?.status === "COMPLETED") return "completed";
   if (wall?.status === "IN_PROGRESS" || (wall?.photo_count ?? 0) > 0) return "in-progress";
+  const values = Object.values(progress ?? {});
+  if (values.some((item) => item.status === "COMPLETED")) return "completed";
+  if (values.some((item) => item.status === "IN_PROGRESS" || item.photo_count > 0)) return "in-progress";
   return "not-started";
 }
 
