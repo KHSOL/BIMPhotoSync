@@ -2,6 +2,9 @@ import { GetObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { Injectable, NotFoundException } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import { Prisma } from "@prisma/client";
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
+import { inflateRawSync } from "node:zlib";
 import { PrismaService } from "../prisma/prisma.service";
 import { ProjectsService } from "../projects/projects.service";
 import { GenerateReportDto, ReportChatDto, ReportQueryDto } from "./dto";
@@ -61,6 +64,11 @@ type SheetDefinition = {
   rows: string[][];
   merges: string[];
   columnWidths: number[];
+};
+
+type TemplateCellPatch = {
+  sheetPath: string;
+  cells: Record<string, string>;
 };
 
 @Injectable()
@@ -667,17 +675,171 @@ function renderDocx(content: ReportContent) {
 }
 
 function renderXlsx(content: ReportContent) {
-  const sheets = buildReportTemplateSheets(content);
-  return zipStore([
-    { path: "[Content_Types].xml", content: textBuffer(contentTypesXlsx(sheets.length)) },
-    { path: "_rels/.rels", content: textBuffer(rootRels("officeDocument", "xl/workbook.xml")) },
-    { path: "xl/workbook.xml", content: textBuffer(workbookXml(sheets)) },
-    { path: "xl/_rels/workbook.xml.rels", content: textBuffer(workbookRels(sheets.length)) },
-    ...sheets.map((sheet, index) => ({
-      path: `xl/worksheets/sheet${index + 1}.xml`,
-      content: textBuffer(worksheetXml(sheet.rows, sheet.merges, sheet.columnWidths))
-    }))
-  ]);
+  const entries = readReportTemplateEntries();
+  const patches = buildTemplateCellPatches(content);
+  const patchBySheet = new Map(patches.map((patch) => [patch.sheetPath, patch.cells]));
+  return zipStore(entries.map((entry) => {
+    const cells = patchBySheet.get(entry.path);
+    if (!cells) return entry;
+    return {
+      path: entry.path,
+      content: textBuffer(patchWorksheetXml(entry.content.toString("utf8"), cells))
+    };
+  }));
+}
+
+function readReportTemplateEntries() {
+  const templatePath = reportTemplatePath();
+  return unzipEntries(readFileSync(templatePath));
+}
+
+function reportTemplatePath() {
+  const candidates = [
+    join(process.cwd(), "apps", "api", "templates", "report-template.xlsx"),
+    join(process.cwd(), "templates", "report-template.xlsx"),
+    join(__dirname, "..", "..", "templates", "report-template.xlsx")
+  ];
+  const found = candidates.find((candidate) => existsSync(candidate));
+  if (!found) {
+    throw new Error("Report template not found. Expected apps/api/templates/report-template.xlsx.");
+  }
+  return found;
+}
+
+function unzipEntries(buffer: Buffer): ZipEntry[] {
+  const eocdOffset = findEndOfCentralDirectory(buffer);
+  const entryCount = buffer.readUInt16LE(eocdOffset + 10);
+  let centralOffset = buffer.readUInt32LE(eocdOffset + 16);
+  const entries: ZipEntry[] = [];
+
+  for (let index = 0; index < entryCount; index++) {
+    if (buffer.readUInt32LE(centralOffset) !== 0x02014b50) {
+      throw new Error("Invalid XLSX central directory.");
+    }
+    const method = buffer.readUInt16LE(centralOffset + 10);
+    const compressedSize = buffer.readUInt32LE(centralOffset + 20);
+    const nameLength = buffer.readUInt16LE(centralOffset + 28);
+    const extraLength = buffer.readUInt16LE(centralOffset + 30);
+    const commentLength = buffer.readUInt16LE(centralOffset + 32);
+    const localOffset = buffer.readUInt32LE(centralOffset + 42);
+    const entryPath = buffer.subarray(centralOffset + 46, centralOffset + 46 + nameLength).toString("utf8");
+    const contentStart = localFileContentStart(buffer, localOffset);
+    const compressed = buffer.subarray(contentStart, contentStart + compressedSize);
+    const content = method === 0 ? Buffer.from(compressed) : method === 8 ? inflateRawSync(compressed) : null;
+    if (!content) throw new Error(`Unsupported XLSX compression method: ${method}`);
+    entries.push({ path: entryPath, content });
+    centralOffset += 46 + nameLength + extraLength + commentLength;
+  }
+
+  return entries;
+}
+
+function findEndOfCentralDirectory(buffer: Buffer) {
+  for (let offset = buffer.length - 22; offset >= 0; offset--) {
+    if (buffer.readUInt32LE(offset) === 0x06054b50) return offset;
+  }
+  throw new Error("Invalid XLSX file: end of central directory not found.");
+}
+
+function localFileContentStart(buffer: Buffer, localOffset: number) {
+  if (buffer.readUInt32LE(localOffset) !== 0x04034b50) {
+    throw new Error("Invalid XLSX local file header.");
+  }
+  const nameLength = buffer.readUInt16LE(localOffset + 26);
+  const extraLength = buffer.readUInt16LE(localOffset + 28);
+  return localOffset + 30 + nameLength + extraLength;
+}
+
+function buildTemplateCellPatches(content: ReportContent): TemplateCellPatch[] {
+  const generatedDate = formatKoreanDate(content.generated_at);
+  const dateRange = content.situation.date_range ?? photoDateRange(content.comparison_photos) ?? generatedDate;
+  const siteName = content.situation.room ?? "현장 전체";
+  const companyName = "BIM Photo Sync";
+  const location = content.situation.room ?? "현장 전체";
+  const trade = content.situation.trade ?? "전체 공종";
+  const workSummary = content.progress_timeline.slice(0, 6).join("\n") || "등록된 작업 사진 기준의 작업내용이 없습니다.";
+  const overallSummary = content.comparison_photos.length > 0
+    ? `${content.comparison_photos.length}장의 사진 근거를 기준으로 방(실) → 공사면 → 일자 → 공종 순서로 분석했습니다.`
+    : "선택한 조건에 해당하는 사진 데이터가 없습니다.";
+  const followUp = "완료/진행 중/시작 전 상태와 누락 사진을 다음 점검 시 재확인합니다.";
+
+  return [
+    {
+      sheetPath: "xl/worksheets/sheet1.xml",
+      cells: {
+        A16: `■ ${content.title}`,
+        A20: dateRange,
+        C28: companyName
+      }
+    },
+    {
+      sheetPath: "xl/worksheets/sheet2.xml",
+      cells: {
+        A17: content.title,
+        A29: dateRange,
+        A36: companyName
+      }
+    },
+    {
+      sheetPath: "xl/worksheets/sheet3.xml",
+      cells: {
+        A2: `■ 공사명  : ${content.title}`,
+        A3: `날짜 : ${dateRange}`,
+        C3: `위치 : ${location}`,
+        E3: `작성자 : ${content.generated_by}`,
+        G3: `공정명 : ${trade}`,
+        I3: `현장소장 : ${content.generated_by}   (인)`,
+        C4: workSummary,
+        C9: content.analysis_result,
+        C14: content.memo ?? "추가 조치 내용은 현장 관리자 검토 후 입력합니다.",
+        C19: overallSummary,
+        C24: followUp
+      }
+    },
+    buildPhotoTemplatePatch("xl/worksheets/sheet4.xml", content, 0, siteName),
+    buildPhotoTemplatePatch("xl/worksheets/sheet5.xml", content, 6, siteName),
+    buildPhotoTemplatePatch("xl/worksheets/sheet6.xml", content, 12, siteName),
+    {
+      sheetPath: "xl/worksheets/sheet7.xml",
+      cells: {
+        A2: `현장명: ${siteName}`,
+        L2: `일자 : ${generatedDate}`,
+        A3: content.comparison_photos[0] ? photoEvidenceText(content.comparison_photos[0]) : "등록된 전경 사진이 없습니다.",
+        H3: content.comparison_photos[1] ? photoEvidenceText(content.comparison_photos[1]) : "추가 전경 사진이 없습니다.",
+        A11: content.comparison_photos[2] ? photoEvidenceText(content.comparison_photos[2]) : "",
+        H11: content.comparison_photos[3] ? photoEvidenceText(content.comparison_photos[3]) : ""
+      }
+    }
+  ];
+}
+
+function buildPhotoTemplatePatch(sheetPath: string, content: ReportContent, startIndex: number, siteName: string): TemplateCellPatch {
+  const slots = ["C11", "J11", "C20", "J20", "C29", "J29"];
+  const cells: Record<string, string> = { A2: `현장명: ${siteName}` };
+  slots.forEach((cell, index) => {
+    const photo = content.comparison_photos[startIndex + index];
+    cells[cell] = photo ? photoEvidenceText(photo) : index === 0 && startIndex === 0 ? "선택한 조건에 해당하는 사진 데이터가 없습니다." : "";
+  });
+  return { sheetPath, cells };
+}
+
+function patchWorksheetXml(xml: string, cells: Record<string, string>) {
+  return Object.entries(cells).reduce((current, [cellRef, value]) => setInlineStringCell(current, cellRef, value), xml);
+}
+
+function setInlineStringCell(xml: string, cellRef: string, value: string) {
+  const selfClosingCellPattern = new RegExp(`<c\\b(?=[^>]*\\br="${cellRef}")[^>]*/>`);
+  const cellPattern = new RegExp(`<c\\b(?=[^>]*\\br="${cellRef}")[^>]*>(?:[\\s\\S]*?)<\\/c>`);
+  const existing = selfClosingCellPattern.exec(xml) ?? cellPattern.exec(xml);
+  const style = existing?.[0].match(/\bs="([^"]+)"/)?.[0] ?? "";
+  const cellXml = `<c r="${cellRef}"${style ? ` ${style}` : ""} t="inlineStr"><is><t xml:space="preserve">${xmlEscape(value)}</t></is></c>`;
+  if (existing) return xml.replace(existing[0], cellXml);
+
+  const rowNumber = Number(cellRef.match(/\d+/)?.[0] ?? 1);
+  const rowPattern = new RegExp(`(<row\\b(?=[^>]*\\br="${rowNumber}")[^>]*>)([\\s\\S]*?)(<\\/row>)`);
+  if (rowPattern.test(xml)) return xml.replace(rowPattern, `$1$2${cellXml}$3`);
+
+  return xml.replace("</sheetData>", `<row r="${rowNumber}">${cellXml}</row></sheetData>`);
 }
 
 function buildReportTemplateSheets(content: ReportContent): SheetDefinition[] {
