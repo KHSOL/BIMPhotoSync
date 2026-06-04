@@ -319,10 +319,9 @@ public sealed class SyncRoomsExternalHandler : IExternalEventHandler
         int syncedCount = 0;
         foreach (ViewPlan floorPlan in floorPlans)
         {
-            View3D? exportView = null;
             try
             {
-                exportView = CreateFloorPlanSection3DView(doc, floorPlan, out string sectionDiagnostics);
+                View3D? exportView = GetOrCreateFloorPlanSection3DView(doc, floorPlan, out string sectionDiagnostics);
                 ValidationLog.Write(sectionDiagnostics);
                 if (exportView == null)
                 {
@@ -339,13 +338,6 @@ public sealed class SyncRoomsExternalHandler : IExternalEventHandler
             catch (Exception ex)
             {
                 ValidationLog.Write($"Skipped 3D model sync for {floorPlan.Name}: {ex.Message}");
-            }
-            finally
-            {
-                if (exportView != null)
-                {
-                    DeleteTemporaryView(doc, exportView.Id);
-                }
             }
         }
 
@@ -397,31 +389,42 @@ public sealed class SyncRoomsExternalHandler : IExternalEventHandler
             : $"Synced 3D model {displayViewName} ({Math.Round(bytes.LongLength / 1024.0 / 1024.0, 2)} MB).";
     }
 
-    private static View3D? CreateFloorPlanSection3DView(Document doc, ViewPlan floorPlan, out string diagnostics)
+    private static View3D? GetOrCreateFloorPlanSection3DView(Document doc, ViewPlan floorPlan, out string diagnostics)
     {
         FloorPlanSectionBoxResult sectionResult = BuildFloorPlanSectionBox(doc, floorPlan);
         diagnostics = sectionResult.Diagnostic;
         if (sectionResult.SectionBox == null) return null;
 
-        ViewFamilyType? viewFamilyType = new FilteredElementCollector(doc)
+        string viewName = BuildFloorPlan3DViewName(floorPlan);
+        View3D? view = FindMatching3DView(doc, viewName);
+        ViewFamilyType? viewFamilyType = view == null
+            ? new FilteredElementCollector(doc)
             .OfClass(typeof(ViewFamilyType))
             .Cast<ViewFamilyType>()
-            .FirstOrDefault(type => type.ViewFamily == ViewFamily.ThreeDimensional);
-        if (viewFamilyType == null)
+            .FirstOrDefault(type => type.ViewFamily == ViewFamily.ThreeDimensional)
+            : null;
+        if (view == null && viewFamilyType == null)
         {
             diagnostics = $"{diagnostics} 3D view creation skipped: no 3D ViewFamilyType is available.";
             return null;
         }
 
-        using Transaction transaction = new(doc, "BIM Photo Sync 3D floor section");
+        bool reusedView = view != null;
+        using Transaction transaction = new(doc, reusedView
+            ? "BIM Photo Sync update 3D floor section"
+            : "BIM Photo Sync create 3D floor section");
         transaction.Start();
-        View3D view = View3D.CreateIsometric(doc, viewFamilyType.Id);
-        view.Name = UniqueViewName(doc, $"BPS 3D - {floorPlan.Name}");
+        view ??= View3D.CreateIsometric(doc, viewFamilyType!.Id);
+        if (!reusedView)
+        {
+            view.Name = viewName;
+        }
+
         view.SetSectionBox(sectionResult.SectionBox);
         view.IsSectionBoxActive = true;
         TryConfigure3DExportView(view);
         transaction.Commit();
-        doc.Regenerate();
+        diagnostics = $"{diagnostics} {(reusedView ? "Reused" : "Created")} 3D export view {view.Name} ({view.Id.Value}).";
         return view;
     }
 
@@ -443,41 +446,19 @@ public sealed class SyncRoomsExternalHandler : IExternalEventHandler
         }
     }
 
-    private static void DeleteTemporaryView(Document doc, ElementId viewId)
+    private static string BuildFloorPlan3DViewName(ViewPlan floorPlan)
     {
-        try
-        {
-            using Transaction transaction = new(doc, "BIM Photo Sync cleanup 3D floor section");
-            transaction.Start();
-            if (doc.GetElement(viewId) != null)
-            {
-                doc.Delete(viewId);
-            }
-            transaction.Commit();
-        }
-        catch (Exception ex)
-        {
-            ValidationLog.Write($"Could not delete temporary 3D view {viewId.Value}: {ex.Message}");
-        }
+        string desiredName = $"BPS 3D - {floorPlan.Name}";
+        return desiredName.Length > 80 ? desiredName[..80] : desiredName;
     }
 
-    private static string UniqueViewName(Document doc, string desiredName)
+    private static View3D? FindMatching3DView(Document doc, string viewName)
     {
-        string baseName = desiredName.Length > 80 ? desiredName[..80] : desiredName;
-        HashSet<string> existingNames = new FilteredElementCollector(doc)
-            .OfClass(typeof(View))
-            .Cast<View>()
-            .Select(view => view.Name)
-            .ToHashSet(StringComparer.OrdinalIgnoreCase);
-        if (!existingNames.Contains(baseName)) return baseName;
-
-        for (int i = 1; i < 1000; i++)
-        {
-            string candidate = $"{baseName} {i}";
-            if (!existingNames.Contains(candidate)) return candidate;
-        }
-
-        return $"{baseName} {DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()}";
+        return new FilteredElementCollector(doc)
+            .OfClass(typeof(View3D))
+            .Cast<View3D>()
+            .Where(view => !view.IsTemplate)
+            .FirstOrDefault(view => string.Equals(view.Name, viewName, StringComparison.OrdinalIgnoreCase));
     }
 
     private static FloorPlanSectionBoxResult BuildFloorPlanSectionBox(Document doc, ViewPlan floorPlan)

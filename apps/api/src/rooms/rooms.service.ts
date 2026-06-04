@@ -146,7 +146,7 @@ function buildSurfaceProgress(photos: RoomWithProgressPhotos["photos"]) {
     const surfacePhotos = photos.filter((photo) => photo.workSurface === surface);
     const completed = surfacePhotos.some((photo) => {
       const note = `${photo.description ?? ""} ${photo.aiDescription ?? ""}`;
-      return photo.progressStatus === ProgressStatus.COMPLETED || note.includes("완료");
+      return photo.progressStatus === ProgressStatus.COMPLETED || includesCompletionKeyword(note);
     });
     result[surface] = {
       status: completed ? "COMPLETED" : surfacePhotos.length > 0 ? "IN_PROGRESS" : "NOT_STARTED",
@@ -155,4 +155,7 @@ function buildSurfaceProgress(photos: RoomWithProgressPhotos["photos"]) {
     return result;
   }, {});
 }
-
+function includesCompletionKeyword(text: string | null | undefined) {
+  const normalized = text?.trim().toLowerCase() ?? "";
+  return normalized.includes("완료") || normalized.includes("completed") || normalized.includes("done");
+}

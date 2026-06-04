@@ -243,7 +243,18 @@ export class PhotosService {
 }
 
 function inferInitialProgressStatus(description: string | undefined) {
-  return description?.includes("완료") ? ProgressStatus.COMPLETED : ProgressStatus.PENDING_REVIEW;
+  return includesCompletionKeyword(description) ? ProgressStatus.COMPLETED : ProgressStatus.PENDING_REVIEW;
+}
+
+function includesCompletionKeyword(text: string | null | undefined) {
+  const normalized = text?.trim().toLowerCase() ?? "";
+  return normalized.includes("완료") || normalized.includes("completed") || normalized.includes("done");
+}
+
+function displayProgressStatus(photo: Pick<Photo, "progressStatus" | "description" | "aiDescription">) {
+  if (photo.progressStatus === ProgressStatus.COMPLETED) return ProgressStatus.COMPLETED;
+  const note = `${photo.description ?? ""} ${photo.aiDescription ?? ""}`;
+  return includesCompletionKeyword(note) ? ProgressStatus.COMPLETED : photo.progressStatus;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -269,7 +280,7 @@ export function toPhotoResponse(photo: Photo & { room?: unknown; tradeCategory?:
     worker_name: photo.workerName,
     description: photo.description,
     ai_description: photo.aiDescription,
-    progress_status: photo.progressStatus,
+    progress_status: displayProgressStatus(photo),
     object_key: photo.objectKey,
     photo_url: `${publicBase}/api/v1/photos/${photo.id}/object`,
     uploaded_at: photo.uploadedAt,
