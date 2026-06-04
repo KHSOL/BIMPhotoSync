@@ -10,7 +10,7 @@ import { ProjectsService } from "../projects/projects.service";
 import { GenerateReportDto, ReportChatDto, ReportQueryDto } from "./dto";
 
 type PhotoForReport = Prisma.PhotoGetPayload<{
-  include: { room: true; analyses: { orderBy: { createdAt: "desc" }; take: 1 } };
+  include: { room: true; tradeCategory: true; analyses: { orderBy: { createdAt: "desc" }; take: 1 } };
 }>;
 
 type ReportContent = {
@@ -150,7 +150,7 @@ export class ReportsService {
     return { data: toReportResponse(report) };
   }
 
-  async export(user: { sub: string; companyId: string }, reportId: string, format = "JSON"): Promise<ExportFile> {
+  async export(user: { sub: string; companyId: string }, reportId: string, format = "DOCX"): Promise<ExportFile> {
     const report = await this.prisma.generatedReport.findUnique({
       where: { id: reportId },
       include: { project: true, createdBy: { select: { id: true, name: true, email: true, role: true } } }
@@ -163,39 +163,19 @@ export class ReportsService {
     const safeTitle = safeFilename(response.title);
     const normalizedFormat = format.toUpperCase();
 
-    if (normalizedFormat === "XLSX") {
-      const images = await this.getReportImages(content);
-      return {
-        filename: `${safeTitle}.xlsx`,
-        contentType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        buffer: renderXlsx(content, images)
-      };
-    }
     if (normalizedFormat === "DOCX") {
+      const images = await this.getReportImages(content);
       return {
         filename: `${safeTitle}.docx`,
         contentType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        buffer: renderDocx(content)
+        buffer: renderDocx(content, images)
       };
     }
-    if (normalizedFormat === "PDF") {
-      return {
-        filename: `${safeTitle}.pdf`,
-        contentType: "application/pdf",
-        buffer: renderPdf(content)
-      };
-    }
-    if (normalizedFormat === "HWP") {
-      return {
-        filename: `${safeTitle}.hwpx`,
-        contentType: "application/vnd.hancom.hwpx",
-        buffer: renderHwpx(content)
-      };
-    }
+    const images = await this.getReportImages(content);
     return {
-      filename: `${safeTitle}.json`,
-      contentType: "application/json; charset=utf-8",
-      buffer: Buffer.from(JSON.stringify(content, null, 2), "utf8")
+      filename: `${safeTitle}.docx`,
+      contentType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      buffer: renderDocx(content, images)
     };
   }
 
@@ -317,7 +297,7 @@ export class ReportsService {
 
     return this.prisma.photo.findMany({
       where,
-      include: { room: true, analyses: { orderBy: { createdAt: "desc" }, take: 1 } },
+      include: { room: true, tradeCategory: true, analyses: { orderBy: { createdAt: "desc" }, take: 1 } },
       orderBy: [{ workDate: "asc" }, { takenAt: "asc" }, { uploadedAt: "asc" }],
       take: 120
     });
@@ -578,7 +558,7 @@ function photoSummary(photo: PhotoForReport) {
     work_date: photo.workDate.toISOString().slice(0, 10),
     room: roomLabel(photo),
     work_surface: photo.workSurface,
-    trade: photo.trade,
+    trade: photo.tradeCategory?.label ?? photo.trade,
     worker_name: photo.workerName,
     description: photo.description,
     ai_description: photo.aiDescription ?? photo.analyses[0]?.summary ?? null
@@ -705,36 +685,333 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function renderDocx(content: ReportContent) {
+function renderDocx(content: ReportContent, images: ReportImage[] = []) {
+  const templateEntries = readWordTemplateEntries();
+  const documentXml = reportDocumentXml(content, images);
+  const relsXml = wordDocumentRelsXml(images);
+  const mediaEntries = images.slice(0, 6).map((image, index) => ({
+    path: `word/media/report-photo-${index + 1}.${image.extension}`,
+    content: image.buffer
+  }));
+  const entries = upsertEntries(templateEntries, [
+    { path: "word/document.xml", content: textBuffer(documentXml) },
+    { path: "word/_rels/document.xml.rels", content: textBuffer(relsXml) },
+    ...mediaEntries
+  ]).map((entry) => entry.path === "[Content_Types].xml"
+    ? { ...entry, content: textBuffer(ensureWordImageContentTypes(entry.content.toString("utf8"), images.slice(0, 6))) }
+    : entry);
+
+  return zipStore(entries);
+}
+
+function reportDocumentXml(content: ReportContent, images: ReportImage[]) {
+  const photoImagesById = new Map(images.map((image, index) => [image.photoId, { ...image, relId: `rIdPhoto${index + 1}` }]));
+  const dateRange = content.situation.date_range ?? photoDateRange(content.comparison_photos) ?? content.generated_at;
   const body = [
-    paragraph(content.title, "Title"),
-    paragraph(`생성일: ${content.generated_at}`),
-    paragraph(`생성자: ${content.generated_by}`),
-    paragraph("상황분석", "Heading1"),
-    paragraph(content.analysis_result),
-    paragraph("변화 과정", "Heading1"),
-    ...content.progress_timeline.map((line) => paragraph(line)),
-    paragraph("비교 사진 근거", "Heading1"),
-    tableXml([
-      ["작업일자", "Room", "공사면", "공종", "작업자", "내용", "AI 요약"],
-      ...content.comparison_photos.map((photo) => [
-        photo.work_date,
-        photo.room,
-        photo.work_surface,
-        photo.trade,
-        photo.worker_name ?? "",
-        photo.description ?? "",
-        photo.ai_description ?? ""
-      ])
-    ]),
-    content.memo ? paragraph(`메모: ${content.memo}`) : ""
+    wordParagraph(reportDocumentTitle(content), { align: "center", bold: true, size: 36, spacingAfter: 260 }),
+    reportInfoTable(content, dateRange),
+    wordParagraph(""),
+    workLogTable(content),
+    wordParagraph(""),
+    judgmentTable(content, dateRange),
+    wordParagraph("※ 본 보고서는 BIM Photo Sync 현장 사진과 AI 분석 결과를 기준으로 작성되었습니다.", { size: 17 }),
+    wordParagraph("※ 실제 시공 상황과 최종 품질 판단은 현장 감독관 검토를 기준으로 확정하십시오.", { size: 17 }),
+    `<w:p><w:r><w:br w:type="page"/></w:r></w:p>`,
+    wordParagraph("시공 현장 사진", { align: "center", bold: true, size: 34, spacingAfter: 80 }),
+    wordParagraph("Construction Site Photos", { align: "center", bold: true, size: 20, spacingAfter: 220 }),
+    photoGridTable(content, photoImagesById)
   ].join("");
-  return zipStore([
-    { path: "[Content_Types].xml", content: textBuffer(contentTypesDocx()) },
-    { path: "_rels/.rels", content: textBuffer(rootRels("officeDocument", "word/document.xml")) },
-    { path: "word/document.xml", content: textBuffer(`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>${body}<w:sectPr><w:pgSz w:w="11906" w:h="16838"/><w:pgMar w:top="1134" w:right="850" w:bottom="1134" w:left="850"/></w:sectPr></w:body></w:document>`) },
-    { path: "word/styles.xml", content: textBuffer(wordStyles()) }
+
+  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture">
+  <w:body>${body}<w:sectPr><w:pgSz w:w="11906" w:h="16838"/><w:pgMar w:top="850" w:right="850" w:bottom="850" w:left="850" w:header="708" w:footer="708" w:gutter="0"/></w:sectPr></w:body>
+</w:document>`;
+}
+
+function reportInfoTable(content: ReportContent, dateRange: string) {
+  return wordTable([
+    [
+      wordTextCell("■ 공종", 1900, { bold: true, fill: "F2F6FB" }),
+      wordTextCell(dominantReportTrade(content), 3300),
+      wordTextCell("■ 시공 기간", 1900, { bold: true, fill: "F2F6FB" }),
+      wordTextCell(formatReportDateRange(dateRange), 3600)
+    ],
+    [
+      wordTextCell("■ 작성일", 1900, { bold: true, fill: "F2F6FB" }),
+      wordTextCell(formatKoreanDate(content.generated_at), 3300),
+      wordTextCell("■ 작성자", 1900, { bold: true, fill: "F2F6FB" }),
+      wordTextCell(content.generated_by, 3600)
+    ]
+  ], { width: 11700 });
+}
+
+function workLogTable(content: ReportContent) {
+  const rows = buildWorkLogRows(content);
+  return wordTable([
+    [
+      wordTextCell("날짜", 1900, { bold: true, fill: "EAF1F8", align: "center" }),
+      wordTextCell("작업 항목", 2500, { bold: true, fill: "EAF1F8", align: "center" }),
+      wordTextCell("작업 상세 내용", 5300, { bold: true, fill: "EAF1F8", align: "center" }),
+      wordTextCell("비고 / 주의사항", 2000, { bold: true, fill: "EAF1F8", align: "center" })
+    ],
+    ...rows.map((row) => [
+      wordTextCell(row.date, 1900, { align: "center", size: 18 }),
+      wordTextCell(row.item, 2500, { size: 18 }),
+      wordTextCell(row.detail, 5300, { size: 18 }),
+      wordTextCell(row.note, 2000, { size: 18 })
+    ])
+  ], { width: 11700 });
+}
+
+function judgmentTable(content: ReportContent, dateRange: string) {
+  const photoCount = content.comparison_photos.length;
+  const trade = dominantReportTrade(content);
+  const scope = content.situation.room ?? "현장 전체";
+  return wordTable([
+    [wordRawCell(wordParagraph("■ 종합 판단", { bold: true, size: 24 }), 11700, { gridSpan: 2, fill: "F8FAFC" })],
+    [wordTextCell("시공 범위", 2200, { bold: true, fill: "F2F6FB" }), wordTextCell(`${scope} / ${trade} / ${formatReportDateRange(dateRange)}`, 9500)],
+    [wordTextCell("품질 상태", 2200, { bold: true, fill: "F2F6FB" }), wordTextCell(content.analysis_result || "등록된 사진 기준 분석 결과가 없습니다.", 9500)],
+    [wordTextCell("완료 일자", 2200, { bold: true, fill: "F2F6FB" }), wordTextCell(reportLastDateText(content), 9500)],
+    [wordTextCell("특이 사항", 2200, { bold: true, fill: "F2F6FB" }), wordTextCell(content.memo ?? "현장 조건과 누락 사진 여부를 다음 점검 시 재확인합니다.", 9500)],
+    [wordTextCell("종합 의견", 2200, { bold: true, fill: "F2F6FB" }), wordTextCell(`${photoCount}장의 사진 근거를 날짜순으로 검토했습니다. 방, 공종, 공사면별 세부 근거는 사진 페이지를 확인하십시오.`, 9500)]
+  ], { width: 11700 });
+}
+
+function photoGridTable(
+  content: ReportContent,
+  imageByPhotoId: Map<string, ReportImage & { relId: string }>
+) {
+  const slots = Array.from({ length: 6 }, (_, index) => content.comparison_photos[index] ?? null);
+  const rows = [0, 2, 4].map((start) => [
+    photoSlotCell(slots[start], imageByPhotoId, 5850),
+    photoSlotCell(slots[start + 1], imageByPhotoId, 5850)
   ]);
+  return wordTable(rows, { width: 11700 });
+}
+
+function photoSlotCell(
+  photo: ReportContent["comparison_photos"][number] | null,
+  imageByPhotoId: Map<string, ReportImage & { relId: string }>,
+  width: number
+) {
+  const image = photo ? imageByPhotoId.get(photo.photo_id) : null;
+  const imageBlock = image
+    ? wordImageParagraph(image.relId, `report-photo-${photo?.photo_id ?? "empty"}`, 2280000, 1320000)
+    : wordParagraph("[ 사진 첨부 ]", { align: "center", bold: true, color: "667085", size: 20, spacingAfter: 80 });
+  const meta = photo
+    ? [
+        ["방", photo.room],
+        ["공종", photo.trade],
+        ["공사면", photo.work_surface],
+        ["공사일", formatKoreanDate(photo.work_date)],
+        ["작업내용", photo.description ?? photo.ai_description ?? "내용 없음"]
+      ]
+    : [
+        ["방", ""],
+        ["공종", ""],
+        ["공사면", ""],
+        ["공사일", "년 - 월 - 일"],
+        ["작업내용", ""]
+      ];
+  const metaXml = wordTable(meta.map(([label, value]) => [
+    wordTextCell(label, 1200, { bold: true, fill: "F8FAFC", size: 17 }),
+    wordTextCell(value, width - 1700, { size: 17 })
+  ]), { width: width - 500, nested: true });
+
+  return wordRawCell(`${imageBlock}${metaXml}`, width);
+}
+
+type WordTextOptions = {
+  align?: "left" | "center";
+  bold?: boolean;
+  color?: string;
+  fill?: string;
+  gridSpan?: number;
+  size?: number;
+  spacingAfter?: number;
+};
+
+function buildWorkLogRows(content: ReportContent) {
+  const rowsByDate = new Map<string, ReportContent["comparison_photos"]>();
+  for (const photo of content.comparison_photos) {
+    const key = photo.work_date || "날짜 없음";
+    rowsByDate.set(key, [...(rowsByDate.get(key) ?? []), photo]);
+  }
+  const reportDates = datesInReportRange(content.situation.date_range) ?? Array.from(rowsByDate.keys()).sort();
+  if (reportDates.length === 0) {
+    return [{
+      date: "-",
+      item: "사진 데이터 없음",
+      detail: content.analysis_result || "선택한 기간에 해당하는 사진이 없습니다.",
+      note: content.memo ?? "기간, 방, 공종 조건을 확인하십시오."
+    }];
+  }
+
+  return reportDates.slice(0, 31).map((date) => {
+    const photos = rowsByDate.get(date) ?? [];
+    if (photos.length === 0) {
+      return {
+        date: formatKoreanDateWithWeekday(date),
+        item: "등록 사진 없음",
+        detail: "선택한 조건에 해당하는 작업 사진이 등록되지 않았습니다.",
+        note: "현장 작업 여부와 사진 누락 여부 확인 필요"
+      };
+    }
+    const tradeNames = uniqueText(photos.map((photo) => photo.trade));
+    const surfaceNames = uniqueText(photos.map((photo) => photo.work_surface));
+    const descriptions = uniqueText(photos.map((photo) => photo.description ?? photo.ai_description ?? ""));
+    const workers = uniqueText(photos.map((photo) => photo.worker_name ?? ""));
+    return {
+      date: formatKoreanDateWithWeekday(date),
+      item: [surfaceNames.join(", "), tradeNames.join(", ")].filter(Boolean).join(" / ") || "현장 사진 기록",
+      detail: descriptions.join("\n") || `${photos.length}장의 사진 근거가 등록되었습니다.`,
+      note: workers.length > 0 ? `작성자: ${workers.join(", ")}` : "AI 분석 및 현장 검토 필요"
+    };
+  });
+}
+
+function datesInReportRange(value: string | null) {
+  const first = firstDateFromRange(value);
+  const last = lastDateFromRange(value);
+  if (!first && !last) return null;
+  const start = new Date(first ?? last ?? "");
+  const end = new Date(last ?? first ?? "");
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return null;
+  start.setUTCHours(0, 0, 0, 0);
+  end.setUTCHours(0, 0, 0, 0);
+  if (start.getTime() > end.getTime()) return null;
+  const dates: string[] = [];
+  for (let current = new Date(start); current.getTime() <= end.getTime(); current.setUTCDate(current.getUTCDate() + 1)) {
+    dates.push(current.toISOString().slice(0, 10));
+  }
+  return dates;
+}
+
+function uniqueText(values: string[]) {
+  return Array.from(new Set(values.map((value) => value.trim()).filter((value) => value.length > 0)));
+}
+
+function dominantReportTrade(content: ReportContent) {
+  if (content.situation.trade) return content.situation.trade;
+  const counts = new Map<string, number>();
+  for (const photo of content.comparison_photos) {
+    if (photo.trade) counts.set(photo.trade, (counts.get(photo.trade) ?? 0) + 1);
+  }
+  return Array.from(counts.entries()).sort((a, b) => b[1] - a[1])[0]?.[0] ?? "전체 공종";
+}
+
+function reportDocumentTitle(content: ReportContent) {
+  const dateRange = content.situation.date_range ?? photoDateRange(content.comparison_photos);
+  const firstDate = firstDateFromRange(dateRange);
+  if (!firstDate) return content.title;
+  const date = new Date(firstDate);
+  if (Number.isNaN(date.getTime())) return content.title;
+  const week = Math.max(1, Math.ceil(date.getDate() / 7));
+  return `${date.getFullYear()}년 ${date.getMonth() + 1}월 ${week}주차 시공일지`;
+}
+
+function reportLastDateText(content: ReportContent) {
+  const dates = content.comparison_photos.map((photo) => photo.work_date).filter(Boolean).sort();
+  return dates.length > 0 ? `${formatKoreanDateWithWeekday(dates[dates.length - 1])} 기준` : "완료일 미확정";
+}
+
+function formatReportDateRange(value: string) {
+  const first = firstDateFromRange(value);
+  const last = lastDateFromRange(value);
+  if (!first && !last) return value;
+  if (first && last && first !== last) {
+    return `${formatKoreanDate(first)} ~ ${formatKoreanDate(last)} (총 ${inclusiveDayCount(first, last)}일)`;
+  }
+  return formatKoreanDate(first ?? last ?? value);
+}
+
+function firstDateFromRange(value: string | null) {
+  return value?.match(/\d{4}-\d{2}-\d{2}/)?.[0] ?? null;
+}
+
+function lastDateFromRange(value: string | null) {
+  const matches = value?.match(/\d{4}-\d{2}-\d{2}/g) ?? [];
+  return matches[matches.length - 1] ?? null;
+}
+
+function inclusiveDayCount(from: string, to: string) {
+  const fromDate = new Date(from);
+  const toDate = new Date(to);
+  if (Number.isNaN(fromDate.getTime()) || Number.isNaN(toDate.getTime())) return 1;
+  return Math.max(1, Math.round((toDate.getTime() - fromDate.getTime()) / 86400000) + 1);
+}
+
+function formatKoreanDateWithWeekday(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  const weekdays = ["일", "월", "화", "수", "목", "금", "토"];
+  return `${date.getFullYear()}년 ${date.getMonth() + 1}월 ${date.getDate()}일 (${weekdays[date.getDay()]})`;
+}
+
+function wordTable(rows: string[][], options: { width: number; nested?: boolean }) {
+  const borders = options.nested
+    ? '<w:tblBorders><w:top w:val="single" w:sz="4" w:color="D8E0EA"/><w:left w:val="single" w:sz="4" w:color="D8E0EA"/><w:bottom w:val="single" w:sz="4" w:color="D8E0EA"/><w:right w:val="single" w:sz="4" w:color="D8E0EA"/><w:insideH w:val="single" w:sz="4" w:color="D8E0EA"/><w:insideV w:val="single" w:sz="4" w:color="D8E0EA"/></w:tblBorders>'
+    : '<w:tblBorders><w:top w:val="single" w:sz="6" w:color="CBD5E1"/><w:left w:val="single" w:sz="6" w:color="CBD5E1"/><w:bottom w:val="single" w:sz="6" w:color="CBD5E1"/><w:right w:val="single" w:sz="6" w:color="CBD5E1"/><w:insideH w:val="single" w:sz="4" w:color="CBD5E1"/><w:insideV w:val="single" w:sz="4" w:color="CBD5E1"/></w:tblBorders>';
+  return `<w:tbl><w:tblPr><w:tblW w:w="${options.width}" w:type="dxa"/><w:tblLayout w:type="fixed"/>${borders}<w:tblCellMar><w:top w:w="120" w:type="dxa"/><w:left w:w="120" w:type="dxa"/><w:bottom w:w="120" w:type="dxa"/><w:right w:w="120" w:type="dxa"/></w:tblCellMar></w:tblPr>${rows.map((row) => `<w:tr>${row.join("")}</w:tr>`).join("")}</w:tbl>`;
+}
+
+function wordTextCell(text: string, width: number, options: WordTextOptions = {}) {
+  const paragraphs = String(text || " ").split("\n").map((line) => wordParagraph(line, options)).join("");
+  return wordRawCell(paragraphs, width, options);
+}
+
+function wordRawCell(raw: string, width: number, options: WordTextOptions = {}) {
+  const fill = options.fill ? `<w:shd w:fill="${options.fill}"/>` : "";
+  const gridSpan = options.gridSpan ? `<w:gridSpan w:val="${options.gridSpan}"/>` : "";
+  return `<w:tc><w:tcPr><w:tcW w:w="${width}" w:type="dxa"/>${gridSpan}${fill}<w:vAlign w:val="center"/></w:tcPr>${raw}</w:tc>`;
+}
+
+function wordParagraph(text: string, options: WordTextOptions = {}) {
+  const align = options.align === "center" ? '<w:jc w:val="center"/>' : "";
+  const spacing = `<w:spacing w:after="${options.spacingAfter ?? 80}" w:line="260" w:lineRule="auto"/>`;
+  const bold = options.bold ? "<w:b/>" : "";
+  const color = options.color ? `<w:color w:val="${options.color}"/>` : "";
+  const size = `<w:sz w:val="${options.size ?? 20}"/>`;
+  return `<w:p><w:pPr>${align}${spacing}</w:pPr><w:r><w:rPr>${bold}${color}${size}</w:rPr><w:t xml:space="preserve">${xmlEscape(text)}</w:t></w:r></w:p>`;
+}
+
+function wordImageParagraph(relId: string, name: string, cx: number, cy: number) {
+  return `<w:p><w:pPr><w:jc w:val="center"/><w:spacing w:after="80"/></w:pPr><w:r><w:drawing><wp:inline distT="0" distB="0" distL="0" distR="0"><wp:extent cx="${cx}" cy="${cy}"/><wp:docPr id="${xmlEscape(relId.replace(/\D/g, "") || "1")}" name="${xmlEscape(name)}"/><wp:cNvGraphicFramePr><a:graphicFrameLocks noChangeAspect="1"/></wp:cNvGraphicFramePr><a:graphic><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture"><pic:pic><pic:nvPicPr><pic:cNvPr id="0" name="${xmlEscape(name)}"/><pic:cNvPicPr/></pic:nvPicPr><pic:blipFill><a:blip r:embed="${relId}"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill><pic:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="${cx}" cy="${cy}"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></pic:spPr></pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing></w:r></w:p>`;
+}
+
+function wordDocumentRelsXml(images: ReportImage[]) {
+  const relationships = images.slice(0, 6).map((image, index) => {
+    return `<Relationship Id="rIdPhoto${index + 1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/report-photo-${index + 1}.${image.extension}"/>`;
+  }).join("");
+  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">${relationships}</Relationships>`;
+}
+
+function ensureWordImageContentTypes(xml: string, images: ReportImage[]) {
+  let current = xml;
+  if (images.some((image) => image.extension === "jpg") && !current.includes('Extension="jpg"')) {
+    current = current.replace("</Types>", '<Default Extension="jpg" ContentType="image/jpeg"/></Types>');
+  }
+  if (images.some((image) => image.extension === "png") && !current.includes('Extension="png"')) {
+    current = current.replace("</Types>", '<Default Extension="png" ContentType="image/png"/></Types>');
+  }
+  return current;
+}
+
+function readWordTemplateEntries() {
+  return unzipEntries(readFileSync(wordReportTemplatePath()));
+}
+
+function wordReportTemplatePath() {
+  const candidates = [
+    join(process.cwd(), "apps", "api", "templates", "report-template.docx"),
+    join(process.cwd(), "templates", "report-template.docx"),
+    join(__dirname, "..", "..", "templates", "report-template.docx")
+  ];
+  const found = candidates.find((candidate) => existsSync(candidate));
+  if (!found) {
+    throw new Error("Report template not found. Expected apps/api/templates/report-template.docx.");
+  }
+  return found;
 }
 
 function renderXlsx(content: ReportContent, images: ReportImage[] = []) {
@@ -1356,41 +1633,6 @@ function renderHwpx(content: ReportContent) {
   ]);
 }
 
-function renderPdf(content: ReportContent) {
-  const lines = [
-    content.title,
-    `생성일: ${content.generated_at}`,
-    `생성자: ${content.generated_by}`,
-    "",
-    "상황분석",
-    content.analysis_result,
-    "",
-    "변화 과정",
-    ...content.progress_timeline.slice(0, 18),
-    "",
-    "비교 사진 근거",
-    ...content.comparison_photos.slice(0, 18).map((photo) => `${photo.work_date} ${photo.room} ${photo.work_surface}/${photo.trade} ${photo.description ?? photo.ai_description ?? ""}`),
-    content.memo ? `메모: ${content.memo}` : ""
-  ].flatMap((line) => wrapText(line, 54)).slice(0, 58);
-  const stream = [
-    "BT",
-    "/F1 10 Tf",
-    "50 790 Td",
-    "14 TL",
-    ...lines.map((line, index) => `${index === 0 ? "" : "T*"} ${pdfHexText(line)} Tj`),
-    "ET"
-  ].join("\n");
-  const objects = [
-    "<< /Type /Catalog /Pages 2 0 R >>",
-    "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
-    "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >>",
-    `<< /Length ${Buffer.byteLength(stream, "binary")} >>\nstream\n${stream}\nendstream`,
-    "<< /Type /Font /Subtype /Type0 /BaseFont /HYSMyeongJoStd-Medium /Encoding /UniKS-UCS2-H /DescendantFonts [6 0 R] >>",
-    "<< /Type /Font /Subtype /CIDFontType0 /BaseFont /HYSMyeongJoStd-Medium /CIDSystemInfo << /Registry (Adobe) /Ordering (Korea1) /Supplement 2 >> >>"
-  ];
-  return buildPdf(objects);
-}
-
 function workbookXml(sheets: SheetDefinition[]) {
   const sheetXml = sheets.map((sheet, index) => {
     return `<sheet name="${xmlEscape(sheet.name)}" sheetId="${index + 1}" r:id="rId${index + 1}"/>`;
@@ -1525,44 +1767,6 @@ function crc32(buffer: Buffer) {
     }
   }
   return (crc ^ 0xffffffff) >>> 0;
-}
-
-function buildPdf(objects: string[]) {
-  const parts: Buffer[] = [textBuffer("%PDF-1.7\n")];
-  const offsets: number[] = [];
-  let offset = parts[0].length;
-  objects.forEach((object, index) => {
-    offsets.push(offset);
-    const part = textBuffer(`${index + 1} 0 obj\n${object}\nendobj\n`);
-    parts.push(part);
-    offset += part.length;
-  });
-  const xrefOffset = offset;
-  const xref = [
-    `xref\n0 ${objects.length + 1}`,
-    "0000000000 65535 f ",
-    ...offsets.map((item) => `${String(item).padStart(10, "0")} 00000 n `),
-    `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>`,
-    `startxref\n${xrefOffset}\n%%EOF`
-  ].join("\n");
-  parts.push(textBuffer(xref));
-  return Buffer.concat(parts);
-}
-
-function pdfHexText(text: string) {
-  return `<${Buffer.from(`\ufeff${text}`, "utf16le").swap16().toString("hex")}>`;
-}
-
-function wrapText(text: string, maxLength: number) {
-  if (text.length <= maxLength) return [text];
-  const lines: string[] = [];
-  let current = text;
-  while (current.length > maxLength) {
-    lines.push(current.slice(0, maxLength));
-    current = current.slice(maxLength);
-  }
-  if (current) lines.push(current);
-  return lines;
 }
 
 function textBuffer(value: string) {

@@ -5,22 +5,28 @@ import {
   ChevronLeft,
   ChevronRight,
   Download,
-  Filter,
   KeyRound,
   RefreshCw,
-  Search
+  Search,
+  Trash2
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
-import { apiJson, authHeaders, Project, readProjectId, readSession, Room, saveProjectId } from "../client";
+import { apiJson, authHeaders, canAccessAdminBoards, Project, readProjectId, readSession, Room, saveProjectId, TradeCategory, User } from "../client";
 
 type ProjectList = { data: Project[] };
 type RoomList = { data: Room[] };
+type TradeCategoryList = { data: TradeCategory[] };
+type TradeCategoryResult = { data: TradeCategory };
 
 export default function RoomsPage() {
   const [token, setToken] = useState("");
+  const [user, setUser] = useState<User | null>(null);
   const [projects, setProjects] = useState<Project[]>([]);
   const [projectId, setProjectId] = useState("");
   const [rooms, setRooms] = useState<Room[]>([]);
+  const [tradeCategories, setTradeCategories] = useState<TradeCategory[]>([]);
+  const [selectedTradeCategoryIds, setSelectedTradeCategoryIds] = useState<string[]>([]);
+  const [newTradeLabel, setNewTradeLabel] = useState("");
   const [selectedRoomId, setSelectedRoomId] = useState("");
   const [query, setQuery] = useState("");
   const [page, setPage] = useState(1);
@@ -30,6 +36,7 @@ export default function RoomsPage() {
     const session = readSession();
     if (!session) return;
     setToken(session.token);
+    setUser(session.user);
     const storedProjectId = readProjectId();
     setProjectId(storedProjectId);
     void loadProjects(session.token, storedProjectId).catch((err) => setStatus(err.message));
@@ -45,8 +52,18 @@ export default function RoomsPage() {
     setProjectId(nextProjectId);
     if (nextProjectId) {
       saveProjectId(nextProjectId);
+      await loadTradeCategories(nextToken, nextProjectId);
       await loadRooms(nextToken, nextProjectId);
     }
+  }
+
+  async function loadTradeCategories(nextToken = token, nextProjectId = projectId) {
+    if (!nextProjectId) return;
+    const json = await apiJson<TradeCategoryList>(`/projects/${nextProjectId}/trade-categories`, {
+      headers: authHeaders(nextToken)
+    });
+    setTradeCategories(json.data);
+    setSelectedTradeCategoryIds(json.data.map((category) => category.id));
   }
 
   async function loadRooms(nextToken = token, nextProjectId = projectId, nextQuery = query) {
@@ -68,6 +85,7 @@ export default function RoomsPage() {
     setProjectId(nextProjectId);
     saveProjectId(nextProjectId);
     setSelectedRoomId("");
+    void loadTradeCategories(token, nextProjectId).catch((err) => setStatus(err.message));
     void loadRooms(token, nextProjectId).catch((err) => setStatus(err.message));
   }
 
@@ -97,13 +115,51 @@ export default function RoomsPage() {
   const visibleRooms = useMemo(() => rooms.slice((page - 1) * pageSize, page * pageSize), [page, rooms]);
   const selectedRoom = rooms.find((room) => room.id === selectedRoomId) ?? visibleRooms[0] ?? rooms[0];
   const selectedProject = projects.find((project) => project.id === projectId);
-  const mappedRooms = rooms.filter((room) => room.bim_photo_room_id).length;
-  const roomSummary = [
-    ["전체 방", String(rooms.length), "조회됨", "blue"],
-    ["BIM ID 연결", String(mappedRooms), `${rooms.length ? Math.round((mappedRooms / rooms.length) * 100) : 0}%`, "green"],
-    ["현재 표시", String(visibleRooms.length), `${page} / ${pageCount}`, "orange"],
-    ["선택 방", selectedRoom?.room_number ?? "-", selectedRoom?.level_name ?? "-", "red"]
-  ];
+  const activeTradeCategoryIds = selectedTradeCategoryIds;
+  const allTradesSelected = tradeCategories.length > 0 && activeTradeCategoryIds.length === tradeCategories.length;
+  const canManageTradeCategories = canAccessAdminBoards(user);
+
+  function toggleTradeCategory(categoryId: string) {
+    setSelectedTradeCategoryIds((current) => {
+      return current.includes(categoryId) ? current.filter((id) => id !== categoryId) : [...current, categoryId];
+    });
+  }
+
+  function toggleAllTradeCategories() {
+    setSelectedTradeCategoryIds((current) => {
+      const allIds = tradeCategories.map((category) => category.id);
+      return current.length === allIds.length ? [] : allIds;
+    });
+  }
+
+  async function addTradeCategory() {
+    const label = newTradeLabel.trim();
+    if (!label || !projectId) return;
+    const wasAllSelected = allTradesSelected;
+    const json = await apiJson<TradeCategoryResult>(`/projects/${projectId}/trade-categories`, {
+      method: "POST",
+      headers: { ...authHeaders(token), "Content-Type": "application/json" },
+      body: JSON.stringify({ label })
+    });
+    setTradeCategories((current) => [...current, json.data]);
+    if (wasAllSelected) setSelectedTradeCategoryIds((current) => [...current, json.data.id]);
+    setNewTradeLabel("");
+    setStatus(`${json.data.label} 공종을 추가했습니다.`);
+  }
+
+  async function removeTradeCategory(categoryId: string) {
+    if (!projectId) return;
+    const category = tradeCategories.find((trade) => trade.id === categoryId);
+    if (!category || category.is_system) return;
+    if (!window.confirm(`${category.label} 공종을 삭제할까요?`)) return;
+    await apiJson<TradeCategoryResult>(`/projects/${projectId}/trade-categories/${categoryId}`, {
+      method: "DELETE",
+      headers: authHeaders(token)
+    });
+    setTradeCategories((current) => current.filter((trade) => trade.id !== categoryId));
+    setSelectedTradeCategoryIds((current) => current.filter((id) => id !== categoryId));
+    setStatus(`${category.label} 공종을 삭제했습니다.`);
+  }
 
   if (!token) {
     return (
@@ -152,9 +208,6 @@ export default function RoomsPage() {
           <Search size={17} />
           <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="방 이름 / 번호 / 층 검색" />
         </label>
-        <button className="filter-button" type="button" onClick={() => loadRooms().catch((err) => setStatus(err.message))}>
-          <Filter size={16} /> 필터
-        </button>
         <button className="filter-button" type="button" onClick={resetSearch}>
           전체보기
         </button>
@@ -163,36 +216,48 @@ export default function RoomsPage() {
       <section className="rooms-layout">
         <article className="panel ref-card room-table-card">
           <h2 className="section-title">전체 {rooms.length}개 방</h2>
-          <p className="muted progress-help">
-            공정 진행률은 방 안의 공사면별 상태 점수를 합산해 계산합니다. 방 상태는 전체 공사면이 완료일 때만 완료로 표시됩니다.
-          </p>
-          <div className="progress-rule-grid" aria-label="공정 진행률 기준">
-            <div className="progress-rule-card">
-              <strong>시작 전: 0점</strong>
-              <span>해당 공사면에 업로드된 사진이 없으면 시작 전으로 계산합니다.</span>
+          <div className="trade-selector-panel" aria-label="진행률 계산 공종 선택">
+            <div>
+              <strong>진행률 계산 공종</strong>
+              <span>{activeTradeCategoryIds.length === 0 ? "선택된 공종 없음" : allTradesSelected ? "전체 공종 기준" : `${activeTradeCategoryIds.length}개 공종 기준`}</span>
             </div>
-            <div className="progress-rule-card">
-              <strong>진행 중: 0.5점</strong>
-              <span>해당 공사면에 사진이 1장 이상 있고 완료 근거가 없으면 진행 중으로 계산합니다.</span>
+            <div className="trade-checkbox-grid">
+              <label className="trade-checkbox">
+                <input type="checkbox" checked={allTradesSelected} onChange={toggleAllTradeCategories} />
+                <span>전체 공종</span>
+              </label>
+              {tradeCategories.map((category) => (
+                <label className="trade-checkbox" key={category.id}>
+                  <input
+                    type="checkbox"
+                    checked={activeTradeCategoryIds.includes(category.id)}
+                    onChange={() => toggleTradeCategory(category.id)}
+                  />
+                  <span>{category.label}</span>
+                </label>
+              ))}
             </div>
-            <div className="progress-rule-card">
-              <strong>완료: 1점</strong>
-              <span>작업 내용, 메모, AI 검토에 완료 근거가 있으면 완료로 계산합니다.</span>
-            </div>
-            <div className="progress-rule-card">
-              <strong>방 진행률</strong>
-              <span>(공사면 점수 합계 / 공사면 수) x 100% 입니다.</span>
-            </div>
-          </div>
-          <div className="status-summary-grid">
-            {roomSummary.map(([label, value, percent, tone]) => (
-              <div className="status-summary-card" key={label}>
-                <i className={`${tone}-dot`} />
-                <span>{label}</span>
-                <strong>{value}</strong>
-                <small>({percent})</small>
+            {canManageTradeCategories ? (
+              <div className="trade-manager-row">
+                <label className="field compact">
+                  <span className="label">공종 추가</span>
+                  <input className="input" value={newTradeLabel} onChange={(event) => setNewTradeLabel(event.target.value)} placeholder="예: 석고보드" />
+                </label>
+                <button className="button" type="button" onClick={() => addTradeCategory().catch((err) => setStatus(err.message))}>
+                  공종 추가
+                </button>
+                <div className="filter-chip-row">
+                  {tradeCategories.filter((trade) => !trade.is_system).length === 0 ? <span className="muted">삭제 가능한 사용자 지정 공종이 없습니다.</span> : null}
+                  {tradeCategories.filter((trade) => !trade.is_system).map((trade) => (
+                    <button className="filter-chip danger" key={trade.id} type="button" onClick={() => removeTradeCategory(trade.id).catch((err) => setStatus(err.message))} aria-label={`${trade.label} 공종 삭제`}>
+                      <Trash2 size={14} />
+                      <span>{trade.label}</span>
+                      <strong>삭제</strong>
+                    </button>
+                  ))}
+                </div>
               </div>
-            ))}
+            ) : null}
           </div>
 
           <div className="room-table-wrap">
@@ -204,8 +269,6 @@ export default function RoomsPage() {
                 <col className="room-col-level" />
                 <col className="room-col-progress" />
                 <col className="room-col-status" />
-                <col className="room-col-photo" />
-                <col className="room-col-bim" />
                 <col className="room-col-action" />
               </colgroup>
               <thead>
@@ -216,15 +279,13 @@ export default function RoomsPage() {
                   <th>층</th>
                   <th>공정 진행률</th>
                   <th>상태</th>
-                  <th>최근 사진</th>
-                  <th>BIM_PHOTO_ROOM_ID</th>
                   <th>작업</th>
                 </tr>
               </thead>
               <tbody>
                 {visibleRooms.map((room) => {
-                  const progress = roomProgressPercent(room);
-                  const progressStatus = roomProgressStatus(room);
+                  const progress = roomProgressPercent(room, activeTradeCategoryIds);
+                  const progressStatus = roomProgressStatus(room, activeTradeCategoryIds);
                   return (
                     <tr key={room.id} className={room.id === selectedRoom?.id ? "selected" : ""} onClick={() => setSelectedRoomId(room.id)}>
                       <td><input type="checkbox" aria-label={`${room.room_name} 선택`} checked={room.id === selectedRoom?.id} readOnly /></td>
@@ -238,9 +299,11 @@ export default function RoomsPage() {
                         </div>
                       </td>
                       <td className="status-cell"><span className={progressStatus.badgeClass}>{progressStatus.label}</span></td>
-                      <td><div className="mini-photo"><div className="photo-fallback" /></div></td>
-                      <td><code>{room.bim_photo_room_id}</code></td>
-                      <td><a href={`/photos?project_id=${projectId}&room_id=${room.id}`}>사진</a></td>
+                      <td>
+                        <a className="small-button" href={`/photos?tab=list&project_id=${projectId}&room_id=${room.id}`}>
+                          사진
+                        </a>
+                      </td>
                     </tr>
                   );
                 })}
@@ -276,15 +339,15 @@ export default function RoomsPage() {
   );
 }
 
-function roomProgressStatus(room: Room) {
-  const values = Object.values(room.progress_by_surface ?? {});
+function roomProgressStatus(room: Room, tradeCategoryIds: string[]) {
+  const values = roomTradeProgressValues(room, tradeCategoryIds);
   if (values.length > 0 && values.every((item) => item.status === "COMPLETED")) return { label: "완료", badgeClass: "badge green" };
   if (values.some((item) => item.status === "IN_PROGRESS" || item.status === "COMPLETED")) return { label: "진행중", badgeClass: "badge orange" };
   return { label: "시작 전", badgeClass: "badge red" };
 }
 
-function roomProgressPercent(room: Room) {
-  const values = Object.values(room.progress_by_surface ?? {});
+function roomProgressPercent(room: Room, tradeCategoryIds: string[]) {
+  const values = roomTradeProgressValues(room, tradeCategoryIds);
   if (values.length === 0) return 0;
   const score = values.reduce((sum, item) => {
     if (item.status === "COMPLETED") return sum + 1;
@@ -292,4 +355,8 @@ function roomProgressPercent(room: Room) {
     return sum;
   }, 0);
   return Math.round((score / values.length) * 100);
+}
+
+function roomTradeProgressValues(room: Room, tradeCategoryIds: string[]) {
+  return tradeCategoryIds.map((tradeCategoryId) => room.progress_by_trade_category?.[tradeCategoryId] ?? { status: "NOT_STARTED" as const, photo_count: 0 });
 }

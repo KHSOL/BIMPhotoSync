@@ -1,6 +1,6 @@
 "use client";
 
-import { AlertCircle, BarChart3, Building2, Camera, CheckCircle2, FileText, Home, KeyRound, RefreshCw } from "lucide-react";
+import { AlertCircle, Building2, Camera, CheckCircle2, FileText, Home, KeyRound, RefreshCw } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { apiJson, authHeaders, canAccessAdminBoards, clearProjectId, readProjectId, readSession, saveProjectId, type User } from "../client";
 import { defaultSurfaceOptions, defaultTradeOptions, labelForOption } from "../photo-options";
@@ -52,7 +52,6 @@ export default function DashboardPage() {
   const [token, setToken] = useState("");
   const [selectedProjectId, setSelectedProjectId] = useState("");
   const [summary, setSummary] = useState<DashboardSummary["data"] | null>(null);
-  const [status, setStatus] = useState("");
   const [user, setUser] = useState<User | null>(null);
 
   useEffect(() => {
@@ -70,7 +69,6 @@ export default function DashboardPage() {
     const query = projectId ? `?project_id=${encodeURIComponent(projectId)}` : "";
     const json = await apiJson<DashboardSummary>(`/dashboard/summary${query}`, { headers: authHeaders(nextToken) });
     setSummary(json.data);
-    setStatus(projectId ? "선택한 프로젝트 현황을 불러왔습니다." : "전체 프로젝트 현황을 불러왔습니다.");
   }
 
   async function handleSummaryError(error: unknown, nextToken = token, attemptedProjectId = selectedProjectId) {
@@ -79,10 +77,8 @@ export default function DashboardPage() {
       clearProjectId();
       setSelectedProjectId("");
       await loadSummary(nextToken, "");
-      setStatus("이전 계정의 프로젝트 선택을 초기화하고 전체 현황을 불러왔습니다.");
       return;
     }
-    setStatus(message);
     setSummary(emptySummary);
   }
 
@@ -139,14 +135,10 @@ export default function DashboardPage() {
               ))}
             </select>
           </label>
-          <button className="filter-button" type="button" onClick={() => loadSummary().catch((error) => handleSummaryError(error))}>
-            <RefreshCw size={16} />
-            새로고침
-          </button>
         </div>
       </header>
 
-      <section className="metric-grid six">
+      <section className={`metric-grid dashboard-metric-grid ${showAdminBoards ? "six" : "five"}`}>
         <Metric icon={<Home />} label="방" value={summary.totals.rooms} sub="동기화된 방" tone="blue" />
         <Metric icon={<Camera />} label="사진" value={summary.totals.photos} sub="업로드 사진" tone="sky" />
         <Metric icon={<CheckCircle2 />} label="AI 분석 완료" value={summary.totals.analyzed_photos} sub="분석 내용 저장" tone="green" />
@@ -163,31 +155,6 @@ export default function DashboardPage() {
               summary.trade_distribution.map((row) => <DistributionRow key={row.trade} label={labelForOption(defaultTradeOptions, row.trade)} count={row.count} total={summary.totals.photos} />)
             ) : (
               <p className="muted">아직 업로드된 사진이 없습니다.</p>
-            )}
-          </div>
-        </article>
-
-        <article className="panel ref-card">
-          <PanelTitle title="층별 방 분포" href="/rooms" />
-          <div className="level-bar-list">
-            {summary.level_distribution.length > 0 ? (
-              summary.level_distribution.map((row) => {
-                const percent = percentOf(row.count, summary.totals.rooms);
-                return (
-                  <div className="level-bar-row" key={row.level_name}>
-                    <div className="level-bar-label">
-                      <strong>{row.level_name}</strong>
-                      <small>{row.count.toLocaleString()}개 방</small>
-                    </div>
-                    <div className="level-bar-track" aria-label={`${row.level_name} ${percent}%`}>
-                      <span style={{ "--value": `${percent}%` } as React.CSSProperties} />
-                    </div>
-                    <em>{percent}%</em>
-                  </div>
-                );
-              })
-            ) : (
-              <p className="muted">아직 동기화된 방이 없습니다.</p>
             )}
           </div>
         </article>
@@ -245,11 +212,10 @@ export default function DashboardPage() {
         </article> : null}
 
         <article className="panel ref-card">
-          <PanelTitle title="상태" />
+          <PanelTitle title="프로젝트 연결" />
           <div className="issue-box">
-            <strong>{status}</strong>
-            <span><BarChart3 size={16} /> 데이터 기준: API 집계</span>
-            <span>프로젝트 수 <b>{summary.projects.length}</b></span>
+            <strong>{summary.projects.length.toLocaleString()}개</strong>
+            <span>연결된 프로젝트</span>
           </div>
         </article>
       </section>

@@ -1,34 +1,18 @@
 import { Injectable, NotFoundException } from "@nestjs/common";
 import { randomUUID } from "crypto";
-import { Prisma, ProgressStatus, WorkSurface } from "@prisma/client";
+import { ProgressStatus, Trade } from "@prisma/client";
 import { PrismaService } from "../prisma/prisma.service";
 import { ProjectsService } from "../projects/projects.service";
 import { CreateRoomDto, UpdateRoomDto } from "./dto";
 
-const workSurfaces = [
-  WorkSurface.FLOOR,
-  WorkSurface.WALL,
-  WorkSurface.CEILING,
-  WorkSurface.WINDOW,
-  WorkSurface.DOOR,
-  WorkSurface.PIPE,
-  WorkSurface.ELECTRIC,
-  WorkSurface.OTHER
-] as const;
-
-type SurfaceProgressStatus = "NOT_STARTED" | "IN_PROGRESS" | "COMPLETED";
-type RoomWithProgressPhotos = Prisma.RoomGetPayload<{
-  include: {
-    photos: {
-      select: {
-        workSurface: true;
-        description: true;
-        aiDescription: true;
-        progressStatus: true;
-      };
-    };
-  };
-}>;
+type TradeProgressStatus = "NOT_STARTED" | "IN_PROGRESS" | "COMPLETED";
+type RoomProgressPhoto = {
+  tradeCategoryId: string | null;
+  trade?: Trade;
+  description: string | null;
+  aiDescription: string | null;
+  progressStatus: ProgressStatus;
+};
 
 @Injectable()
 export class RoomsService {
@@ -39,34 +23,41 @@ export class RoomsService {
 
   async list(user: { sub: string; companyId: string }, projectId: string, query?: { q?: string }) {
     await this.projects.assertProjectAccess(user.sub, user.companyId, projectId);
-    const rooms = await this.prisma.room.findMany({
-      where: {
-        projectId,
-        status: "ACTIVE",
-        ...(query?.q
-          ? {
-              OR: [
-                { roomName: { contains: query.q, mode: "insensitive" } },
-                { roomNumber: { contains: query.q, mode: "insensitive" } },
-                { levelName: { contains: query.q, mode: "insensitive" } }
-              ]
+    const [rooms, tradeCategories] = await this.prisma.$transaction([
+      this.prisma.room.findMany({
+        where: {
+          projectId,
+          status: "ACTIVE",
+          ...(query?.q
+            ? {
+                OR: [
+                  { roomName: { contains: query.q, mode: "insensitive" } },
+                  { roomNumber: { contains: query.q, mode: "insensitive" } },
+                  { levelName: { contains: query.q, mode: "insensitive" } }
+                ]
+              }
+            : {})
+        },
+        include: {
+          photos: {
+            where: { status: "ACTIVE" },
+            select: {
+              tradeCategoryId: true,
+              trade: true,
+              description: true,
+              aiDescription: true,
+              progressStatus: true
             }
-          : {})
-      },
-      include: {
-        photos: {
-          where: { status: "ACTIVE" },
-          select: {
-            workSurface: true,
-            description: true,
-            aiDescription: true,
-            progressStatus: true
           }
-        }
-      },
-      orderBy: [{ levelName: "asc" }, { roomNumber: "asc" }, { roomName: "asc" }]
-    });
-    return { data: rooms.map(toRoomResponse) };
+        },
+        orderBy: [{ levelName: "asc" }, { roomNumber: "asc" }, { roomName: "asc" }]
+      }),
+      this.prisma.tradeCategory.findMany({
+        where: { projectId, isActive: true },
+        select: { id: true, code: true }
+      })
+    ]);
+    return { data: rooms.map((room) => toRoomResponse(room, tradeCategories)) };
   }
 
   async create(user: { sub: string; companyId: string; role: string }, projectId: string, dto: CreateRoomDto) {
@@ -79,7 +70,7 @@ export class RoomsService {
         roomName: dto.room_name,
         levelName: dto.level_name,
         locationText: dto.location_text
-      }
+      },
     });
     return { data: toRoomResponse(room) };
   }
@@ -118,14 +109,9 @@ export function toRoomResponse(room: {
   levelName: string | null;
   locationText: string | null;
   status: string;
-  photos?: Array<{
-    workSurface: WorkSurface;
-    description: string | null;
-    aiDescription: string | null;
-    progressStatus: ProgressStatus;
-  }>;
-}) {
-  const progressBySurface = room.photos ? buildSurfaceProgress(room.photos) : undefined;
+  photos?: RoomProgressPhoto[];
+}, tradeCategories: Array<{ id: string; code: string }> = []) {
+  const progressByTradeCategory = room.photos ? buildTradeCategoryProgress(room.photos, tradeCategories) : undefined;
   return {
     id: room.id,
     project_id: room.projectId,
@@ -137,24 +123,27 @@ export function toRoomResponse(room: {
     level_name: room.levelName,
     location_text: room.locationText,
     status: room.status,
-    ...(progressBySurface ? { progress_by_surface: progressBySurface } : {})
+    ...(progressByTradeCategory ? { progress_by_trade_category: progressByTradeCategory } : {})
   };
 }
 
-function buildSurfaceProgress(photos: RoomWithProgressPhotos["photos"]) {
-  return workSurfaces.reduce<Record<string, { status: SurfaceProgressStatus; photo_count: number }>>((result, surface) => {
-    const surfacePhotos = photos.filter((photo) => photo.workSurface === surface);
-    const completed = surfacePhotos.some((photo) => {
-      const note = `${photo.description ?? ""} ${photo.aiDescription ?? ""}`;
-      return photo.progressStatus === ProgressStatus.COMPLETED || includesCompletionKeyword(note);
-    });
-    result[surface] = {
-      status: completed ? "COMPLETED" : surfacePhotos.length > 0 ? "IN_PROGRESS" : "NOT_STARTED",
-      photo_count: surfacePhotos.length
+function buildTradeCategoryProgress(photos: RoomProgressPhoto[], tradeCategories: Array<{ id: string; code: string }>) {
+  const tradeCategoryByCode = new Map(tradeCategories.map((category) => [category.code, category.id]));
+  return photos.reduce<Record<string, { status: TradeProgressStatus; photo_count: number }>>((result, photo) => {
+    const legacyTradeCategoryId = photo.trade ? tradeCategoryByCode.get(photo.trade) : undefined;
+    const tradeCategoryId = photo.tradeCategoryId ?? legacyTradeCategoryId;
+    if (!tradeCategoryId) return result;
+    const current = result[tradeCategoryId] ?? { status: "NOT_STARTED", photo_count: 0 };
+    const note = `${photo.description ?? ""} ${photo.aiDescription ?? ""}`;
+    const completed = photo.progressStatus === ProgressStatus.COMPLETED || includesCompletionKeyword(note);
+    result[tradeCategoryId] = {
+      status: completed ? "COMPLETED" : current.status === "COMPLETED" ? "COMPLETED" : "IN_PROGRESS",
+      photo_count: current.photo_count + 1
     };
     return result;
   }, {});
 }
+
 function includesCompletionKeyword(text: string | null | undefined) {
   const normalized = text?.trim().toLowerCase() ?? "";
   return normalized.includes("완료") || normalized.includes("completed") || normalized.includes("done");

@@ -397,15 +397,16 @@ public sealed class SyncRoomsExternalHandler : IExternalEventHandler
 
         string viewName = BuildFloorPlan3DViewName(floorPlan);
         View3D? view = FindMatching3DView(doc, viewName);
-        ViewFamilyType? viewFamilyType = view == null
+        View3D? seedView = view == null ? FindSeed3DView(doc) : null;
+        ViewFamilyType? viewFamilyType = view == null && seedView == null
             ? new FilteredElementCollector(doc)
-            .OfClass(typeof(ViewFamilyType))
-            .Cast<ViewFamilyType>()
-            .FirstOrDefault(type => type.ViewFamily == ViewFamily.ThreeDimensional)
+                .OfClass(typeof(ViewFamilyType))
+                .Cast<ViewFamilyType>()
+                .FirstOrDefault(type => type.ViewFamily == ViewFamily.ThreeDimensional)
             : null;
-        if (view == null && viewFamilyType == null)
+        if (view == null && seedView == null && viewFamilyType == null)
         {
-            diagnostics = $"{diagnostics} 3D view creation skipped: no 3D ViewFamilyType is available.";
+            diagnostics = $"{diagnostics} 3D view creation skipped: no existing 3D view or 3D ViewFamilyType is available.";
             return null;
         }
 
@@ -414,6 +415,12 @@ public sealed class SyncRoomsExternalHandler : IExternalEventHandler
             ? "BIM Photo Sync update 3D floor section"
             : "BIM Photo Sync create 3D floor section");
         transaction.Start();
+        if (view == null && seedView != null)
+        {
+            ElementId duplicatedViewId = seedView.Duplicate(ViewDuplicateOption.Duplicate);
+            view = doc.GetElement(duplicatedViewId) as View3D;
+        }
+
         view ??= View3D.CreateIsometric(doc, viewFamilyType!.Id);
         if (!reusedView)
         {
@@ -424,7 +431,12 @@ public sealed class SyncRoomsExternalHandler : IExternalEventHandler
         view.IsSectionBoxActive = true;
         TryConfigure3DExportView(view);
         transaction.Commit();
-        diagnostics = $"{diagnostics} {(reusedView ? "Reused" : "Created")} 3D export view {view.Name} ({view.Id.Value}).";
+        string sourceDescription = reusedView
+            ? "Reused"
+            : seedView != null
+                ? $"Created from Revit 3D view {seedView.Name}"
+                : "Created";
+        diagnostics = $"{diagnostics} {sourceDescription} 3D export view {view.Name} ({view.Id.Value}).";
         return view;
     }
 
@@ -459,6 +471,23 @@ public sealed class SyncRoomsExternalHandler : IExternalEventHandler
             .Cast<View3D>()
             .Where(view => !view.IsTemplate)
             .FirstOrDefault(view => string.Equals(view.Name, viewName, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static View3D? FindSeed3DView(Document doc)
+    {
+        List<View3D> views = new FilteredElementCollector(doc)
+            .OfClass(typeof(View3D))
+            .Cast<View3D>()
+            .Where(view => !view.IsTemplate)
+            .Where(view => view.CanViewBeDuplicated(ViewDuplicateOption.Duplicate))
+            .Where(view => !view.Name.StartsWith("BPS 3D - ", StringComparison.OrdinalIgnoreCase))
+            .ToList();
+
+        return views
+            .OrderByDescending(view => string.Equals(view.Name, "{3D}", StringComparison.OrdinalIgnoreCase))
+            .ThenByDescending(view => string.Equals(view.Name, "3D", StringComparison.OrdinalIgnoreCase))
+            .ThenBy(view => view.Name)
+            .FirstOrDefault();
     }
 
     private static FloorPlanSectionBoxResult BuildFloorPlanSectionBox(Document doc, ViewPlan floorPlan)
@@ -1598,4 +1627,3 @@ public sealed class SyncRoomsExternalHandler : IExternalEventHandler
             System.Text.Encoding.UTF8);
     }
 }
-

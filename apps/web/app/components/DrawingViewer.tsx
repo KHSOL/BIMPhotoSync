@@ -30,6 +30,7 @@ import {
   Room,
   saveProjectId
 } from "../client";
+import type { TradeCategory } from "../client";
 import { defaultSurfaceOptions, defaultTradeOptions, labelForOption } from "../photo-options";
 import { FloorPlan3D } from "./FloorPlan3D";
 import { ObjModelViewer } from "./ObjModelViewer";
@@ -40,7 +41,9 @@ type FloorPlanList = { data: RevitFloorPlan[] };
 type Model3DList = { data: RevitModel3D[] };
 type SheetList = { data: RevitSheet[] };
 type RoomList = { data: Room[] };
+type TradeCategoryList = { data: TradeCategory[] };
 type RoomPhotosResponse = { data: { photos: Photo[] } };
+type TradeProgressValue = { status: "NOT_STARTED" | "IN_PROGRESS" | "COMPLETED"; photo_count: number };
 type PdfJsModule = typeof import("pdfjs-dist");
 type PdfRenderState = "idle" | "loading" | "ready" | "error";
 
@@ -72,7 +75,10 @@ export default function DrawingViewer({ mode }: { mode: DrawingViewerMode }) {
   const [selectedRoomId, setSelectedRoomId] = useState("");
   const [treeQuery, setTreeQuery] = useState("");
   const [roomProgressByBimId, setRoomProgressByBimId] = useState<Record<string, Room["progress_by_surface"]>>({});
+  const [roomTradeProgressByBimId, setRoomTradeProgressByBimId] = useState<Record<string, Room["progress_by_trade_category"]>>({});
+  const [tradeCategories, setTradeCategories] = useState<TradeCategory[]>([]);
   const [photos, setPhotos] = useState<Photo[]>([]);
+  const [showAllPhotos, setShowAllPhotos] = useState(false);
   const [status, setStatus] = useState(
     mode === "floorPlans"
       ? "동기화된 평면도 구역을 불러오는 중입니다."
@@ -120,6 +126,11 @@ export default function DrawingViewer({ mode }: { mode: DrawingViewerMode }) {
   }, [plans, treeQuery]);
   const selectedPhotosHref =
     getRoomDatabaseId(selectedRoom) !== "" ? `/photos?project_id=${projectId}&room_id=${getRoomDatabaseId(selectedRoom)}` : "/photos";
+  const selectedTradeProgressRows = useMemo(
+    () => buildTradeProgressRows(tradeCategories, selectedRoomId ? roomTradeProgressByBimId[selectedRoomId] : undefined),
+    [roomTradeProgressByBimId, selectedRoomId, tradeCategories]
+  );
+  const visiblePhotos = showAllPhotos ? photos : photos.slice(0, 6);
 
   useEffect(() => {
     const session = readSession();
@@ -135,6 +146,10 @@ export default function DrawingViewer({ mode }: { mode: DrawingViewerMode }) {
     }
     void loadRoomPhotos(selectedRoomId).catch((err: Error) => setStatus(err.message));
   }, [token, selectedRoomId]);
+
+  useEffect(() => {
+    setShowAllPhotos(false);
+  }, [selectedRoomId]);
 
   useEffect(() => {
     if (!isFloorPlanMode || !token || !selectedPlan?.asset?.url) {
@@ -213,23 +228,32 @@ export default function DrawingViewer({ mode }: { mode: DrawingViewerMode }) {
 
   async function loadProjectGeometry(nextToken = token, nextProjectId = projectId) {
     if (!nextProjectId) return;
-    const [floorPlanJson, modelAssetJson, sheetJson, roomJson] = await Promise.all([
+    const [floorPlanJson, modelAssetJson, sheetJson, roomJson, tradeCategoryJson] = await Promise.all([
       apiJson<FloorPlanList>(`/revit/projects/${nextProjectId}/floor-plans`, { headers: authHeaders(nextToken) }),
       apiJson<Model3DList>(`/revit/projects/${nextProjectId}/3d-models`, { headers: authHeaders(nextToken) }),
       apiJson<SheetList>(`/revit/projects/${nextProjectId}/sheets`, { headers: authHeaders(nextToken) }),
-      apiJson<RoomList>(`/projects/${nextProjectId}/rooms`, { headers: authHeaders(nextToken) })
+      apiJson<RoomList>(`/projects/${nextProjectId}/rooms`, { headers: authHeaders(nextToken) }),
+      apiJson<TradeCategoryList>(`/projects/${nextProjectId}/trade-categories`, { headers: authHeaders(nextToken) })
     ]);
 
     const nextPlans = Array.isArray(floorPlanJson.data) ? floorPlanJson.data : [];
     const nextModelAssets = Array.isArray(modelAssetJson.data) ? modelAssetJson.data : [];
     const nextSheets = Array.isArray(sheetJson.data) ? sheetJson.data : [];
     const nextRooms = Array.isArray(roomJson.data) ? roomJson.data : [];
+    const nextTradeCategories = Array.isArray(tradeCategoryJson.data) ? tradeCategoryJson.data : [];
     setPlans(nextPlans);
     setModelAssets(nextModelAssets);
     setSheets(nextSheets);
+    setTradeCategories(nextTradeCategories);
     setRoomProgressByBimId(
       nextRooms.reduce<Record<string, Room["progress_by_surface"]>>((result, room) => {
         result[room.bim_photo_room_id] = room.progress_by_surface;
+        return result;
+      }, {})
+    );
+    setRoomTradeProgressByBimId(
+      nextRooms.reduce<Record<string, Room["progress_by_trade_category"]>>((result, room) => {
+        result[room.bim_photo_room_id] = room.progress_by_trade_category;
         return result;
       }, {})
     );
@@ -514,25 +538,27 @@ export default function DrawingViewer({ mode }: { mode: DrawingViewerMode }) {
               <p className="muted">{status}</p>
             )}
           </section>
-          <section className="panel ref-card">
-            <h2 className="section-title">연결 정보</h2>
-            <dl className="detail-definition">
-              <dt>{isFloorPlanMode ? "평면도" : "시트"}</dt>
-              <dd>{isFloorPlanMode ? selectedPlan?.view_name ?? "-" : selectedSheet ? `${selectedSheet.sheet_number} · ${selectedSheet.sheet_name}` : "-"}</dd>
-              <dt>방 구역</dt>
-              <dd>{isFloorPlanMode ? selectedPlan?.rooms.length ?? 0 : selectedSheet?.overlays.length ?? 0}</dd>
-              <dt>프로젝트</dt>
-              <dd>{projects.find((project) => project.id === projectId)?.name ?? "-"}</dd>
-              <dt>동기화 시각</dt>
-              <dd>
-                {isFloorPlanMode && selectedPlan
-                  ? new Date(selectedPlan.synced_at).toLocaleString("ko-KR")
-                  : selectedSheet
-                    ? new Date(selectedSheet.synced_at).toLocaleString("ko-KR")
-                    : "-"}
-              </dd>
-            </dl>
-            <p className="muted">{status}</p>
+          <section className="panel ref-card room-trade-progress-card">
+            <div className="ref-panel-title">
+              <h2>공정별 진행률</h2>
+              <span className="muted">{selectedRoom ? "선택 방 기준" : "방을 선택하세요"}</span>
+            </div>
+            {selectedRoom && selectedTradeProgressRows.length > 0 ? (
+              <div className="trade-progress-list compact">
+                {selectedTradeProgressRows.map((row) => (
+                  <div className="trade-progress" key={row.id}>
+                    <span title={row.label}>{row.label}</span>
+                    <div className="progress" aria-label={`${row.label} ${row.percent}%`}>
+                      <span style={{ width: `${row.percent}%` }} />
+                    </div>
+                    <strong>{row.percent}%</strong>
+                    <small>{formatProgressStatus(row.status)}</small>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="muted">{selectedRoom ? "등록된 공종이 없습니다." : status}</p>
+            )}
           </section>
         </aside>
       </section>
@@ -546,8 +572,8 @@ export default function DrawingViewer({ mode }: { mode: DrawingViewerMode }) {
             모든 사진 보기 <ChevronRight size={14} />
           </a>
         </div>
-        <div className="strip-photos">
-          {photos.slice(0, 6).map((photo, index) => (
+        <div className={showAllPhotos ? "strip-photos expanded" : "strip-photos"}>
+          {visiblePhotos.map((photo, index) => (
             <article className={index === 0 ? "strip-photo active" : "strip-photo"} key={photo.id}>
               {photo.preview_url ? <img src={photo.preview_url} alt={photo.description ?? "방 사진"} /> : <div className="photo-fallback" />}
               <strong>{photo.work_date}</strong>
@@ -557,10 +583,12 @@ export default function DrawingViewer({ mode }: { mode: DrawingViewerMode }) {
             </article>
           ))}
           {photos.length === 0 ? <p className="muted">이 방에 등록된 사진이 없습니다.</p> : null}
-          <a className="more-photo" href={selectedPhotosHref}>
-            <Camera size={25} />
-            더보기
-          </a>
+          {photos.length > 6 ? (
+            <button className="more-photo" type="button" onClick={() => setShowAllPhotos((current) => !current)}>
+              <Camera size={25} />
+              {showAllPhotos ? "접기" : "더보기"}
+            </button>
+          ) : null}
         </div>
       </section>
     </div>
@@ -845,6 +873,32 @@ function roomDisplayProgress(progress: Room["progress_by_surface"] | undefined):
   if (values.some((item) => item.status === "COMPLETED")) return "completed";
   if (values.some((item) => item.status === "IN_PROGRESS")) return "in-progress";
   return "not-started";
+}
+
+function buildTradeProgressRows(tradeCategories: TradeCategory[], progress: Room["progress_by_trade_category"] | undefined) {
+  return tradeCategories
+    .filter((category) => category.is_active)
+    .map((category) => {
+      const value: TradeProgressValue = progress?.[category.id] ?? { status: "NOT_STARTED", photo_count: 0 };
+      return {
+        id: category.id,
+        label: category.label,
+        status: value.status,
+        percent: progressPercent(value.status)
+      };
+    });
+}
+
+function progressPercent(status: TradeProgressValue["status"]) {
+  if (status === "COMPLETED") return 100;
+  if (status === "IN_PROGRESS") return 50;
+  return 0;
+}
+
+function formatProgressStatus(status: TradeProgressValue["status"]) {
+  if (status === "COMPLETED") return "완료";
+  if (status === "IN_PROGRESS") return "진행중";
+  return "시작 전";
 }
 
 function getRoomDatabaseId(room: FloorPlanRoom | RevitRoomOverlay | undefined) {

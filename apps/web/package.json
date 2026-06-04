@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev -p 3000",
+    "dev": "node scripts/ensure-dev-routes-manifest.mjs && next dev -p 3001 --disable-source-maps",
     "build": "next build",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },

@@ -1,5 +1,5 @@
 import * as assert from "node:assert/strict";
-import { ProgressStatus, WorkSurface } from "@prisma/client";
+import { ProgressStatus } from "@prisma/client";
 import { toRoomResponse } from "./rooms.service";
 
 function testRoomProgressUsesKoreanCompletionKeyword() {
@@ -16,7 +16,7 @@ function testRoomProgressUsesKoreanCompletionKeyword() {
     status: "ACTIVE",
     photos: [
       {
-        workSurface: WorkSurface.OTHER,
+        tradeCategoryId: "trade-1",
         description: "창고설비 완료",
         aiDescription: null,
         progressStatus: ProgressStatus.PENDING_REVIEW
@@ -24,7 +24,7 @@ function testRoomProgressUsesKoreanCompletionKeyword() {
     ]
   });
 
-  assert.equal(response.progress_by_surface?.[WorkSurface.OTHER]?.status, "COMPLETED");
+  assert.equal(response.progress_by_trade_category?.["trade-1"]?.status, "COMPLETED");
 }
 
 function testRoomProgressUsesEnglishCompletionKeyword() {
@@ -41,7 +41,7 @@ function testRoomProgressUsesEnglishCompletionKeyword() {
     status: "ACTIVE",
     photos: [
       {
-        workSurface: WorkSurface.WALL,
+        tradeCategoryId: "trade-2",
         description: null,
         aiDescription: "Wall installation completed.",
         progressStatus: ProgressStatus.PENDING_REVIEW
@@ -49,7 +49,7 @@ function testRoomProgressUsesEnglishCompletionKeyword() {
     ]
   });
 
-  assert.equal(response.progress_by_surface?.[WorkSurface.WALL]?.status, "COMPLETED");
+  assert.equal(response.progress_by_trade_category?.["trade-2"]?.status, "COMPLETED");
 }
 
 for (const test of [testRoomProgressUsesKoreanCompletionKeyword, testRoomProgressUsesEnglishCompletionKeyword]) {

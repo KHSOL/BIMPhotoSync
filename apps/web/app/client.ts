@@ -93,6 +93,7 @@ export type Room = {
   location_text?: string | null;
   status: string;
   progress_by_surface?: Record<string, { status: "NOT_STARTED" | "IN_PROGRESS" | "COMPLETED"; photo_count: number }>;
+  progress_by_trade_category?: Record<string, { status: "NOT_STARTED" | "IN_PROGRESS" | "COMPLETED"; photo_count: number }>;
 };
 
 export type PlanPoint = {

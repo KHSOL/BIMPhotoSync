@@ -1,6 +1,6 @@
 "use client";
 
-import { CalendarDays, Download, Eye, FileSpreadsheet, FileText, Filter, KeyRound, Plus, Search } from "lucide-react";
+import { Download, Eye, FileText, KeyRound, Plus, Search } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import {
   API_BASE,
@@ -26,7 +26,7 @@ type RoomList = { data: Room[] };
 type ReportList = { data: GeneratedReport[] };
 type ReportResult = { data: GeneratedReport };
 type TradeCategoryList = { data: TradeCategory[] };
-type ExportFormat = "JSON" | "XLSX" | "DOCX" | "PDF" | "HWP";
+type ReportOwnerFilter = "ALL" | "MINE";
 
 export default function ReportsPage() {
   const [token, setToken] = useState("");
@@ -37,6 +37,7 @@ export default function ReportsPage() {
   const [tradeCategories, setTradeCategories] = useState<TradeCategory[]>([]);
   const [reports, setReports] = useState<GeneratedReport[]>([]);
   const [selectedId, setSelectedId] = useState("");
+  const [ownerFilter, setOwnerFilter] = useState<ReportOwnerFilter>("ALL");
   const [status, setStatus] = useState("로그인 후 프로젝트를 선택하세요.");
   const [generating, setGenerating] = useState(false);
   const [filters, setFilters] = useState({
@@ -113,22 +114,6 @@ export default function ReportsPage() {
     setFilters((current) => ({ ...current, trade_category_id: "", trade: value }));
   }
 
-  function resetFilters() {
-    setFilters({
-      room_id: "",
-      work_surface: "",
-      trade: "",
-      trade_category_id: "",
-      date_from: "",
-      date_to: "",
-      worker_name: "",
-      title: "",
-      memo: "",
-      ai_prompt: ""
-    });
-    setStatus("보고서 생성 필터를 초기화했습니다.");
-  }
-
   function reportRequestBase() {
     return {
       project_id: projectId,
@@ -170,38 +155,31 @@ export default function ReportsPage() {
     }
   }
 
-  async function downloadReportFile(report: GeneratedReport, format: ExportFormat) {
-    if (format === "JSON") {
-      const blob = new Blob([JSON.stringify(report.content, null, 2)], { type: "application/json;charset=utf-8" });
-      downloadBlob(blob, `${report.title}.json`);
-      return;
-    }
-    const res = await fetch(`${API_BASE}/reports/${report.id}/export?format=${format}`, { headers: authHeaders(token) });
+  async function downloadReportFile(report: GeneratedReport) {
+    const res = await fetch(`${API_BASE}/reports/${report.id}/export?format=DOCX`, { headers: authHeaders(token) });
     if (!res.ok) {
       const json: unknown = await res.json().catch(() => ({}));
       throw new Error(errorMessage(json, `API error ${res.status}`));
     }
-    const fallbackByFormat: Record<ExportFormat, string> = {
-      JSON: `${report.title}.json`,
-      XLSX: `${report.title}.xlsx`,
-      DOCX: `${report.title}.docx`,
-      PDF: `${report.title}.pdf`,
-      HWP: `${report.title}.hwpx`
-    };
-    downloadBlob(await res.blob(), filenameFromDisposition(res.headers.get("content-disposition")) ?? fallbackByFormat[format]);
+    downloadBlob(await res.blob(), filenameFromDisposition(res.headers.get("content-disposition")) ?? `${report.title}.docx`);
   }
 
-  function requestDownload(report: GeneratedReport, format: ExportFormat) {
-    void downloadReportFile(report, format).catch((err: Error) => setStatus(err.message));
+  function requestDownload(report: GeneratedReport) {
+    void downloadReportFile(report).catch((err: Error) => setStatus(err.message));
   }
 
   const canGenerate = isUpperManager(user);
-  const selectedReport = useMemo(() => reports.find((report) => report.id === selectedId) ?? reports[0], [reports, selectedId]);
   const filteredReports = useMemo(() => {
     const keyword = filters.title.trim().toLowerCase();
-    if (!keyword) return reports;
-    return reports.filter((report) => report.title.toLowerCase().includes(keyword));
-  }, [reports, filters.title]);
+    return reports.filter((report) => {
+      if (ownerFilter === "MINE" && report.created_by.id !== user?.id) return false;
+      if (keyword && !report.title.toLowerCase().includes(keyword)) return false;
+      return true;
+    });
+  }, [reports, filters.title, ownerFilter, user?.id]);
+  const selectedReport = useMemo(() => {
+    return filteredReports.find((report) => report.id === selectedId) ?? filteredReports[0] ?? reports.find((report) => report.id === selectedId);
+  }, [filteredReports, reports, selectedId]);
   const selectedTradeValue = filters.trade_category_id || filters.trade;
 
   if (!user) {
@@ -233,9 +211,6 @@ export default function ReportsPage() {
           <h1 className="page-title">보고서</h1>
           <p className="muted">사진 분석 결과를 프로젝트, 방, 공사면, 공종, 작업일자, 작성자 기준으로 보고서화합니다.</p>
         </div>
-        <button className="button" type="button" disabled={!canGenerate || generating} onClick={generateReport}>
-          <Plus size={16} /> {generating ? "생성 중" : "보고서 생성"}
-        </button>
       </header>
 
       {!canGenerate ? (
@@ -300,22 +275,24 @@ export default function ReportsPage() {
             placeholder="예: 지난 7일간 공정 지연 원인과 완료 근거를 중심으로 작성해줘"
           />
         </label>
-        <button className="filter-button" type="button" onClick={resetFilters}><Filter size={16} />전체보기</button>
-      </section>
-
-      <section className="metric-grid five">
-        <Metric icon={<FileText />} label="전체 보고서" value={String(reports.length)} sub="현재 프로젝트" tone="blue" />
-        <Metric icon={<Eye />} label="생성 완료" value={String(reports.filter((r) => r.status === "GENERATED").length)} sub="저장된 보고서" tone="green" />
-        <Metric icon={<CalendarDays />} label="최근 생성" value={selectedReport ? new Date(selectedReport.created_at).toLocaleDateString("ko-KR") : "-"} sub="선택 보고서" tone="orange" />
-        <Metric icon={<Download />} label="사진 근거" value={String(selectedReport?.photo_ids.length ?? 0)} sub="선택 보고서" tone="purple" />
-        <Metric icon={<FileSpreadsheet />} label="내보내기" value="5" sub="JSON / XLSX / DOCX / PDF / HWPX" tone="sky" />
+        <button className="button" type="button" disabled={!canGenerate || generating} onClick={generateReport}>
+          <Plus size={16} /> {generating ? "생성 중" : "보고서 생성"}
+        </button>
       </section>
 
       <section className="reports-layout">
         <article className="panel ref-card">
-          <div className="tab-row">
-            <button className="active" type="button" onClick={() => loadReports().catch((err: Error) => setStatus(err.message))}>전체</button>
-            <button type="button" onClick={() => setReports((rows) => rows.filter((report) => report.created_by.id === user.id))}>내 보고서</button>
+          <div className="report-list-head">
+            <div className="tab-row">
+              <button className={ownerFilter === "ALL" ? "active" : ""} type="button" onClick={() => setOwnerFilter("ALL")}>전체</button>
+              <button className={ownerFilter === "MINE" ? "active" : ""} type="button" onClick={() => setOwnerFilter("MINE")}>내 보고서</button>
+            </div>
+            <label className="field compact">
+              <span className="label">보고서 프로젝트</span>
+              <select className="input" value={projectId} onChange={(event) => changeProject(event.target.value)}>
+                {projects.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}
+              </select>
+            </label>
           </div>
           <div className="room-table-wrap">
             <table className="room-table ref-table">
@@ -341,7 +318,7 @@ export default function ReportsPage() {
                     <td><span className={report.status === "GENERATED" ? "badge green" : "badge red"}>{reportStatusLabel(report.status)}</span></td>
                     <td className="table-actions">
                       <button className="icon-button" type="button" aria-label="미리보기" onClick={(event) => { event.stopPropagation(); setSelectedId(report.id); }}><Eye size={16} /></button>
-                      <button className="icon-button" type="button" aria-label="JSON 다운로드" onClick={(event) => { event.stopPropagation(); requestDownload(report, "JSON"); }}><Download size={16} /></button>
+                      <button className="icon-button" type="button" aria-label="Word 다운로드" onClick={(event) => { event.stopPropagation(); requestDownload(report); }}><Download size={16} /></button>
                     </td>
                   </tr>
                 ))}
@@ -359,39 +336,16 @@ export default function ReportsPage() {
                 <h2>{selectedReport.title}</h2>
                 <span className="badge green">{reportStatusLabel(selectedReport.status)}</span>
               </div>
-              <div className="report-preview">
-                <div className="report-cover">
-                  <strong>BIM PHOTO SYNC</strong>
-                  <span>보고서</span>
-                  <div className="cover-photo"><div className="photo-fallback" /></div>
-                </div>
-                <dl className="detail-definition">
-                  <dt>생성일</dt><dd>{new Date(selectedReport.created_at).toLocaleString("ko-KR")}</dd>
-                  <dt>생성자</dt><dd>{selectedReport.created_by.name}</dd>
-                  <dt>모델</dt><dd>{selectedReport.model_provider} / {selectedReport.model_name}</dd>
-                  <dt>사진 수</dt><dd>{selectedReport.photo_ids.length}</dd>
-                  <dt>형식</dt><dd>{selectedReport.format}</dd>
-                </dl>
-              </div>
+              <dl className="detail-definition">
+                <dt>생성일</dt><dd>{new Date(selectedReport.created_at).toLocaleString("ko-KR")}</dd>
+                <dt>생성자</dt><dd>{selectedReport.created_by.name}</dd>
+                <dt>사진 수</dt><dd>{selectedReport.photo_ids.length}</dd>
+              </dl>
               <h3 className="section-title">상황분석</h3>
               <p className="muted">{selectedReport.content.analysis_result}</p>
-              <h3 className="section-title">변화 과정</h3>
-              <ul className="report-list compact-list">
-                {selectedReport.content.progress_timeline.slice(0, 8).map((line) => <li key={line}>{line}</li>)}
-              </ul>
-              <h3 className="section-title">비교 사진 근거</h3>
-              <div className="badge-row">
-                {selectedReport.content.comparison_photos.slice(0, 6).map((photo) => (
-                  <span className="badge" key={photo.photo_id}>{photo.work_date} / {photo.room}</span>
-                ))}
-              </div>
               {selectedReport.error_message ? <p className="muted">Gemini 대체 결과: {selectedReport.error_message}</p> : null}
               <div className="report-actions">
-                <button className="button" type="button" onClick={() => requestDownload(selectedReport, "JSON")}><Download size={16} />JSON</button>
-                <button className="button secondary" type="button" onClick={() => requestDownload(selectedReport, "XLSX")}><FileSpreadsheet size={16} />XLSX</button>
-                <button className="button secondary" type="button" onClick={() => requestDownload(selectedReport, "DOCX")}><FileText size={16} />DOCX</button>
-                <button className="button secondary" type="button" onClick={() => requestDownload(selectedReport, "PDF")}><FileText size={16} />PDF</button>
-                <button className="button secondary" type="button" onClick={() => requestDownload(selectedReport, "HWP")}><FileText size={16} />HWPX</button>
+                <button className="button" type="button" onClick={() => requestDownload(selectedReport)}><FileText size={16} />Word 내보내기</button>
               </div>
             </>
           ) : (
@@ -431,17 +385,4 @@ function reportStatusLabel(status: string) {
   if (status === "GENERATED") return "생성 완료";
   if (status === "FAILED") return "생성 실패";
   return status;
-}
-
-function Metric({ icon, label, value, sub, tone }: { icon: React.ReactNode; label: string; value: string; sub: string; tone: string }) {
-  return (
-    <div className={`metric-card ${tone}`}>
-      <span className="metric-icon">{icon}</span>
-      <div>
-        <span>{label}</span>
-        <strong>{value}</strong>
-        <small>{sub}</small>
-      </div>
-    </div>
-  );
 }

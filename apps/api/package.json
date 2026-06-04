@@ -4,7 +4,8 @@
   "private": true,
   "scripts": {
     "start": "node dist/main.js",
-    "start:dev": "nest start --watch",
+    "start:dev": "ts-node -r tsconfig-paths/register src/main.ts",
+    "start:dev:nest": "nest start --watch",
     "build": "nest build",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "prisma:generate": "prisma generate",

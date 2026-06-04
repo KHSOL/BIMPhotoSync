@@ -224,7 +224,7 @@ async function testFindPhotosIgnoresLegacyTradeWhenCategorySelected() {
   assert.equal(Object.prototype.hasOwnProperty.call(where, "trade"), false);
 }
 
-async function testExportXlsxEmbedsPhotosAndWrapsMetadata() {
+async function testExportDocxUsesWordTemplateAndEmbedsPhotos() {
   const prisma: MockPrisma = {
     photo: {
       async findMany() {
@@ -252,24 +252,22 @@ async function testExportXlsxEmbedsPhotosAndWrapsMetadata() {
     }
   });
 
-  const exported = await service.export({ sub: "user-1", companyId: "company-1" }, "report-1", "XLSX");
+  const exported = await service.export({ sub: "user-1", companyId: "company-1" }, "report-1", "DOCX");
   const entries = unzipEntries(exported.buffer);
-  const sheet4Xml = zipEntryText(entries, "xl/worksheets/sheet4.xml");
-  const stylesXml = zipEntryText(entries, "xl/styles.xml");
-  const drawingXml = zipEntryText(entries, "xl/drawings/report-photos-sheet4.xml");
-  const drawingRelsXml = zipEntryText(entries, "xl/drawings/_rels/report-photos-sheet4.xml.rels");
-  const sheet4RelsXml = zipEntryText(entries, "xl/worksheets/_rels/sheet4.xml.rels");
+  const documentXml = zipEntryText(entries, "word/document.xml");
+  const relsXml = zipEntryText(entries, "word/_rels/document.xml.rels");
 
-  assert.match(sheet4Xml, /<drawing r:id="rId2"\/>/);
-  assert.match(sheet4Xml, /<c r="C11"[^>]*t="inlineStr">/);
-  assert.match(stylesXml, /<cellXfs /);
-  assert.match(drawingXml, /<xdr:pic>/);
-  assert.match(drawingRelsXml, /Target="\.\.\/media\/report-photo-1\.png"/);
-  assert.match(sheet4RelsXml, /Type="http:\/\/schemas\.openxmlformats\.org\/officeDocument\/2006\/relationships\/drawing" Target="\.\.\/drawings\/report-photos-sheet4\.xml"/);
-  assert.ok(entries.some((entry) => entry.path === "xl/media/report-photo-1.png"));
+  assert.equal(exported.filename, "주간 보고서.docx");
+  assert.match(documentXml, /시공일지/);
+  assert.match(documentXml, /시공 현장 사진/);
+  assert.match(documentXml, /101 회의실/);
+  assert.match(documentXml, /긴 설명 텍스트/);
+  assert.match(documentXml, /r:embed="rIdPhoto1"/);
+  assert.match(relsXml, /Target="media\/report-photo-1\.png"/);
+  assert.ok(entries.some((entry) => entry.path === "word/media/report-photo-1.png"));
 }
 
-async function testExportXlsxFallsBackToTextWhenPhotoDownloadFails() {
+async function testExportDocxFallsBackToTextWhenPhotoDownloadFails() {
   const prisma: MockPrisma = {
     photo: {
       async findMany() {
@@ -294,13 +292,13 @@ async function testExportXlsxFallsBackToTextWhenPhotoDownloadFails() {
     }
   });
 
-  const exported = await service.export({ sub: "user-1", companyId: "company-1" }, "report-1", "XLSX");
+  const exported = await service.export({ sub: "user-1", companyId: "company-1" }, "report-1", "DOCX");
   const entries = unzipEntries(exported.buffer);
-  const sheet4Xml = zipEntryText(entries, "xl/worksheets/sheet4.xml");
+  const documentXml = zipEntryText(entries, "word/document.xml");
 
-  assert.equal(entries.some((entry) => entry.path === "xl/media/report-photo-1.png"), false);
-  assert.equal(entries.some((entry) => entry.path === "xl/drawings/report-photos-sheet4.xml"), false);
-  assert.match(sheet4Xml, /긴 설명 텍스트/);
+  assert.equal(entries.some((entry) => entry.path === "word/media/report-photo-1.png"), false);
+  assert.match(documentXml, /\[ 사진 첨부 \]/);
+  assert.match(documentXml, /긴 설명 텍스트/);
 }
 
 async function run(name: string, fn: () => Promise<void>) {
@@ -315,8 +313,8 @@ async function run(name: string, fn: () => Promise<void>) {
 
 async function main() {
   await run("findPhotos ignores legacy trade filter when trade_category_id is selected", testFindPhotosIgnoresLegacyTradeWhenCategorySelected);
-  await run("export XLSX preserves the template and embeds report photos with wrapped metadata cells", testExportXlsxEmbedsPhotosAndWrapsMetadata);
-  await run("export XLSX falls back to text evidence when photo download fails", testExportXlsxFallsBackToTextWhenPhotoDownloadFails);
+  await run("export DOCX uses the Word template and embeds report photos", testExportDocxUsesWordTemplateAndEmbedsPhotos);
+  await run("export DOCX falls back to text evidence when photo download fails", testExportDocxFallsBackToTextWhenPhotoDownloadFails);
 }
 
 if (require.main === module) {
