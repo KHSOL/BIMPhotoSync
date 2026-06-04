@@ -159,17 +159,11 @@ public sealed class SyncRoomsExternalHandler : IExternalEventHandler
         Dictionary<string, RoomMappingDto> mappingsByElementId = BuildMappingsByElementId(mappings);
         if (mappingsByElementId.Count == 0) return 0;
 
-        List<ViewPlan> floorPlans = new FilteredElementCollector(doc)
-            .OfClass(typeof(ViewPlan))
-            .Cast<ViewPlan>()
-            .Where(view => IsCanonicalFloorPlanView(doc, view))
-            .OrderBy(view => view.GenLevel?.Elevation ?? 0)
-            .ThenBy(view => view.Name)
-            .ToList();
+        List<ViewPlan> floorPlans = GetPrimaryFloorPlanViewsByLevel(doc);
 
         if (floorPlans.Count == 0)
         {
-            ValidationLog.Write("Skipped floor plan sync: no canonical Floor Plan views were found.");
+            ValidationLog.Write("Skipped floor plan sync: no syncable Floor Plan views were found.");
             return 0;
         }
 
@@ -211,34 +205,29 @@ public sealed class SyncRoomsExternalHandler : IExternalEventHandler
         string levelName = GetViewLevelName(doc, view);
         Transform? modelToViewTransform = GetModelToViewTransform(view);
 
-        List<FloorPlanRoomDto> planRooms = new();
-        foreach (SpatialElement room in new FilteredElementCollector(doc, view.Id)
-                     .OfCategory(BuiltInCategory.OST_Rooms)
-                     .WhereElementIsNotElementType()
-                     .Cast<SpatialElement>())
+        List<FloorPlanRoomDto> planRooms = BuildFloorPlanRooms(
+            doc,
+            new FilteredElementCollector(doc, view.Id)
+                .OfCategory(BuiltInCategory.OST_Rooms)
+                .WhereElementIsNotElementType()
+                .Cast<SpatialElement>(),
+            mappingsByElementId,
+            levelName,
+            modelToViewTransform);
+
+        if (planRooms.Count == 0 && view is ViewPlan { GenLevel: not null } viewPlan)
         {
-            string elementId = room.Id.Value.ToString();
-            if (!mappingsByElementId.TryGetValue(elementId, out RoomMappingDto? mapping)) continue;
-
-            IReadOnlyList<PlanPointDto> polygon = GetRoomBoundary(room, modelToViewTransform);
-            IReadOnlyList<PlanPointDto> modelPolygon = GetRoomBoundary(room);
-            if (polygon.Count < 3 || modelPolygon.Count < 3) continue;
-
-            PlanPointDto center = GetRoomCenter(room, polygon, modelToViewTransform);
-            PlanPointDto modelCenter = GetRoomCenter(room, modelPolygon);
-            planRooms.Add(new FloorPlanRoomDto(
-                Room_Id: mapping.Room_Id,
-                Bim_Photo_Room_Id: mapping.Bim_Photo_Room_Id,
-                Revit_Unique_Id: mapping.Revit_Unique_Id,
-                Revit_Element_Id: mapping.Revit_Element_Id,
-                Room_Number: room.get_Parameter(BuiltInParameter.ROOM_NUMBER)?.AsString(),
-                Room_Name: room.get_Parameter(BuiltInParameter.ROOM_NAME)?.AsString() ?? "Unnamed Room",
-                Level_Name: doc.GetElement(room.LevelId)?.Name ?? levelName,
-                Area_M2: GetRoomAreaM2(room),
-                Center: center,
-                Polygon: polygon,
-                Model_Center: modelCenter,
-                Model_Polygon: modelPolygon));
+            IEnumerable<SpatialElement> levelRooms = new FilteredElementCollector(doc)
+                .OfCategory(BuiltInCategory.OST_Rooms)
+                .WhereElementIsNotElementType()
+                .Cast<SpatialElement>()
+                .Where(room => room.LevelId == viewPlan.GenLevel.Id);
+            planRooms = BuildFloorPlanRooms(doc, levelRooms, mappingsByElementId, levelName, modelToViewTransform);
+            if (planRooms.Count > 0)
+            {
+                ValidationLog.Write(
+                    $"Floor plan {view.Name} used same-level Room fallback because the view-scoped Room collector returned 0 bounded Rooms.");
+            }
         }
 
         if (planRooms.Count == 0)
@@ -267,6 +256,43 @@ public sealed class SyncRoomsExternalHandler : IExternalEventHandler
                 ? "Floor plan sync returned null."
                 : $"Synced floor plan {floorPlanResponse.Data.Id} for {levelName} with {planRooms.Count} rooms.");
         return floorPlanResponse == null ? 0 : planRooms.Count;
+    }
+
+    private static List<FloorPlanRoomDto> BuildFloorPlanRooms(
+        Document doc,
+        IEnumerable<SpatialElement> rooms,
+        IReadOnlyDictionary<string, RoomMappingDto> mappingsByElementId,
+        string fallbackLevelName,
+        Transform? modelToViewTransform)
+    {
+        List<FloorPlanRoomDto> planRooms = new();
+        foreach (SpatialElement room in rooms)
+        {
+            string elementId = room.Id.Value.ToString();
+            if (!mappingsByElementId.TryGetValue(elementId, out RoomMappingDto? mapping)) continue;
+
+            IReadOnlyList<PlanPointDto> polygon = GetRoomBoundary(room, modelToViewTransform);
+            IReadOnlyList<PlanPointDto> modelPolygon = GetRoomBoundary(room);
+            if (polygon.Count < 3 || modelPolygon.Count < 3) continue;
+
+            PlanPointDto center = GetRoomCenter(room, polygon, modelToViewTransform);
+            PlanPointDto modelCenter = GetRoomCenter(room, modelPolygon);
+            planRooms.Add(new FloorPlanRoomDto(
+                Room_Id: mapping.Room_Id,
+                Bim_Photo_Room_Id: mapping.Bim_Photo_Room_Id,
+                Revit_Unique_Id: mapping.Revit_Unique_Id,
+                Revit_Element_Id: mapping.Revit_Element_Id,
+                Room_Number: room.get_Parameter(BuiltInParameter.ROOM_NUMBER)?.AsString(),
+                Room_Name: room.get_Parameter(BuiltInParameter.ROOM_NAME)?.AsString() ?? "Unnamed Room",
+                Level_Name: doc.GetElement(room.LevelId)?.Name ?? fallbackLevelName,
+                Area_M2: GetRoomAreaM2(room),
+                Center: center,
+                Polygon: polygon,
+                Model_Center: modelCenter,
+                Model_Polygon: modelPolygon));
+        }
+
+        return planRooms;
     }
 
     private static int SyncSheets(Document doc, IReadOnlyList<RoomMappingDto> mappings)
@@ -303,17 +329,11 @@ public sealed class SyncRoomsExternalHandler : IExternalEventHandler
             return "Skipped 3D model sync: Project ID is not configured.";
         }
 
-        List<ViewPlan> floorPlans = new FilteredElementCollector(doc)
-            .OfClass(typeof(ViewPlan))
-            .Cast<ViewPlan>()
-            .Where(view => IsCanonicalFloorPlanView(doc, view))
-            .OrderBy(view => view.GenLevel?.Elevation ?? 0)
-            .ThenBy(view => view.Name)
-            .ToList();
+        List<ViewPlan> floorPlans = GetPrimaryFloorPlanViewsByLevel(doc);
 
         if (floorPlans.Count == 0)
         {
-            return "Skipped 3D model sync: no canonical Floor Plan views were found.";
+            return "Skipped 3D model sync: no syncable Floor Plan views were found.";
         }
 
         int syncedCount = 0;
@@ -397,14 +417,14 @@ public sealed class SyncRoomsExternalHandler : IExternalEventHandler
 
         string viewName = BuildFloorPlan3DViewName(floorPlan);
         View3D? view = FindMatching3DView(doc, viewName);
-        View3D? seedView = view == null ? FindSeed3DView(doc) : null;
-        ViewFamilyType? viewFamilyType = view == null && seedView == null
+        ViewFamilyType? viewFamilyType = view == null
             ? new FilteredElementCollector(doc)
                 .OfClass(typeof(ViewFamilyType))
                 .Cast<ViewFamilyType>()
                 .FirstOrDefault(type => type.ViewFamily == ViewFamily.ThreeDimensional)
             : null;
-        if (view == null && seedView == null && viewFamilyType == null)
+        View3D? seedView = view == null && viewFamilyType == null ? FindSeed3DView(doc) : null;
+        if (view == null && viewFamilyType == null && seedView == null)
         {
             diagnostics = $"{diagnostics} 3D view creation skipped: no existing 3D view or 3D ViewFamilyType is available.";
             return null;
@@ -415,25 +435,37 @@ public sealed class SyncRoomsExternalHandler : IExternalEventHandler
             ? "BIM Photo Sync update 3D floor section"
             : "BIM Photo Sync create 3D floor section");
         transaction.Start();
-        if (view == null && seedView != null)
+        if (view == null && viewFamilyType != null)
+        {
+            view = View3D.CreateIsometric(doc, viewFamilyType.Id);
+        }
+        else if (view == null && seedView != null)
         {
             ElementId duplicatedViewId = seedView.Duplicate(ViewDuplicateOption.Duplicate);
             view = doc.GetElement(duplicatedViewId) as View3D;
         }
 
-        view ??= View3D.CreateIsometric(doc, viewFamilyType!.Id);
+        if (view == null)
+        {
+            transaction.RollBack();
+            diagnostics = $"{diagnostics} 3D view creation failed after Revit returned no View3D element.";
+            return null;
+        }
+
         if (!reusedView)
         {
             view.Name = viewName;
         }
 
-        view.SetSectionBox(sectionResult.SectionBox);
         view.IsSectionBoxActive = true;
+        view.SetSectionBox(sectionResult.SectionBox);
         TryConfigure3DExportView(view);
         transaction.Commit();
         string sourceDescription = reusedView
             ? "Reused"
-            : seedView != null
+            : viewFamilyType != null
+                ? "Created isometric"
+                : seedView != null
                 ? $"Created from Revit 3D view {seedView.Name}"
                 : "Created";
         diagnostics = $"{diagnostics} {sourceDescription} 3D export view {view.Name} ({view.Id.Value}).";
@@ -479,6 +511,7 @@ public sealed class SyncRoomsExternalHandler : IExternalEventHandler
             .OfClass(typeof(View3D))
             .Cast<View3D>()
             .Where(view => !view.IsTemplate)
+            .Where(view => !view.IsPerspective)
             .Where(view => view.CanViewBeDuplicated(ViewDuplicateOption.Duplicate))
             .Where(view => !view.Name.StartsWith("BPS 3D - ", StringComparison.OrdinalIgnoreCase))
             .ToList();
@@ -1015,6 +1048,76 @@ public sealed class SyncRoomsExternalHandler : IExternalEventHandler
         return mappings
             .Where(mapping => !string.IsNullOrWhiteSpace(mapping.Revit_Element_Id))
             .ToDictionary(mapping => mapping.Revit_Element_Id, mapping => mapping);
+    }
+
+    private static List<ViewPlan> GetPrimaryFloorPlanViewsByLevel(Document doc)
+    {
+        return new FilteredElementCollector(doc)
+            .OfClass(typeof(ViewPlan))
+            .Cast<ViewPlan>()
+            .Where(view => IsSyncableFloorPlanView(doc, view))
+            .GroupBy(view => view.GenLevel!.Id.Value)
+            .Select(group => group
+                .OrderByDescending(view => FloorPlanSelectionScore(doc, view))
+                .ThenByDescending(view => CountBoundedRoomsInView(doc, view))
+                .ThenBy(view => view.Name)
+                .First())
+            .OrderBy(view => view.GenLevel?.Elevation ?? 0)
+            .ThenBy(view => view.Name)
+            .ToList();
+    }
+
+    private static int FloorPlanSelectionScore(Document doc, ViewPlan view)
+    {
+        int score = 0;
+        if (view.GenLevel != null && NormalizePlanName(view.Name) == NormalizePlanName(view.GenLevel.Name))
+        {
+            score += 100;
+        }
+
+        if (doc.GetElement(view.GetTypeId()) is ViewFamilyType viewFamilyType)
+        {
+            string typeName = NormalizePlanName(viewFamilyType.Name);
+            if (typeName.Contains("FLOORPLAN", StringComparison.Ordinal) ||
+                typeName.Contains("PLAN", StringComparison.Ordinal) ||
+                typeName.Contains("평면", StringComparison.Ordinal))
+            {
+                score += 10;
+            }
+        }
+
+        if (view.GetPrimaryViewId() == ElementId.InvalidElementId)
+        {
+            score += 5;
+        }
+
+        return score;
+    }
+
+    private static int CountBoundedRoomsInView(Document doc, View view)
+    {
+        try
+        {
+            return new FilteredElementCollector(doc, view.Id)
+                .OfCategory(BuiltInCategory.OST_Rooms)
+                .WhereElementIsNotElementType()
+                .Cast<SpatialElement>()
+                .Count(IsBoundedRoom);
+        }
+        catch (Exception ex)
+        {
+            ValidationLog.Write($"Could not count bounded Rooms in floor plan {view.Name}: {ex.Message}");
+            return 0;
+        }
+    }
+
+    private static bool IsSyncableFloorPlanView(Document doc, ViewPlan view)
+    {
+        if (view.IsTemplate) return false;
+        if (view.ViewType != ViewType.FloorPlan) return false;
+        if (view.GenLevel == null) return false;
+        if (doc.GetElement(view.GetTypeId()) is not ViewFamilyType viewFamilyType) return false;
+        return viewFamilyType.ViewFamily == ViewFamily.FloorPlan;
     }
 
     private static bool IsCanonicalFloorPlanView(Document doc, ViewPlan view)
