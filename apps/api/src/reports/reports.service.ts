@@ -69,6 +69,32 @@ type SheetDefinition = {
 type TemplateCellPatch = {
   sheetPath: string;
   cells: Record<string, string>;
+  rowHeights?: Record<number, number>;
+  styleOverrides?: Record<string, number>;
+};
+
+type ReportImage = {
+  photoId: string;
+  buffer: Buffer;
+  extension: "jpg" | "png";
+  mediaPath: string;
+};
+
+type ReportImageAnchor = {
+  sheetPath: string;
+  image: ReportImage;
+  fromCol: number;
+  fromRow: number;
+  toCol: number;
+  toRow: number;
+};
+
+type ReportImageSheet = {
+  sheetPath: string;
+  drawingPath: string;
+  relPath: string;
+  sheetRelPath: string;
+  anchors: ReportImageAnchor[];
 };
 
 @Injectable()
@@ -138,10 +164,11 @@ export class ReportsService {
     const normalizedFormat = format.toUpperCase();
 
     if (normalizedFormat === "XLSX") {
+      const images = await this.getReportImages(content);
       return {
         filename: `${safeTitle}.xlsx`,
         contentType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        buffer: renderXlsx(content)
+        buffer: renderXlsx(content, images)
       };
     }
     if (normalizedFormat === "DOCX") {
@@ -275,7 +302,7 @@ export class ReportsService {
       status: "ACTIVE",
       ...(dto.room_id ? { roomId: dto.room_id } : {}),
       ...(dto.work_surface ? { workSurface: dto.work_surface } : {}),
-      ...(dto.trade ? { trade: dto.trade } : {}),
+      ...(dto.trade_category_id ? {} : dto.trade ? { trade: dto.trade } : {}),
       ...(dto.trade_category_id ? { tradeCategoryId: dto.trade_category_id } : {}),
       ...(dto.worker_name ? { workerName: { contains: dto.worker_name, mode: "insensitive" } } : {}),
       ...(inferredRange.from || inferredRange.to
@@ -356,6 +383,42 @@ export class ReportsService {
       mime_type: object.ContentType ?? photo.mimeType,
       data: Buffer.concat(chunks).toString("base64")
     };
+  }
+
+  private async getReportImages(content: ReportContent): Promise<ReportImage[]> {
+    const photoIds = content.comparison_photos.map((photo) => photo.photo_id).filter((photoId) => photoId.length > 0);
+    if (photoIds.length === 0) return [];
+
+    const photos = await this.prisma.photo.findMany({
+      where: { id: { in: photoIds }, status: "ACTIVE" },
+      select: { id: true, objectKey: true, mimeType: true }
+    });
+    const photoById = new Map(photos.map((photo) => [photo.id, photo]));
+    const images: ReportImage[] = [];
+
+    for (const photoId of photoIds) {
+      const photo = photoById.get(photoId);
+      if (!photo) continue;
+      const extension = imageExtension(photo.mimeType);
+      if (!extension) continue;
+      try {
+        const object = await this.s3.send(new GetObjectCommand({ Bucket: this.bucket, Key: photo.objectKey }));
+        const chunks: Buffer[] = [];
+        for await (const chunk of object.Body as AsyncIterable<Uint8Array>) {
+          chunks.push(Buffer.from(chunk));
+        }
+        images.push({
+          photoId,
+          buffer: Buffer.concat(chunks),
+          extension,
+          mediaPath: `xl/media/report-photo-${images.length + 1}.${extension}`
+        });
+      } catch {
+        // Missing image objects should not block report export; the text evidence remains in the template.
+      }
+    }
+
+    return images;
   }
 }
 
@@ -674,18 +737,49 @@ function renderDocx(content: ReportContent) {
   ]);
 }
 
-function renderXlsx(content: ReportContent) {
+function renderXlsx(content: ReportContent, images: ReportImage[] = []) {
   const entries = readReportTemplateEntries();
-  const patches = buildTemplateCellPatches(content);
-  const patchBySheet = new Map(patches.map((patch) => [patch.sheetPath, patch.cells]));
-  return zipStore(entries.map((entry) => {
-    const cells = patchBySheet.get(entry.path);
-    if (!cells) return entry;
+  const stylesEntry = entries.find((entry) => entry.path === "xl/styles.xml");
+  const wrapStyles = stylesEntry ? buildWrapStyleOverrides(stylesEntry.content.toString("utf8"), [46, 68, 71]) : { xml: null, styleByBaseId: {} };
+  const patches = buildTemplateCellPatches(content, wrapStyles.styleByBaseId);
+  const patchBySheet = new Map(patches.map((patch) => [patch.sheetPath, patch]));
+  const anchors = buildReportImageAnchors(content, images);
+  const imageSheets = buildReportImageSheets(anchors);
+  const drawingBySheet = new Map(imageSheets.map((sheet) => [sheet.sheetPath, sheet]));
+  const imageEntries = anchors.map((anchor, index) => ({
+    path: `xl/media/report-photo-${index + 1}.${anchor.image.extension}`,
+    content: anchor.image.buffer
+  }));
+  const generatedEntries = [
+    ...imageSheets.map((sheet) => ({
+      path: sheet.drawingPath,
+      content: textBuffer(drawingXml(sheet))
+    })),
+    ...imageSheets.map((sheet) => ({
+      path: sheet.relPath,
+      content: textBuffer(drawingRelationshipXml(sheet, anchors))
+    }))
+  ];
+  const patchedEntries = entries.map((entry) => {
+    if (entry.path === "xl/styles.xml" && wrapStyles.xml) {
+      return { path: entry.path, content: textBuffer(wrapStyles.xml) };
+    }
+
+    const patch = patchBySheet.get(entry.path);
+    const drawing = drawingBySheet.get(entry.path);
+    if (!patch && !drawing) return entry;
+    const patchedXml = patch ? patchWorksheetXml(entry.content.toString("utf8"), patch) : entry.content.toString("utf8");
+    const xml = enhanceReportWorksheetLayout(entry.path, patchedXml);
     return {
       path: entry.path,
-      content: textBuffer(patchWorksheetXml(entry.content.toString("utf8"), cells))
+      content: textBuffer(drawing ? ensureWorksheetDrawing(xml, "rId2") : xml)
     };
-  }));
+  });
+  const withSheetRels = upsertEntries(patchedEntries, buildWorksheetRelationshipEntries(patchedEntries, imageSheets));
+  const withContentTypes = withSheetRels.map((entry) => entry.path === "[Content_Types].xml"
+    ? { ...entry, content: textBuffer(ensureReportImageContentTypes(entry.content.toString("utf8"), imageSheets, anchors)) }
+    : entry);
+  return zipStore(upsertEntries(withContentTypes, [...imageEntries, ...generatedEntries]));
 }
 
 function readReportTemplateEntries() {
@@ -704,6 +798,215 @@ function reportTemplatePath() {
     throw new Error("Report template not found. Expected apps/api/templates/report-template.xlsx.");
   }
   return found;
+}
+
+function buildReportImageAnchors(content: ReportContent, images: ReportImage[]): ReportImageAnchor[] {
+  const imageByPhotoId = new Map(images.map((image) => [image.photoId, image]));
+  const slots = [
+    { sheetPath: "xl/worksheets/sheet4.xml", drawingPath: "xl/drawings/report-photo-sheet4.xml", relPath: "xl/drawings/_rels/report-photo-sheet4.xml.rels", sheetRelPath: "xl/worksheets/_rels/sheet4.xml.rels", fromCol: 2, fromRow: 3, toCol: 7, toRow: 10 },
+    { sheetPath: "xl/worksheets/sheet4.xml", drawingPath: "xl/drawings/report-photo-sheet4b.xml", relPath: "xl/drawings/_rels/report-photo-sheet4b.xml.rels", sheetRelPath: "xl/worksheets/_rels/sheet4.xml.rels", fromCol: 9, fromRow: 3, toCol: 14, toRow: 10 },
+    { sheetPath: "xl/worksheets/sheet4.xml", drawingPath: "xl/drawings/report-photo-sheet4c.xml", relPath: "xl/drawings/_rels/report-photo-sheet4c.xml.rels", sheetRelPath: "xl/worksheets/_rels/sheet4.xml.rels", fromCol: 2, fromRow: 12, toCol: 7, toRow: 19 },
+    { sheetPath: "xl/worksheets/sheet4.xml", drawingPath: "xl/drawings/report-photo-sheet4d.xml", relPath: "xl/drawings/_rels/report-photo-sheet4d.xml.rels", sheetRelPath: "xl/worksheets/_rels/sheet4.xml.rels", fromCol: 9, fromRow: 12, toCol: 14, toRow: 19 },
+    { sheetPath: "xl/worksheets/sheet4.xml", drawingPath: "xl/drawings/report-photo-sheet4e.xml", relPath: "xl/drawings/_rels/report-photo-sheet4e.xml.rels", sheetRelPath: "xl/worksheets/_rels/sheet4.xml.rels", fromCol: 2, fromRow: 21, toCol: 7, toRow: 28 },
+    { sheetPath: "xl/worksheets/sheet4.xml", drawingPath: "xl/drawings/report-photo-sheet4f.xml", relPath: "xl/drawings/_rels/report-photo-sheet4f.xml.rels", sheetRelPath: "xl/worksheets/_rels/sheet4.xml.rels", fromCol: 9, fromRow: 21, toCol: 14, toRow: 28 },
+    { sheetPath: "xl/worksheets/sheet5.xml", drawingPath: "xl/drawings/report-photo-sheet5.xml", relPath: "xl/drawings/_rels/report-photo-sheet5.xml.rels", sheetRelPath: "xl/worksheets/_rels/sheet5.xml.rels", fromCol: 2, fromRow: 3, toCol: 7, toRow: 10 },
+    { sheetPath: "xl/worksheets/sheet5.xml", drawingPath: "xl/drawings/report-photo-sheet5b.xml", relPath: "xl/drawings/_rels/report-photo-sheet5b.xml.rels", sheetRelPath: "xl/worksheets/_rels/sheet5.xml.rels", fromCol: 9, fromRow: 3, toCol: 14, toRow: 10 },
+    { sheetPath: "xl/worksheets/sheet5.xml", drawingPath: "xl/drawings/report-photo-sheet5c.xml", relPath: "xl/drawings/_rels/report-photo-sheet5c.xml.rels", sheetRelPath: "xl/worksheets/_rels/sheet5.xml.rels", fromCol: 2, fromRow: 12, toCol: 7, toRow: 19 },
+    { sheetPath: "xl/worksheets/sheet5.xml", drawingPath: "xl/drawings/report-photo-sheet5d.xml", relPath: "xl/drawings/_rels/report-photo-sheet5d.xml.rels", sheetRelPath: "xl/worksheets/_rels/sheet5.xml.rels", fromCol: 9, fromRow: 12, toCol: 14, toRow: 19 },
+    { sheetPath: "xl/worksheets/sheet5.xml", drawingPath: "xl/drawings/report-photo-sheet5e.xml", relPath: "xl/drawings/_rels/report-photo-sheet5e.xml.rels", sheetRelPath: "xl/worksheets/_rels/sheet5.xml.rels", fromCol: 2, fromRow: 21, toCol: 7, toRow: 28 },
+    { sheetPath: "xl/worksheets/sheet5.xml", drawingPath: "xl/drawings/report-photo-sheet5f.xml", relPath: "xl/drawings/_rels/report-photo-sheet5f.xml.rels", sheetRelPath: "xl/worksheets/_rels/sheet5.xml.rels", fromCol: 9, fromRow: 21, toCol: 14, toRow: 28 },
+    { sheetPath: "xl/worksheets/sheet6.xml", drawingPath: "xl/drawings/report-photo-sheet6.xml", relPath: "xl/drawings/_rels/report-photo-sheet6.xml.rels", sheetRelPath: "xl/worksheets/_rels/sheet6.xml.rels", fromCol: 2, fromRow: 3, toCol: 7, toRow: 10 },
+    { sheetPath: "xl/worksheets/sheet6.xml", drawingPath: "xl/drawings/report-photo-sheet6b.xml", relPath: "xl/drawings/_rels/report-photo-sheet6b.xml.rels", sheetRelPath: "xl/worksheets/_rels/sheet6.xml.rels", fromCol: 9, fromRow: 3, toCol: 14, toRow: 10 },
+    { sheetPath: "xl/worksheets/sheet6.xml", drawingPath: "xl/drawings/report-photo-sheet6c.xml", relPath: "xl/drawings/_rels/report-photo-sheet6c.xml.rels", sheetRelPath: "xl/worksheets/_rels/sheet6.xml.rels", fromCol: 2, fromRow: 12, toCol: 7, toRow: 19 },
+    { sheetPath: "xl/worksheets/sheet6.xml", drawingPath: "xl/drawings/report-photo-sheet6d.xml", relPath: "xl/drawings/_rels/report-photo-sheet6d.xml.rels", sheetRelPath: "xl/worksheets/_rels/sheet6.xml.rels", fromCol: 9, fromRow: 12, toCol: 14, toRow: 19 },
+    { sheetPath: "xl/worksheets/sheet6.xml", drawingPath: "xl/drawings/report-photo-sheet6e.xml", relPath: "xl/drawings/_rels/report-photo-sheet6e.xml.rels", sheetRelPath: "xl/worksheets/_rels/sheet6.xml.rels", fromCol: 2, fromRow: 21, toCol: 7, toRow: 28 },
+    { sheetPath: "xl/worksheets/sheet6.xml", drawingPath: "xl/drawings/report-photo-sheet6f.xml", relPath: "xl/drawings/_rels/report-photo-sheet6f.xml.rels", sheetRelPath: "xl/worksheets/_rels/sheet6.xml.rels", fromCol: 9, fromRow: 21, toCol: 14, toRow: 28 },
+    { sheetPath: "xl/worksheets/sheet7.xml", drawingPath: "xl/drawings/report-photo-overview.xml", relPath: "xl/drawings/_rels/report-photo-overview.xml.rels", sheetRelPath: "xl/worksheets/_rels/sheet7.xml.rels", fromCol: 0, fromRow: 2, toCol: 7, toRow: 10 },
+    { sheetPath: "xl/worksheets/sheet7.xml", drawingPath: "xl/drawings/report-photo-overviewb.xml", relPath: "xl/drawings/_rels/report-photo-overviewb.xml.rels", sheetRelPath: "xl/worksheets/_rels/sheet7.xml.rels", fromCol: 7, fromRow: 2, toCol: 14, toRow: 10 },
+    { sheetPath: "xl/worksheets/sheet7.xml", drawingPath: "xl/drawings/report-photo-overviewc.xml", relPath: "xl/drawings/_rels/report-photo-overviewc.xml.rels", sheetRelPath: "xl/worksheets/_rels/sheet7.xml.rels", fromCol: 0, fromRow: 10, toCol: 7, toRow: 18 },
+    { sheetPath: "xl/worksheets/sheet7.xml", drawingPath: "xl/drawings/report-photo-overviewd.xml", relPath: "xl/drawings/_rels/report-photo-overviewd.xml.rels", sheetRelPath: "xl/worksheets/_rels/sheet7.xml.rels", fromCol: 7, fromRow: 10, toCol: 14, toRow: 18 }
+  ];
+
+  return content.comparison_photos
+    .map((photo, index) => {
+      const slot = slots[index];
+      const image = imageByPhotoId.get(photo.photo_id);
+      if (!slot || !image) return null;
+      return {
+        sheetPath: slot.sheetPath,
+        image,
+        fromCol: slot.fromCol,
+        fromRow: slot.fromRow,
+        toCol: slot.toCol,
+        toRow: slot.toRow
+      };
+    })
+    .filter((anchor): anchor is ReportImageAnchor => anchor !== null);
+}
+
+function buildReportImageSheets(anchors: ReportImageAnchor[]): ReportImageSheet[] {
+  const sheetDefinitions = [
+    {
+      sheetPath: "xl/worksheets/sheet4.xml",
+      drawingPath: "xl/drawings/report-photos-sheet4.xml",
+      relPath: "xl/drawings/_rels/report-photos-sheet4.xml.rels",
+      sheetRelPath: "xl/worksheets/_rels/sheet4.xml.rels"
+    },
+    {
+      sheetPath: "xl/worksheets/sheet5.xml",
+      drawingPath: "xl/drawings/report-photos-sheet5.xml",
+      relPath: "xl/drawings/_rels/report-photos-sheet5.xml.rels",
+      sheetRelPath: "xl/worksheets/_rels/sheet5.xml.rels"
+    },
+    {
+      sheetPath: "xl/worksheets/sheet6.xml",
+      drawingPath: "xl/drawings/report-photos-sheet6.xml",
+      relPath: "xl/drawings/_rels/report-photos-sheet6.xml.rels",
+      sheetRelPath: "xl/worksheets/_rels/sheet6.xml.rels"
+    },
+    {
+      sheetPath: "xl/worksheets/sheet7.xml",
+      drawingPath: "xl/drawings/report-photos-overview.xml",
+      relPath: "xl/drawings/_rels/report-photos-overview.xml.rels",
+      sheetRelPath: "xl/worksheets/_rels/sheet7.xml.rels"
+    }
+  ];
+
+  return sheetDefinitions
+    .map((definition) => ({
+      ...definition,
+      anchors: anchors.filter((anchor) => anchor.sheetPath === definition.sheetPath)
+    }))
+    .filter((sheet) => sheet.anchors.length > 0);
+}
+
+function buildWorksheetRelationshipEntries(entries: ZipEntry[], imageSheets: ReportImageSheet[]): ZipEntry[] {
+  return imageSheets.map((sheet) => {
+    const existing = entries.find((entry) => entry.path === sheet.sheetRelPath)?.content.toString("utf8");
+    const target = "../drawings/" + sheet.drawingPath.split("/").pop();
+    return {
+      path: sheet.sheetRelPath,
+      content: textBuffer(ensureRelationshipXml(existing, "rId2", "http://schemas.openxmlformats.org/officeDocument/2006/relationships/drawing", target))
+    };
+  });
+}
+
+function drawingXml(sheet: ReportImageSheet) {
+  const anchors = sheet.anchors.map((anchor, index) => {
+    const relId = `rId${index + 1}`;
+    const picId = index + 2;
+    return `<xdr:twoCellAnchor editAs="oneCell"><xdr:from><xdr:col>${anchor.fromCol}</xdr:col><xdr:colOff>0</xdr:colOff><xdr:row>${anchor.fromRow}</xdr:row><xdr:rowOff>0</xdr:rowOff></xdr:from><xdr:to><xdr:col>${anchor.toCol}</xdr:col><xdr:colOff>0</xdr:colOff><xdr:row>${anchor.toRow}</xdr:row><xdr:rowOff>0</xdr:rowOff></xdr:to><xdr:pic><xdr:nvPicPr><xdr:cNvPr id="${picId}" name="Report Photo ${picId}"/><xdr:cNvPicPr><a:picLocks noChangeAspect="1"/></xdr:cNvPicPr></xdr:nvPicPr><xdr:blipFill><a:blip xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" r:embed="${relId}"/><a:stretch><a:fillRect/></a:stretch></xdr:blipFill><xdr:spPr><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></xdr:spPr></xdr:pic><xdr:clientData/></xdr:twoCellAnchor>`;
+  }).join("");
+  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><xdr:wsDr xmlns:xdr="http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">${anchors}</xdr:wsDr>`;
+}
+
+function drawingRelationshipXml(sheet: ReportImageSheet, allAnchors: ReportImageAnchor[]) {
+  const relationships = sheet.anchors.map((anchor, index) => {
+    const imageIndex = allAnchors.indexOf(anchor) + 1;
+    return `<Relationship Id="rId${index + 1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="../media/report-photo-${imageIndex}.${anchor.image.extension}"/>`;
+  }).join("");
+  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">${relationships}</Relationships>`;
+}
+
+function ensureWorksheetDrawing(xml: string, relId: string) {
+  if (xml.includes("<drawing ")) return xml;
+  return xml.replace("</worksheet>", `<drawing r:id="${relId}"/></worksheet>`);
+}
+
+function ensureRelationshipXml(existing: string | undefined, id: string, type: string, target: string) {
+  const relationship = `<Relationship Id="${id}" Type="${type}" Target="${target}"/>`;
+  if (!existing || existing.trim().length === 0) {
+    return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">${relationship}</Relationships>`;
+  }
+  if (existing.includes(`Target="${target}"`)) return existing;
+  const withoutConflict = existing.replace(new RegExp(`<Relationship\\b(?=[^>]*\\bId="${id}")[^>]*/>`), "");
+  return withoutConflict.replace("</Relationships>", `${relationship}</Relationships>`);
+}
+
+function ensureReportImageContentTypes(xml: string, imageSheets: ReportImageSheet[], anchors: ReportImageAnchor[]) {
+  let current = xml;
+  if (anchors.some((anchor) => anchor.image.extension === "jpg") && !current.includes('Extension="jpg"')) {
+    current = current.replace("</Types>", '<Default Extension="jpg" ContentType="image/jpeg"/></Types>');
+  }
+  if (anchors.some((anchor) => anchor.image.extension === "png") && !current.includes('Extension="png"')) {
+    current = current.replace("</Types>", '<Default Extension="png" ContentType="image/png"/></Types>');
+  }
+  for (const sheet of imageSheets) {
+    const partName = `/${sheet.drawingPath}`;
+    if (!current.includes(`PartName="${partName}"`)) {
+      current = current.replace("</Types>", `<Override PartName="${partName}" ContentType="application/vnd.openxmlformats-officedocument.drawing+xml"/></Types>`);
+    }
+  }
+  return current;
+}
+
+function upsertEntries(entries: ZipEntry[], replacements: ZipEntry[]) {
+  const replacementByPath = new Map(replacements.map((entry) => [entry.path, entry]));
+  const next = entries.map((entry) => replacementByPath.get(entry.path) ?? entry);
+  const existingPaths = new Set(next.map((entry) => entry.path));
+  for (const replacement of replacements) {
+    if (!existingPaths.has(replacement.path)) next.push(replacement);
+  }
+  return next;
+}
+
+function imageExtension(mimeType: string | null) {
+  const normalized = mimeType?.toLowerCase() ?? "";
+  if (normalized.includes("png")) return "png";
+  if (normalized.includes("jpeg") || normalized.includes("jpg")) return "jpg";
+  return null;
+}
+
+function buildWrapStyleOverrides(stylesXml: string, baseStyleIds: number[]) {
+  const cellXfsMatch = stylesXml.match(/<cellXfs count="(\d+)">([\s\S]*?)<\/cellXfs>/);
+  if (!cellXfsMatch) {
+    return { xml: null, styleByBaseId: {} as Record<number, number> };
+  }
+
+  const xfEntries = cellXfsMatch[2].match(/<xf\b[^>]*?(?:\/>|>[\s\S]*?<\/xf>)/g);
+  if (!xfEntries) {
+    return { xml: null, styleByBaseId: {} as Record<number, number> };
+  }
+
+  const nextEntries = [...xfEntries];
+  const styleByBaseId: Record<number, number> = {};
+
+  for (const baseStyleId of baseStyleIds) {
+    const xf = xfEntries[baseStyleId];
+    if (!xf || styleByBaseId[baseStyleId]) continue;
+
+    let wrapped = xf.replace(/\bshrinkToFit="1"/g, "").replace(/\s{2,}/g, " ");
+    if (wrapped.includes("<alignment")) {
+      wrapped = wrapped.replace(/<alignment\b([^>]*)\/>/, (_match, attrs: string) => {
+        return `<alignment${ensureWrapTextAttribute(attrs)} />`;
+      });
+      wrapped = wrapped.replace(/<alignment\b([^>]*)>([\s\S]*?)<\/alignment>/, (_match, attrs: string, inner: string) => {
+        return `<alignment${ensureWrapTextAttribute(attrs)}>${inner}</alignment>`;
+      });
+    } else {
+      wrapped = wrapped.replace(/<xf\b([^>]*)>/, `<xf$1><alignment wrapText="1" vertical="center"/></xf>`);
+      if (wrapped === xf) {
+        wrapped = wrapped.replace(/\/>$/, ` applyAlignment="1"><alignment wrapText="1" vertical="center"/></xf>`);
+      }
+    }
+    if (!wrapped.includes('applyAlignment="1"')) {
+      wrapped = wrapped.replace("<xf ", '<xf applyAlignment="1" ');
+    }
+
+    styleByBaseId[baseStyleId] = nextEntries.length;
+    nextEntries.push(wrapped);
+  }
+
+  const replacement = `<cellXfs count="${nextEntries.length}">${nextEntries.join("")}</cellXfs>`;
+  return {
+    xml: stylesXml.replace(cellXfsMatch[0], replacement),
+    styleByBaseId
+  };
+}
+
+function ensureWrapTextAttribute(attributes: string) {
+  const withoutWrap = attributes.replace(/\bwrapText="[^"]*"/g, "").replace(/\bshrinkToFit="[^"]*"/g, "");
+  return `${withoutWrap} wrapText="1"`;
 }
 
 function unzipEntries(buffer: Buffer): ZipEntry[] {
@@ -750,7 +1053,7 @@ function localFileContentStart(buffer: Buffer, localOffset: number) {
   return localOffset + 30 + nameLength + extraLength;
 }
 
-function buildTemplateCellPatches(content: ReportContent): TemplateCellPatch[] {
+function buildTemplateCellPatches(content: ReportContent, wrapStyleByBaseId: Record<number, number>): TemplateCellPatch[] {
   const generatedDate = formatKoreanDate(content.generated_at);
   const dateRange = content.situation.date_range ?? photoDateRange(content.comparison_photos) ?? generatedDate;
   const siteName = content.situation.room ?? "현장 전체";
@@ -770,6 +1073,13 @@ function buildTemplateCellPatches(content: ReportContent): TemplateCellPatch[] {
         A16: `■ ${content.title}`,
         A20: dateRange,
         C28: companyName
+      },
+      styleOverrides: {
+        C4: wrapStyleByBaseId[46],
+        C9: wrapStyleByBaseId[46],
+        C14: wrapStyleByBaseId[46],
+        C19: wrapStyleByBaseId[46],
+        C24: wrapStyleByBaseId[46]
       }
     },
     {
@@ -778,6 +1088,12 @@ function buildTemplateCellPatches(content: ReportContent): TemplateCellPatch[] {
         A17: content.title,
         A29: dateRange,
         A36: companyName
+      },
+      styleOverrides: {
+        A3: wrapStyleByBaseId[71],
+        H3: wrapStyleByBaseId[71],
+        A11: wrapStyleByBaseId[71],
+        H11: wrapStyleByBaseId[71]
       }
     },
     {
@@ -796,9 +1112,9 @@ function buildTemplateCellPatches(content: ReportContent): TemplateCellPatch[] {
         C24: followUp
       }
     },
-    buildPhotoTemplatePatch("xl/worksheets/sheet4.xml", content, 0, siteName),
-    buildPhotoTemplatePatch("xl/worksheets/sheet5.xml", content, 6, siteName),
-    buildPhotoTemplatePatch("xl/worksheets/sheet6.xml", content, 12, siteName),
+    buildPhotoTemplatePatch("xl/worksheets/sheet4.xml", content, 0, siteName, wrapStyleByBaseId[68]),
+    buildPhotoTemplatePatch("xl/worksheets/sheet5.xml", content, 6, siteName, wrapStyleByBaseId[68]),
+    buildPhotoTemplatePatch("xl/worksheets/sheet6.xml", content, 12, siteName, wrapStyleByBaseId[68]),
     {
       sheetPath: "xl/worksheets/sheet7.xml",
       cells: {
@@ -813,26 +1129,61 @@ function buildTemplateCellPatches(content: ReportContent): TemplateCellPatch[] {
   ];
 }
 
-function buildPhotoTemplatePatch(sheetPath: string, content: ReportContent, startIndex: number, siteName: string): TemplateCellPatch {
+function buildPhotoTemplatePatch(sheetPath: string, content: ReportContent, startIndex: number, siteName: string, wrapStyleId: number | undefined): TemplateCellPatch {
   const slots = ["C11", "J11", "C20", "J20", "C29", "J29"];
   const cells: Record<string, string> = { A2: `현장명: ${siteName}` };
   slots.forEach((cell, index) => {
     const photo = content.comparison_photos[startIndex + index];
     cells[cell] = photo ? photoEvidenceText(photo) : index === 0 && startIndex === 0 ? "선택한 조건에 해당하는 사진 데이터가 없습니다." : "";
   });
-  return { sheetPath, cells };
+  return {
+    sheetPath,
+    cells,
+    styleOverrides: Object.fromEntries(slots.map((cell) => [cell, wrapStyleId]).filter((entry): entry is [string, number] => typeof entry[1] === "number"))
+  };
 }
 
-function patchWorksheetXml(xml: string, cells: Record<string, string>) {
-  return Object.entries(cells).reduce((current, [cellRef, value]) => setInlineStringCell(current, cellRef, value), xml);
+function patchWorksheetXml(xml: string, patch: TemplateCellPatch) {
+  return Object.entries(patch.cells).reduce((current, [cellRef, value]) => {
+    return setInlineStringCell(current, cellRef, value, patch.styleOverrides?.[cellRef]);
+  }, xml);
 }
 
-function setInlineStringCell(xml: string, cellRef: string, value: string) {
+function enhanceReportWorksheetLayout(sheetPath: string, xml: string) {
+  if (!["xl/worksheets/sheet3.xml", "xl/worksheets/sheet4.xml", "xl/worksheets/sheet5.xml", "xl/worksheets/sheet6.xml", "xl/worksheets/sheet7.xml"].includes(sheetPath)) {
+    return xml;
+  }
+  const tallRowsBySheet: Record<string, Record<number, number>> = {
+    "xl/worksheets/sheet3.xml": { 4: 90, 9: 110, 14: 90, 19: 90, 24: 70 },
+    "xl/worksheets/sheet4.xml": { 11: 108, 20: 108, 29: 108 },
+    "xl/worksheets/sheet5.xml": { 11: 108, 20: 108, 29: 108 },
+    "xl/worksheets/sheet6.xml": { 11: 108, 20: 108, 29: 108 },
+    "xl/worksheets/sheet7.xml": { 3: 130, 11: 130 }
+  };
+  return Object.entries(tallRowsBySheet[sheetPath] ?? {}).reduce((current, [row, height]) => setRowHeight(current, Number(row), height), xml);
+}
+
+function setRowHeight(xml: string, rowNumber: number, height: number) {
+  const rowPattern = new RegExp(`<row\\b(?=[^>]*\\br="${rowNumber}")[^>]*>`);
+  if (rowPattern.test(xml)) {
+    return xml.replace(rowPattern, (rowTag) => {
+      let next = rowTag.replace(/\sht="[^"]*"/, "").replace(/\scustomHeight="[^"]*"/, "");
+      next = next.replace(/>$/, ` ht="${height}" customHeight="1">`);
+      return next;
+    });
+  }
+  return xml.replace("</sheetData>", `<row r="${rowNumber}" ht="${height}" customHeight="1"></row></sheetData>`);
+}
+
+function setInlineStringCell(xml: string, cellRef: string, value: string, styleOverride?: number) {
   const selfClosingCellPattern = new RegExp(`<c\\b(?=[^>]*\\br="${cellRef}")[^>]*/>`);
   const cellPattern = new RegExp(`<c\\b(?=[^>]*\\br="${cellRef}")[^>]*>(?:[\\s\\S]*?)<\\/c>`);
   const existing = selfClosingCellPattern.exec(xml) ?? cellPattern.exec(xml);
-  const style = existing?.[0].match(/\bs="([^"]+)"/)?.[0] ?? "";
-  const cellXml = `<c r="${cellRef}"${style ? ` ${style}` : ""} t="inlineStr"><is><t xml:space="preserve">${xmlEscape(value)}</t></is></c>`;
+  const styleValue = typeof styleOverride === "number"
+    ? `s="${styleOverride}"`
+    : existing?.[0].match(/\bs="([^"]+)"/)?.[0] ?? "";
+  const style = styleValue ? ` ${styleValue}` : "";
+  const cellXml = `<c r="${cellRef}"${style} t="inlineStr"><is><t xml:space="preserve">${xmlEscape(value)}</t></is></c>`;
   if (existing) return xml.replace(existing[0], cellXml);
 
   const rowNumber = Number(cellRef.match(/\d+/)?.[0] ?? 1);

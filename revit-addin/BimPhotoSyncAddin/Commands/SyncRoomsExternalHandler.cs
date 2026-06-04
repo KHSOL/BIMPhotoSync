@@ -13,6 +13,7 @@ public sealed class SyncRoomsExternalHandler : IExternalEventHandler
 {
     private const string SharedParameterName = "BIM_PHOTO_ROOM_ID";
     private const string SharedParameterGuid = "5E6A21CE-7829-4A8A-A354-448246AD687D";
+    private sealed record FloorPlanSectionBoxResult(BoundingBoxXYZ? SectionBox, string Diagnostic);
     public UIApplication? UiApplication { get; set; }
     public RevitSyncOperation Operation { get; set; } = RevitSyncOperation.Rooms;
 
@@ -321,16 +322,19 @@ public sealed class SyncRoomsExternalHandler : IExternalEventHandler
             View3D? exportView = null;
             try
             {
-                exportView = CreateFloorPlanSection3DView(doc, floorPlan);
+                exportView = CreateFloorPlanSection3DView(doc, floorPlan, out string sectionDiagnostics);
+                ValidationLog.Write(sectionDiagnostics);
                 if (exportView == null)
                 {
-                    ValidationLog.Write($"Skipped 3D model sync for {floorPlan.Name}: no bounded Room section box.");
                     continue;
                 }
 
                 string result = SyncSingle3DModel(doc, exportView, floorPlan.Name, floorPlan.Id.Value.ToString());
                 ValidationLog.Write(result);
-                syncedCount++;
+                if (result.StartsWith("Synced 3D model ", StringComparison.Ordinal))
+                {
+                    syncedCount++;
+                }
             }
             catch (Exception ex)
             {
@@ -393,22 +397,27 @@ public sealed class SyncRoomsExternalHandler : IExternalEventHandler
             : $"Synced 3D model {displayViewName} ({Math.Round(bytes.LongLength / 1024.0 / 1024.0, 2)} MB).";
     }
 
-    private static View3D? CreateFloorPlanSection3DView(Document doc, ViewPlan floorPlan)
+    private static View3D? CreateFloorPlanSection3DView(Document doc, ViewPlan floorPlan, out string diagnostics)
     {
-        BoundingBoxXYZ? sectionBox = BuildFloorPlanSectionBox(doc, floorPlan);
-        if (sectionBox == null) return null;
+        FloorPlanSectionBoxResult sectionResult = BuildFloorPlanSectionBox(doc, floorPlan);
+        diagnostics = sectionResult.Diagnostic;
+        if (sectionResult.SectionBox == null) return null;
 
         ViewFamilyType? viewFamilyType = new FilteredElementCollector(doc)
             .OfClass(typeof(ViewFamilyType))
             .Cast<ViewFamilyType>()
             .FirstOrDefault(type => type.ViewFamily == ViewFamily.ThreeDimensional);
-        if (viewFamilyType == null) return null;
+        if (viewFamilyType == null)
+        {
+            diagnostics = $"{diagnostics} 3D view creation skipped: no 3D ViewFamilyType is available.";
+            return null;
+        }
 
         using Transaction transaction = new(doc, "BIM Photo Sync 3D floor section");
         transaction.Start();
         View3D view = View3D.CreateIsometric(doc, viewFamilyType.Id);
         view.Name = UniqueViewName(doc, $"BPS 3D - {floorPlan.Name}");
-        view.SetSectionBox(sectionBox);
+        view.SetSectionBox(sectionResult.SectionBox);
         view.IsSectionBoxActive = true;
         TryConfigure3DExportView(view);
         transaction.Commit();
@@ -471,41 +480,91 @@ public sealed class SyncRoomsExternalHandler : IExternalEventHandler
         return $"{baseName} {DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()}";
     }
 
-    private static BoundingBoxXYZ? BuildFloorPlanSectionBox(Document doc, ViewPlan floorPlan)
+    private static FloorPlanSectionBoxResult BuildFloorPlanSectionBox(Document doc, ViewPlan floorPlan)
     {
-        List<SpatialElement> rooms = new FilteredElementCollector(doc, floorPlan.Id)
+        BoundingBoxXYZ? cropBounds = TryGetFloorPlanCropModelBounds(floorPlan);
+        List<SpatialElement> viewRooms = new FilteredElementCollector(doc, floorPlan.Id)
             .OfCategory(BuiltInCategory.OST_Rooms)
             .WhereElementIsNotElementType()
             .Cast<SpatialElement>()
-            .Where(room => GetRoomAreaM2(room) > 0)
+            .Where(IsBoundedRoom)
             .ToList();
-        if (rooms.Count == 0) return null;
-
-        BoundingBoxXYZ? roomBounds = TryGetFloorPlanCropModelBounds(floorPlan);
-        foreach (SpatialElement room in rooms)
+        BoundingBoxXYZ? viewRoomBounds = BuildRoomBounds(viewRooms);
+        if (viewRoomBounds != null)
         {
-            BoundingBoxXYZ? box = room.get_BoundingBox(null);
-            if (box == null) continue;
-
-            roomBounds = roomBounds == null
-                ? CloneBoundingBox(box)
-                : ExpandBoundingBox(roomBounds, box);
+            BoundingBoxXYZ combinedBounds = CombineBoundingBoxes(cropBounds, viewRoomBounds) ?? CloneBoundingBox(viewRoomBounds);
+            return CreateFloorPlanSectionBoxResult(
+                doc,
+                floorPlan,
+                combinedBounds,
+                $"3D section {floorPlan.Name}: using view-scoped room bounds from {viewRooms.Count} rooms{DescribeCropBounds(cropBounds)}.");
         }
 
-        if (roomBounds == null) return null;
+        List<SpatialElement> levelRooms = new FilteredElementCollector(doc)
+            .OfCategory(BuiltInCategory.OST_Rooms)
+            .WhereElementIsNotElementType()
+            .Cast<SpatialElement>()
+            .Where(IsBoundedRoom)
+            .Where(room => room.LevelId == floorPlan.GenLevel?.Id)
+            .ToList();
+        if (levelRooms.Count > 0)
+        {
+            List<SpatialElement> intersectingCropRooms = cropBounds == null
+                ? levelRooms
+                : levelRooms.Where(room => RoomIntersectsBounds(room, cropBounds)).ToList();
+            List<SpatialElement> fallbackRooms = intersectingCropRooms.Count > 0 ? intersectingCropRooms : levelRooms;
+            BoundingBoxXYZ? levelRoomBounds = BuildRoomBounds(fallbackRooms);
+            if (levelRoomBounds != null)
+            {
+                BoundingBoxXYZ combinedBounds = CombineBoundingBoxes(cropBounds, levelRoomBounds) ?? CloneBoundingBox(levelRoomBounds);
+                string cropDiagnostic = cropBounds == null
+                    ? " without crop bounds."
+                    : intersectingCropRooms.Count > 0
+                        ? $"; crop intersection kept {intersectingCropRooms.Count} of {levelRooms.Count} same-level rooms."
+                        : $"; crop bounds were available but did not intersect any same-level room boxes, so all {levelRooms.Count} same-level rooms were used.";
+                return CreateFloorPlanSectionBoxResult(
+                    doc,
+                    floorPlan,
+                    combinedBounds,
+                    $"3D section {floorPlan.Name}: view-scoped room collection returned 0 bounded rooms. Using same-level document fallback for {floorPlan.GenLevel?.Name ?? floorPlan.Name} from {fallbackRooms.Count} rooms{cropDiagnostic}");
+            }
+        }
 
+        if (cropBounds != null)
+        {
+            return CreateFloorPlanSectionBoxResult(
+                doc,
+                floorPlan,
+                cropBounds,
+                $"3D section {floorPlan.Name}: using crop-box fallback because view-scoped rooms returned 0 bounded rooms and same-level document fallback found no bounded room boxes.");
+        }
+
+        return new FloorPlanSectionBoxResult(
+            null,
+            $"Skipped 3D model sync for {floorPlan.Name}: no bounded rooms were found in view scope or same-level document fallback, and no crop box was available.");
+    }
+
+    private static FloorPlanSectionBoxResult CreateFloorPlanSectionBoxResult(
+        Document doc,
+        ViewPlan floorPlan,
+        BoundingBoxXYZ combinedBounds,
+        string diagnostic)
+    {
         double padding = UnitUtils.ConvertToInternalUnits(2.5, UnitTypeId.Meters);
-        double baseElevation = floorPlan.GenLevel?.Elevation ?? roomBounds.Min.Z;
+        double verticalPadding = UnitUtils.ConvertToInternalUnits(0.35, UnitTypeId.Meters);
+        double baseElevation = floorPlan.GenLevel?.Elevation ?? combinedBounds.Min.Z;
         double topElevation = FindNextLevelElevation(doc, baseElevation)
             ?? baseElevation + UnitUtils.ConvertToInternalUnits(4.2, UnitTypeId.Meters);
 
         BoundingBoxXYZ sectionBox = new()
         {
             Transform = Transform.Identity,
-            Min = new XYZ(roomBounds.Min.X - padding, roomBounds.Min.Y - padding, baseElevation - UnitUtils.ConvertToInternalUnits(0.35, UnitTypeId.Meters)),
-            Max = new XYZ(roomBounds.Max.X + padding, roomBounds.Max.Y + padding, topElevation + UnitUtils.ConvertToInternalUnits(0.35, UnitTypeId.Meters))
+            Min = new XYZ(combinedBounds.Min.X - padding, combinedBounds.Min.Y - padding, baseElevation - verticalPadding),
+            Max = new XYZ(combinedBounds.Max.X + padding, combinedBounds.Max.Y + padding, topElevation + verticalPadding)
         };
-        return sectionBox;
+        return new FloorPlanSectionBoxResult(
+            sectionBox,
+            $"{diagnostic} Section box XY=({Math.Round(sectionBox.Min.X, 2)}, {Math.Round(sectionBox.Min.Y, 2)}) -> ({Math.Round(sectionBox.Max.X, 2)}, {Math.Round(sectionBox.Max.Y, 2)}), Z={Math.Round(sectionBox.Min.Z, 2)} -> {Math.Round(sectionBox.Max.Z, 2)}.");
     }
 
     private static BoundingBoxXYZ? TryGetFloorPlanCropModelBounds(ViewPlan floorPlan)
@@ -540,6 +599,54 @@ public sealed class SyncRoomsExternalHandler : IExternalEventHandler
             Min = source.Min,
             Max = source.Max
         };
+    }
+
+    private static BoundingBoxXYZ? BuildRoomBounds(IEnumerable<SpatialElement> rooms)
+    {
+        BoundingBoxXYZ? bounds = null;
+        foreach (SpatialElement room in rooms)
+        {
+            BoundingBoxXYZ? box = room.get_BoundingBox(null);
+            if (box == null) continue;
+
+            bounds = bounds == null
+                ? CloneBoundingBox(box)
+                : ExpandBoundingBox(bounds, box);
+        }
+
+        return bounds;
+    }
+
+    private static BoundingBoxXYZ? CombineBoundingBoxes(BoundingBoxXYZ? first, BoundingBoxXYZ? second)
+    {
+        if (first == null) return second == null ? null : CloneBoundingBox(second);
+        if (second == null) return CloneBoundingBox(first);
+
+        BoundingBoxXYZ combined = CloneBoundingBox(first);
+        return ExpandBoundingBox(combined, second);
+    }
+
+    private static bool RoomIntersectsBounds(SpatialElement room, BoundingBoxXYZ bounds)
+    {
+        BoundingBoxXYZ? roomBounds = room.get_BoundingBox(null);
+        if (roomBounds == null) return false;
+
+        return roomBounds.Max.X >= bounds.Min.X &&
+               roomBounds.Min.X <= bounds.Max.X &&
+               roomBounds.Max.Y >= bounds.Min.Y &&
+               roomBounds.Min.Y <= bounds.Max.Y &&
+               roomBounds.Max.Z >= bounds.Min.Z &&
+               roomBounds.Min.Z <= bounds.Max.Z;
+    }
+
+    private static bool IsBoundedRoom(SpatialElement room)
+    {
+        return GetRoomAreaM2(room) > 0;
+    }
+
+    private static string DescribeCropBounds(BoundingBoxXYZ? cropBounds)
+    {
+        return cropBounds == null ? " without crop bounds" : " with crop bounds merged";
     }
 
     private static BoundingBoxXYZ ExpandBoundingBox(BoundingBoxXYZ target, BoundingBoxXYZ source)

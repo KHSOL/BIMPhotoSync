@@ -6,6 +6,16 @@
     "orientation": "portrait",
     "scheme": "bimphotosync",
     "userInterfaceStyle": "light",
+    "plugins": [
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "현장 사진 업로드를 위해 사진 보관함 접근이 필요합니다.",
+          "cameraPermission": "현장 사진 촬영을 위해 카메라 접근이 필요합니다.",
+          "microphonePermission": false
+        }
+      ]
+    ],
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.bimphotosync.mobile",
