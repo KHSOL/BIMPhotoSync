@@ -47,8 +47,8 @@ type ExportFile = {
   buffer: Buffer;
 };
 
-type GeminiResult = {
-  provider: "GEMINI" | "HEURISTIC";
+type ReportModelResult = {
+  provider: "GEMINI" | "ANTHROPIC" | "HEURISTIC";
   modelName: string;
   content: ReportContent | null;
   errorMessage: string | null;
@@ -186,8 +186,8 @@ export class ReportsService {
     const creator = await this.prisma.user.findUnique({ where: { id: user.sub }, select: { name: true } });
     const generatedBy = creator?.name ?? user.email ?? "관리자";
     const title = dto.title?.trim() || buildTitle(dto, photos);
-    const gemini = await this.tryGenerateWithGemini(title, generatedBy, dto, photos);
-    const content = gemini.content ?? buildHeuristicReport(title, generatedBy, dto, photos);
+    const generated = await this.tryGenerateWithConfiguredModel(title, generatedBy, dto, photos);
+    const content = generated.content ?? buildHeuristicReport(title, generatedBy, dto, photos);
 
     const report = await this.prisma.generatedReport.create({
       data: {
@@ -199,9 +199,9 @@ export class ReportsService {
         content: content as Prisma.InputJsonValue,
         summary: content.analysis_result,
         photoIds: photos.map((photo) => photo.id),
-        modelProvider: gemini.provider,
-        modelName: gemini.modelName,
-        errorMessage: gemini.errorMessage
+        modelProvider: generated.provider,
+        modelName: generated.modelName,
+        errorMessage: generated.errorMessage
       },
       include: { project: true, createdBy: { select: { id: true, name: true, email: true, role: true } } }
     });
@@ -224,7 +224,7 @@ export class ReportsService {
     const photos = await this.findPhotos(dto);
     const prompt = dto.message.trim();
     const apiKey = this.config.get<string>("GEMINI_API_KEY");
-    const modelName = this.config.get<string>("GEMINI_REPORT_MODEL", "gemini-3.1-flash-lite");
+    const modelName = this.config.get<string>("GEMINI_REPORT_MODEL", "gemini-3.5-flash");
 
     if (!apiKey) {
       return {
@@ -303,29 +303,20 @@ export class ReportsService {
     });
   }
 
-  private async tryGenerateWithGemini(title: string, generatedBy: string, dto: GenerateReportDto, photos: PhotoForReport[]): Promise<GeminiResult> {
+  private async tryGenerateWithConfiguredModel(title: string, generatedBy: string, dto: GenerateReportDto, photos: PhotoForReport[]): Promise<ReportModelResult> {
+    const provider = dto.model_provider ?? this.config.get<"GEMINI" | "ANTHROPIC">("REPORT_MODEL_PROVIDER", "GEMINI");
+    return provider === "ANTHROPIC"
+      ? this.tryGenerateWithAnthropic(title, generatedBy, dto, photos)
+      : this.tryGenerateWithGemini(title, generatedBy, dto, photos);
+  }
+
+  private async tryGenerateWithGemini(title: string, generatedBy: string, dto: GenerateReportDto, photos: PhotoForReport[]): Promise<ReportModelResult> {
     const apiKey = this.config.get<string>("GEMINI_API_KEY");
-    const modelName = this.config.get<string>("GEMINI_REPORT_MODEL", "gemini-3.1-flash-lite");
+    const modelName = this.config.get<string>("GEMINI_REPORT_MODEL", "gemini-3.5-flash");
     if (!apiKey) return { provider: "HEURISTIC", modelName: "bim-photo-sync-report-v1", content: null, errorMessage: null };
 
     try {
-      const parts: Array<Record<string, unknown>> = [
-        {
-          text: [
-            "너는 BIM 현장 사진 분석 보고서 작성자다.",
-            "아래 사진과 메타데이터를 근거로 한국어 JSON 보고서를 작성한다.",
-            "반드시 JSON만 반환한다. Markdown은 금지한다.",
-            "JSON 필드: title, generated_at, generated_by, filters, situation, comparison_photos, progress_timeline, analysis_result, memo.",
-            "분류와 분석 순서는 프로젝트 → 방(실) → 공사면 → 작업일자 → 공종 → 작성자(작업자) 순서를 따른다.",
-            "비교 사진은 같은 방/공사면 안에서 날짜순 변화가 드러나도록 설명한다.",
-            `제목: ${title}`,
-            `생성자: ${generatedBy}`,
-            `필터: ${JSON.stringify(reportFilters(dto))}`,
-            dto.ai_prompt ? `관리자 추가 지시: ${dto.ai_prompt}` : "",
-            `사진 메타데이터: ${JSON.stringify(photos.map(photoSummary))}`
-          ].filter(Boolean).join("\n")
-        }
-      ];
+      const parts: Array<Record<string, unknown>> = [{ text: buildReportGenerationPrompt(title, generatedBy, dto, photos) }];
 
       for (const photo of photos.slice(0, 8)) {
         const image = await this.getPhotoInlineData(photo).catch(() => null);
@@ -349,6 +340,47 @@ export class ReportsService {
         modelName: "bim-photo-sync-report-v1",
         content: null,
         errorMessage: error instanceof Error ? error.message : "Gemini report generation failed."
+      };
+    }
+  }
+
+  private async tryGenerateWithAnthropic(title: string, generatedBy: string, dto: GenerateReportDto, photos: PhotoForReport[]): Promise<ReportModelResult> {
+    const apiKey = this.config.get<string>("ANTHROPIC_API_KEY");
+    const modelName = this.config.get<string>("ANTHROPIC_REPORT_MODEL", "claude-opus-4-8");
+    if (!apiKey) return { provider: "HEURISTIC", modelName: "bim-photo-sync-report-v1", content: null, errorMessage: null };
+
+    try {
+      const res = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-api-key": apiKey,
+          "anthropic-version": "2023-06-01"
+        },
+        body: JSON.stringify({
+          model: modelName,
+          max_tokens: 2500,
+          temperature: 0.2,
+          messages: [
+            {
+              role: "user",
+              content: [{ type: "text", text: buildReportGenerationPrompt(title, generatedBy, dto, photos) }]
+            }
+          ]
+        })
+      });
+
+      if (!res.ok) throw new Error(`Anthropic report generation failed: ${res.status} ${await res.text()}`);
+      const json = (await res.json()) as { content?: Array<{ type?: string; text?: string }> };
+      const text = json.content?.map((part) => part.type === "text" ? part.text ?? "" : "").join("").trim() ?? "";
+      const parsed = parseReportJson(text);
+      return { provider: "ANTHROPIC", modelName, content: normalizeReportContent(parsed, title, generatedBy, dto, photos), errorMessage: null };
+    } catch (error) {
+      return {
+        provider: "HEURISTIC",
+        modelName: "bim-photo-sync-report-v1",
+        content: null,
+        errorMessage: error instanceof Error ? error.message : "Anthropic report generation failed."
       };
     }
   }
@@ -413,6 +445,24 @@ function buildTitle(dto: GenerateReportDto, photos: PhotoForReport[]) {
   ].filter((part): part is string => typeof part === "string" && part.length > 0);
   const generatedDate = new Date().toISOString().slice(0, 10);
   return `${parts.join("_") || "현장"}_분석보고서(${generatedDate})`;
+}
+
+function buildReportGenerationPrompt(title: string, generatedBy: string, dto: GenerateReportDto, photos: PhotoForReport[]) {
+  return [
+    "너는 BIM 현장 사진 분석 보고서 작성자다.",
+    "아래 사진과 메타데이터를 근거로 한국어 JSON 보고서를 작성한다.",
+    "반드시 JSON만 반환한다. Markdown은 금지한다.",
+    "JSON 필드: title, generated_at, generated_by, filters, situation, comparison_photos, progress_timeline, analysis_result, memo.",
+    "comparison_photos는 입력 사진 수와 같은 수로 작성하고, 입력 photo_id를 그대로 유지한다.",
+    "분류와 분석 순서는 프로젝트 → 방(실) → 공사면 → 작업일자 → 공종 → 작성자(작업자) 순서를 따른다.",
+    "비교 사진은 같은 방/공사면 안에서 날짜순 변화가 드러나도록 설명한다.",
+    "analysis_result는 work_items, details, precautions, judgment 값을 포함하는 간결한 한국어 문장으로 작성한다.",
+    `제목: ${title}`,
+    `생성자: ${generatedBy}`,
+    `필터: ${JSON.stringify(reportFilters(dto))}`,
+    dto.ai_prompt ? `관리자 추가 지시: ${dto.ai_prompt}` : "",
+    `사진 메타데이터: ${JSON.stringify(photos.map(photoSummary))}`
+  ].filter(Boolean).join("\n");
 }
 
 function buildHeuristicReport(title: string, generatedBy: string, dto: GenerateReportDto, photos: PhotoForReport[]): ReportContent {
@@ -570,7 +620,10 @@ function roomLabel(photo: PhotoForReport) {
 }
 
 function parseReportJson(text: string) {
-  const cleaned = text.replace(/^```json\s*/i, "").replace(/^```\s*/i, "").replace(/```$/i, "").trim();
+  const withoutFence = text.replace(/^```json\s*/i, "").replace(/^```\s*/i, "").replace(/```$/i, "").trim();
+  const firstBrace = withoutFence.indexOf("{");
+  const lastBrace = withoutFence.lastIndexOf("}");
+  const cleaned = firstBrace >= 0 && lastBrace > firstBrace ? withoutFence.slice(firstBrace, lastBrace + 1) : withoutFence;
   return JSON.parse(cleaned) as Partial<ReportContent>;
 }
 
@@ -585,6 +638,11 @@ function normalizeReportContent(
   const comparisonPhotos = Array.isArray(value.comparison_photos)
     ? value.comparison_photos.map((photo, index) => normalizeComparisonPhoto(photo, fallback.comparison_photos[index])).filter((photo): photo is ReportContent["comparison_photos"][number] => Boolean(photo))
     : [];
+  const comparisonById = new Map(comparisonPhotos.map((photo) => [photo.photo_id, photo]));
+  const mergedComparisonPhotos = fallback.comparison_photos.map((fallbackPhoto, index) => {
+    const generatedPhoto = comparisonById.get(fallbackPhoto.photo_id) ?? comparisonPhotos[index];
+    return generatedPhoto ? { ...fallbackPhoto, ...generatedPhoto, photo_id: fallbackPhoto.photo_id } : fallbackPhoto;
+  });
   const timeline = Array.isArray(value.progress_timeline)
     ? value.progress_timeline.map((line) => stringifyReportValue(line)).filter((line) => line.length > 0)
     : [];
@@ -595,7 +653,7 @@ function normalizeReportContent(
     generated_by: stringifyReportValue(value.generated_by) || fallback.generated_by,
     filters: isRecord(value.filters) ? normalizeStringRecord(value.filters) : fallback.filters,
     situation: isRecord(value.situation) ? { ...fallback.situation, ...normalizeStringRecord(value.situation) } : fallback.situation,
-    comparison_photos: comparisonPhotos.length ? comparisonPhotos : fallback.comparison_photos,
+    comparison_photos: mergedComparisonPhotos,
     progress_timeline: timeline.length ? timeline : fallback.progress_timeline,
     analysis_result: stringifyReportValue(value.analysis_result) || fallback.analysis_result,
     memo: value.memo === null ? null : stringifyReportValue(value.memo) || fallback.memo
@@ -687,9 +745,14 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function renderDocx(content: ReportContent, images: ReportImage[] = []) {
   const templateEntries = readWordTemplateEntries();
-  const documentXml = reportDocumentXml(content, images);
-  const relsXml = wordDocumentRelsXml(images);
-  const mediaEntries = images.slice(0, 6).map((image, index) => ({
+  const templateDocumentXml = templateEntries.find((entry) => entry.path === "word/document.xml")?.content.toString("utf8");
+  const templateRelsXml = templateEntries.find((entry) => entry.path === "word/_rels/document.xml.rels")?.content.toString("utf8");
+  if (!templateDocumentXml || !templateRelsXml) {
+    throw new Error("Report template is missing Word document parts.");
+  }
+  const documentXml = patchWordTemplateDocument(templateDocumentXml, content, images);
+  const relsXml = ensureWordImageRelationships(templateRelsXml, images);
+  const mediaEntries = images.map((image, index) => ({
     path: `word/media/report-photo-${index + 1}.${image.extension}`,
     content: image.buffer
   }));
@@ -698,10 +761,254 @@ function renderDocx(content: ReportContent, images: ReportImage[] = []) {
     { path: "word/_rels/document.xml.rels", content: textBuffer(relsXml) },
     ...mediaEntries
   ]).map((entry) => entry.path === "[Content_Types].xml"
-    ? { ...entry, content: textBuffer(ensureWordImageContentTypes(entry.content.toString("utf8"), images.slice(0, 6))) }
+    ? { ...entry, content: textBuffer(ensureWordImageContentTypes(entry.content.toString("utf8"), images)) }
     : entry);
 
   return zipStore(entries);
+}
+
+function patchWordTemplateDocument(xml: string, content: ReportContent, images: ReportImage[]) {
+  const withText = replaceWordTextNodes(xml, wordTemplateTextReplacements(content));
+  const withWorkLog = replaceTemplateWorkLogTable(withText, content);
+  const withDynamicPhotoSection = replaceTemplatePhotoSection(withWorkLog, content, images);
+  return ensureWordDrawingNamespaces(withDynamicPhotoSection);
+}
+
+function replaceWordTextNodes(xml: string, replacements: Map<number, string>) {
+  let index = 0;
+  return xml.replace(/<w:t\b([^>]*)>([\s\S]*?)<\/w:t>/g, (_match, attributes: string) => {
+    const replacement = replacements.get(index);
+    index += 1;
+    if (replacement === undefined) return _match;
+    return `<w:t${attributes}>${xmlEscape(compactReportText(replacement))}</w:t>`;
+  });
+}
+
+function wordTemplateTextReplacements(content: ReportContent) {
+  const replacements = new Map<number, string>();
+  const dateRange = content.situation.date_range ?? photoDateRange(content.comparison_photos) ?? content.generated_at;
+  const workRows = buildWorkLogRows(content).slice(0, 6);
+  const judgment = reportJudgmentContent(content, dateRange);
+
+  replacements.set(0, reportDocumentTitle(content));
+  replaceTextRunRange(replacements, [3, 4, 5], reportTradeLabel(dominantReportTrade(content)));
+  replacements.set(7, formatReportDateRange(dateRange));
+  replacements.set(9, formatKoreanDate(content.generated_at));
+  replacements.set(11, content.generated_by);
+
+  const rowTextNodes = [
+    { date: [17], item: [18, 19, 20], detail: [21, 22, 23, 24, 25], note: [26] },
+    { date: [27], item: [28, 29, 30], detail: [31, 32, 33, 34], note: [35] },
+    { date: [36], item: [37, 38, 39, 40, 41], detail: [42, 43, 44, 45, 46, 47, 48, 49, 50], note: [51] },
+    { date: [52], item: [53], detail: [54], note: [55] },
+    { date: [56], item: [57], detail: [58, 59, 60, 61, 62], note: [63, 64] },
+    { date: [65], item: [66], detail: [67, 68, 69], note: [70] }
+  ];
+
+  rowTextNodes.forEach((nodeSet, index) => {
+    const row = workRows[index];
+    replaceTextRunRange(replacements, nodeSet.date, row?.date ?? "");
+    replaceTextRunRange(replacements, nodeSet.item, reportWorkLogLabel(row?.item ?? ""));
+    replaceTextRunRange(replacements, nodeSet.detail, row?.detail ?? "");
+    replaceTextRunRange(replacements, nodeSet.note, row?.note ?? "");
+  });
+
+  replaceTextRunRange(replacements, [73, 74, 75, 76, 77, 78, 79, 80, 81], judgment.scope);
+  replaceTextRunRange(replacements, [83, 84, 85, 86, 87], judgment.quality);
+  replacements.set(89, judgment.completedAt);
+  replacements.set(91, judgment.notes);
+  replaceTextRunRange(replacements, [93, 94, 95], judgment.opinion);
+  replaceTextRunRange(replacements, [96, 97, 98], "※ 본 보고서는 BIM Photo Sync 현장 사진과 AI 분석 결과를 기준으로 작성되었습니다. 실제 시공 상황에 따라 일정 및 작업 내용이 변경될 수 있습니다.");
+  replacements.set(99, "※ 비고란의 주의사항은 현장 조건에 따라 감독관의 지시에 따르십시오.");
+
+  const photoNodeSets = [
+    [104, 105, 106, 107, 108],
+    [111, 112, 113, 114, 115],
+    [118, 119, 120, 121, 122],
+    [125, 126, 127, 128, 129],
+    [132, 133, 134, 135, 136],
+    [139, 140, 141, 142, 143]
+  ];
+
+  photoNodeSets.forEach((nodeIndexes, index) => {
+    const photo = content.comparison_photos[index];
+    const values = photo ? photoSlotText(photo) : ["", "", "", "", ""];
+    nodeIndexes.forEach((nodeIndex, valueIndex) => replacements.set(nodeIndex, values[valueIndex] ?? ""));
+  });
+
+  return replacements;
+}
+
+function replaceTextRunRange(replacements: Map<number, string>, indexes: number[], value: string) {
+  indexes.forEach((index, offset) => replacements.set(index, offset === 0 ? value : ""));
+}
+
+function replacePhotoPlaceholders(xml: string, content: ReportContent, images: ReportImage[]) {
+  let index = 0;
+  return xml.replace(/<w:p\b(?![^>]*\/>)(?:(?!<\/w:p>)[\s\S])*?\[ 사진(?:(?!<\/w:p>)[\s\S])*?첨부 \](?:(?!<\/w:p>)[\s\S])*?<\/w:p>/g, (match) => {
+    const image = images[index];
+    const replacement = image
+      ? wordImageParagraph(`rIdPhoto${index + 1}`, `report-photo-${index + 1}`, 2050000, 1150000)
+      : content.comparison_photos[index] ? wordParagraph("[ 사진 첨부 ]", { align: "center", color: "667085", size: 18 }) : match;
+    index += 1;
+    return replacement;
+  });
+}
+
+function replaceTemplatePhotoSection(xml: string, content: ReportContent, images: ReportImage[]) {
+  const photoSection = dynamicPhotoSectionXml(content, images);
+  const pattern = /<w:p\b(?:(?!<\/w:p>)[\s\S])*?시공 현장 사진(?:(?!<\/w:p>)[\s\S])*?<\/w:p>[\s\S]*?(?=<w:sectPr\b)/;
+  if (pattern.test(xml)) return xml.replace(pattern, photoSection);
+  return replacePhotoPlaceholders(xml, content, images);
+}
+
+function replaceTemplateWorkLogTable(xml: string, content: ReportContent) {
+  let replaced = false;
+  return xml.replace(/<w:tbl\b[\s\S]*?<\/w:tbl>/g, (tableXml) => {
+    if (replaced || !tableXml.includes("<w:t>날짜</w:t>") || !tableXml.includes("<w:t>작업 항목</w:t>") || !tableXml.includes("<w:t>작업 상세 내용</w:t>")) {
+      return tableXml;
+    }
+    replaced = true;
+    return compactWorkLogTable(content);
+  });
+}
+
+function compactWorkLogTable(content: ReportContent) {
+  const rows = buildWorkLogRows(content);
+  return wordTable([
+    [
+      wordTextCell("날짜", 1400, { bold: true, fill: "EAF1F8", align: "center", size: 18 }),
+      wordTextCell("작업 항목", 1800, { bold: true, fill: "EAF1F8", align: "center", size: 18 }),
+      wordTextCell("작업 상세 내용", 5000, { bold: true, fill: "EAF1F8", align: "center", size: 18 }),
+      wordTextCell("비고 / 주의사항", 1800, { bold: true, fill: "EAF1F8", align: "center", size: 18 })
+    ],
+    ...rows.map((row) => [
+      wordTextCell(row.date, 1400, { align: "center", size: 16 }),
+      wordTextCell(reportWorkLogLabel(row.item), 1800, { size: 16 }),
+      wordTextCell(row.detail, 5000, { size: 16 }),
+      wordTextCell(row.note, 1800, { size: 16 })
+    ])
+  ], { width: 9000 });
+}
+
+function dynamicPhotoSectionXml(content: ReportContent, images: ReportImage[]) {
+  const imageByPhotoId = new Map(images.map((image, index) => [image.photoId, { ...image, relId: `rIdPhoto${index + 1}` }]));
+  return [
+    `<w:p><w:r><w:br w:type="page"/></w:r></w:p>`,
+    wordParagraph("시공 현장 사진", { align: "center", bold: true, size: 32, spacingAfter: 80 }),
+    wordParagraph("Construction Site Photos", { align: "center", bold: true, size: 20, spacingAfter: 180 }),
+    photoGridTable(content, imageByPhotoId)
+  ].join("");
+}
+
+function ensureWordImageRelationships(existing: string, images: ReportImage[]) {
+  return images.reduce((xml, image, index) => {
+    return ensureRelationshipXml(
+      xml,
+      `rIdPhoto${index + 1}`,
+      "http://schemas.openxmlformats.org/officeDocument/2006/relationships/image",
+      `media/report-photo-${index + 1}.${image.extension}`
+    );
+  }, existing);
+}
+
+function ensureWordDrawingNamespaces(xml: string) {
+  const namespaceByPrefix: Record<string, string> = {
+    a: "http://schemas.openxmlformats.org/drawingml/2006/main",
+    pic: "http://schemas.openxmlformats.org/drawingml/2006/picture"
+  };
+  return xml.replace(/<w:document\b([^>]*)>/, (match, attributes: string) => {
+    const additions = Object.entries(namespaceByPrefix)
+      .filter(([prefix]) => !attributes.includes(`xmlns:${prefix}=`))
+      .map(([prefix, namespace]) => ` xmlns:${prefix}="${namespace}"`)
+      .join("");
+    return additions.length > 0 ? match.replace(">", `${additions}>`) : match;
+  });
+}
+
+function reportJudgmentContent(content: ReportContent, dateRange: string) {
+  const sections = reportAnalysisSections(content.analysis_result);
+  const trade = reportTradeLabel(dominantReportTrade(content));
+  const scope = `${content.situation.room ?? "현장 전체"} / ${trade} / ${formatReportDateRange(dateRange)}`;
+  const quality = sections.judgment || sections.details || content.analysis_result || "등록된 사진 기준 분석 결과가 없습니다.";
+  const notes = sections.precautions || content.memo || "현장 조건과 누락 사진 여부를 다음 점검 시 재확인합니다.";
+  const opinion = content.comparison_photos.length > 0
+    ? `${content.comparison_photos.length}장의 사진 근거를 날짜순으로 검토했습니다. 방, 공종, 공사면, 공사일 기준으로 시공 상태를 확인했습니다.`
+    : "선택한 조건에 해당하는 사진 데이터가 없습니다.";
+  return {
+    scope,
+    quality,
+    completedAt: reportLastDateText(content),
+    notes,
+    opinion
+  };
+}
+
+function reportAnalysisSections(text: string) {
+  const result = { workItems: "", details: "", precautions: "", judgment: "" };
+  const matches = Array.from(text.matchAll(/(?:^| \/ )(?<key>work_items|details|precautions|judgment):\s*(?<value>.*?)(?= \/ (?:work_items|details|precautions|judgment):|$)/g));
+  for (const match of matches) {
+    const key = match.groups?.key;
+    const value = match.groups?.value?.trim() ?? "";
+    if (key === "work_items") result.workItems = value;
+    if (key === "details") result.details = value;
+    if (key === "precautions") result.precautions = value;
+    if (key === "judgment") result.judgment = value;
+  }
+  return result;
+}
+
+function photoSlotText(photo: ReportContent["comparison_photos"][number]) {
+  return [
+    `방 ${photo.room}`,
+    `공종 ${reportTradeLabel(photo.trade)}`,
+    `공사면 ${reportWorkSurfaceLabel(photo.work_surface)}`,
+    "공사일",
+    formatKoreanDate(photo.work_date)
+  ];
+}
+
+function reportWorkLogLabel(value: string) {
+  return value.split("/").map((part) => {
+    const trimmed = part.trim();
+    return reportWorkSurfaceLabel(reportTradeLabel(trimmed));
+  }).join(" / ");
+}
+
+function reportTradeLabel(value: string) {
+  const labels: Record<string, string> = {
+    WATERPROOF: "방수",
+    TILE: "타일",
+    PAINT: "도장",
+    ELECTRIC: "전기",
+    MEP: "기계/설비",
+    WINDOW: "창호",
+    CONCRETE: "콘크리트",
+    OTHER: "기타"
+  };
+  return labels[value] ?? value;
+}
+
+function reportWorkSurfaceLabel(value: string) {
+  const labels: Record<string, string> = {
+    FLOOR: "바닥",
+    WALL: "벽",
+    ENTRY_WALL: "입구벽",
+    FRONT_WALL: "정면벽",
+    RIGHT_WALL: "우측벽",
+    LEFT_WALL: "좌측벽",
+    CEILING: "천장",
+    WINDOW: "창",
+    DOOR: "문",
+    PIPE: "배관",
+    ELECTRIC: "전기",
+    OTHER: "기타"
+  };
+  return labels[value] ?? value;
+}
+
+function compactReportText(value: string) {
+  return value.replace(/\s*\n+\s*/g, " ").replace(/\s{2,}/g, " ").trim();
 }
 
 function reportDocumentXml(content: ReportContent, images: ReportImage[]) {
@@ -781,22 +1088,25 @@ function photoGridTable(
   content: ReportContent,
   imageByPhotoId: Map<string, ReportImage & { relId: string }>
 ) {
-  const slots = Array.from({ length: 6 }, (_, index) => content.comparison_photos[index] ?? null);
-  const rows = [0, 2, 4].map((start) => [
-    photoSlotCell(slots[start], imageByPhotoId, 5850),
-    photoSlotCell(slots[start + 1], imageByPhotoId, 5850)
-  ]);
-  return wordTable(rows, { width: 11700 });
+  const slots = content.comparison_photos.length > 0 ? content.comparison_photos : [null];
+  const rows: string[][] = [];
+  for (let start = 0; start < slots.length; start += 2) {
+    const left = slots[start] ?? null;
+    const right = slots[start + 1] ?? null;
+    rows.push(right ? [photoSlotCell(left, imageByPhotoId, 4500), photoSlotCell(right, imageByPhotoId, 4500)] : [photoSlotCell(left, imageByPhotoId, 9000, 2)]);
+  }
+  return wordTable(rows, { width: 9000 });
 }
 
 function photoSlotCell(
   photo: ReportContent["comparison_photos"][number] | null,
   imageByPhotoId: Map<string, ReportImage & { relId: string }>,
-  width: number
+  width: number,
+  gridSpan?: number
 ) {
   const image = photo ? imageByPhotoId.get(photo.photo_id) : null;
   const imageBlock = image
-    ? wordImageParagraph(image.relId, `report-photo-${photo?.photo_id ?? "empty"}`, 2280000, 1320000)
+    ? wordImageParagraph(image.relId, `report-photo-${photo?.photo_id ?? "empty"}`, gridSpan ? 3900000 : 1950000, gridSpan ? 2200000 : 1100000)
     : wordParagraph("[ 사진 첨부 ]", { align: "center", bold: true, color: "667085", size: 20, spacingAfter: 80 });
   const meta = photo
     ? [
@@ -818,7 +1128,7 @@ function photoSlotCell(
     wordTextCell(value, width - 1700, { size: 17 })
   ]), { width: width - 500, nested: true });
 
-  return wordRawCell(`${imageBlock}${metaXml}`, width);
+  return wordRawCell(`${imageBlock}${metaXml}`, width, gridSpan ? { gridSpan } : {});
 }
 
 type WordTextOptions = {

@@ -136,6 +136,51 @@ function photoFixture() {
   };
 }
 
+function photoFixtureWithId(index: number) {
+  const fixture = photoFixture();
+  const date = new Date(`2026-06-${String(index).padStart(2, "0")}T00:00:00.000Z`);
+  return {
+    ...fixture,
+    id: `photo-${index}`,
+    objectKey: `photos/photo-${index}.png`,
+    workDate: date,
+    takenAt: date,
+    uploadedAt: date,
+    description: `작업 설명 ${index}`,
+    aiDescription: `AI 요약 ${index}`
+  };
+}
+
+function multiPhotoReportFixture() {
+  const fixture = reportFixture();
+  const comparisonPhotos = Array.from({ length: 8 }, (_, index) => {
+    const photo = photoFixtureWithId(index + 1);
+    return {
+      photo_id: photo.id,
+      work_date: photo.workDate.toISOString().slice(0, 10),
+      room: "101 회의실",
+      work_surface: "WALL",
+      trade: "OTHER",
+      worker_name: "홍길동",
+      description: photo.description,
+      ai_description: photo.aiDescription
+    };
+  });
+  return {
+    ...fixture,
+    content: {
+      ...fixture.content,
+      situation: {
+        ...fixture.content.situation,
+        date_range: "2026-06-01 ~ 2026-06-08"
+      },
+      comparison_photos: comparisonPhotos,
+      progress_timeline: comparisonPhotos.map((photo) => `${photo.work_date} ${photo.description}`)
+    },
+    photoIds: comparisonPhotos.map((photo) => photo.photo_id)
+  };
+}
+
 async function* bufferStream(buffer: Buffer) {
   yield buffer;
 }
@@ -263,6 +308,7 @@ async function testExportDocxUsesWordTemplateAndEmbedsPhotos() {
   assert.match(documentXml, /101 회의실/);
   assert.match(documentXml, /긴 설명 텍스트/);
   assert.match(documentXml, /r:embed="rIdPhoto1"/);
+  assertWellFormedXml(documentXml);
   assert.match(relsXml, /Target="media\/report-photo-1\.png"/);
   assert.ok(entries.some((entry) => entry.path === "word/media/report-photo-1.png"));
 }
@@ -299,6 +345,65 @@ async function testExportDocxFallsBackToTextWhenPhotoDownloadFails() {
   assert.equal(entries.some((entry) => entry.path === "word/media/report-photo-1.png"), false);
   assert.match(documentXml, /\[ 사진 첨부 \]/);
   assert.match(documentXml, /긴 설명 텍스트/);
+  assertWellFormedXml(documentXml);
+}
+
+async function testExportDocxKeepsAllReportPhotos() {
+  const prisma: MockPrisma = {
+    photo: {
+      async findMany() {
+        return Array.from({ length: 8 }, (_, index) => photoFixtureWithId(index + 1));
+      }
+    },
+    generatedReport: {
+      async findUnique() {
+        return multiPhotoReportFixture();
+      }
+    },
+    user: {
+      async findUnique() {
+        return null;
+      }
+    }
+  };
+  const service = createService(prisma);
+  Reflect.set(service as object, "s3", {
+    async send() {
+      return {
+        Body: bufferStream(Buffer.from("89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4890000000d49444154789c6360000002000154a24f5d0000000049454e44ae426082", "hex")),
+        ContentType: "image/png"
+      };
+    }
+  });
+
+  const exported = await service.export({ sub: "user-1", companyId: "company-1" }, "report-1", "DOCX");
+  const entries = unzipEntries(exported.buffer);
+  const documentXml = zipEntryText(entries, "word/document.xml");
+  const relsXml = zipEntryText(entries, "word/_rels/document.xml.rels");
+
+  assertWellFormedXml(documentXml);
+  for (let index = 1; index <= 8; index += 1) {
+    assert.match(documentXml, new RegExp(`r:embed="rIdPhoto${index}"`));
+    assert.match(relsXml, new RegExp(`Target="media/report-photo-${index}\\.png"`));
+    assert.ok(entries.some((entry) => entry.path === `word/media/report-photo-${index}.png`));
+  }
+}
+
+function assertWellFormedXml(xml: string) {
+  const stack: string[] = [];
+  const tagPattern = /<([^!?][^>]*)>/g;
+  let match: RegExpExecArray | null;
+  while ((match = tagPattern.exec(xml)) !== null) {
+    const rawTag = match[1].trim();
+    if (rawTag.startsWith("/")) {
+      const tagName = rawTag.slice(1).split(/\s+/)[0];
+      assert.equal(stack.pop(), tagName, `mismatched closing tag: ${tagName}`);
+      continue;
+    }
+    if (rawTag.endsWith("/")) continue;
+    stack.push(rawTag.split(/\s+/)[0]);
+  }
+  assert.deepEqual(stack, []);
 }
 
 async function run(name: string, fn: () => Promise<void>) {
@@ -315,6 +420,7 @@ async function main() {
   await run("findPhotos ignores legacy trade filter when trade_category_id is selected", testFindPhotosIgnoresLegacyTradeWhenCategorySelected);
   await run("export DOCX uses the Word template and embeds report photos", testExportDocxUsesWordTemplateAndEmbedsPhotos);
   await run("export DOCX falls back to text evidence when photo download fails", testExportDocxFallsBackToTextWhenPhotoDownloadFails);
+  await run("export DOCX keeps all report photos", testExportDocxKeepsAllReportPhotos);
 }
 
 if (require.main === module) {

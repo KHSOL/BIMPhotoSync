@@ -13,9 +13,12 @@
     "build:preview": "npx eas-cli@latest build --platform all --profile preview",
     "build:android:production": "npx eas-cli@latest build --platform android --profile production",
     "build:ios:production": "npx eas-cli@latest build --platform ios --profile production",
-    "typecheck": "tsc -p tsconfig.json --noEmit"
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "android": "expo run:android",
+    "ios": "expo run:ios"
   },
   "dependencies": {
+    "@expo/vector-icons": "^15.1.1",
     "expo": "~54.0.35",
     "expo-image-picker": "~17.0.11",
     "expo-status-bar": "~3.0.9",

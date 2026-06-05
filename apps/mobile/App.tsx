@@ -7,106 +7,42 @@ import {
   Modal,
   Platform,
   Pressable,
-  SafeAreaView,
+  StatusBar as RNStatusBar,
   ScrollView,
   SectionList,
   StyleSheet,
   Text,
   TextInput,
   View,
+  useWindowDimensions,
   type TextInputProps
 } from "react-native";
 import * as ImagePicker from "expo-image-picker";
 import { StatusBar } from "expo-status-bar";
+import { Feather } from "@expo/vector-icons";
+
+import { AuthScreen } from "./src/components/AuthScreen";
+import { LogoLockup } from "./src/components/Branding";
+import {
+  surfaces,
+  trades,
+  type AppTab,
+  type AuthMode,
+  type AuthResponse,
+  type Photo,
+  type PillTone,
+  type Project,
+  type RegisterRole,
+  type Room,
+  type RoomProgressStatus,
+  type RoomSection,
+  type SurfaceCode,
+  type TradeCode,
+  type UploadMeta,
+  type User
+} from "./src/domain";
 
 const API_BASE = process.env.EXPO_PUBLIC_API_BASE_URL ?? "https://api-production-1d018.up.railway.app/api/v1";
-
-const trades = [
-  ["WATERPROOF", "방수"],
-  ["TILE", "타일"],
-  ["PAINT", "도장"],
-  ["ELECTRIC", "전기"],
-  ["MEP", "설비"],
-  ["WINDOW", "창호"],
-  ["CONCRETE", "콘크리트"],
-  ["OTHER", "기타"]
-] as const;
-
-const surfaces = [
-  ["FLOOR", "바닥"],
-  ["WALL", "벽"],
-  ["CEILING", "천장"],
-  ["WINDOW", "창"],
-  ["DOOR", "문"],
-  ["PIPE", "배관"],
-  ["ELECTRIC", "전기"],
-  ["OTHER", "기타"]
-] as const;
-
-type AppTab = "home" | "projects" | "profile";
-type AuthMode = "login" | "register";
-type RegisterRole = "WORKER" | "COMPANY_ADMIN";
-type SurfaceCode = (typeof surfaces)[number][0];
-type TradeCode = (typeof trades)[number][0];
-type RoomProgressStatus = "NOT_STARTED" | "IN_PROGRESS" | "COMPLETED";
-type PillTone = "blue" | "green" | "yellow" | "red" | "gray";
-
-type Project = {
-  id: string;
-  name: string;
-  code: string;
-  member_role?: string | null;
-  created_at?: string | null;
-};
-
-type Room = {
-  id: string;
-  bim_photo_room_id: string;
-  room_name: string;
-  room_number?: string | null;
-  level_name?: string | null;
-  progress_by_surface?: Partial<Record<SurfaceCode, { status: RoomProgressStatus; photo_count: number }>>;
-};
-
-type Photo = {
-  id: string;
-  project_id: string;
-  room_id: string;
-  work_surface: string;
-  trade: string;
-  work_date: string;
-  worker_name?: string | null;
-  description?: string | null;
-  progress_status: string;
-  photo_url: string;
-  uploaded_at: string;
-  room?: Room;
-};
-
-type User = {
-  email: string;
-  name: string;
-  role: string;
-  company_name?: string | null;
-};
-
-type AuthResponse = {
-  data: {
-    access_token: string;
-    user: User;
-  };
-};
-
-type UploadMeta = {
-  work_surface: SurfaceCode;
-  trade: TradeCode;
-  description: string;
-};
-
-type RoomSection = {
-  title: string;
-  data: Room[];
-};
 
 export default function App() {
   const [tab, setTab] = useState<AppTab>("home");
@@ -125,11 +61,14 @@ export default function App() {
   const [rooms, setRooms] = useState<Room[]>([]);
   const [roomId, setRoomId] = useState("");
   const [roomPickerVisible, setRoomPickerVisible] = useState(false);
+  const [projectPickerVisible, setProjectPickerVisible] = useState(false);
   const [roomSearch, setRoomSearch] = useState("");
+  const [roomLevelFilter, setRoomLevelFilter] = useState("");
   const [images, setImages] = useState<ImagePicker.ImagePickerAsset[]>([]);
   const [photos, setPhotos] = useState<Photo[]>([]);
   const [photoRoomFilter, setPhotoRoomFilter] = useState("");
-  const [status, setStatus] = useState("로그인 후 프로젝트를 선택하고 방 기준으로 현장 사진을 업로드하세요.");
+  const [projectPhotosVisible, setProjectPhotosVisible] = useState(false);
+  const [status, setStatus] = useState("");
   const [authBusy, setAuthBusy] = useState(false);
   const [loadingProjects, setLoadingProjects] = useState(false);
   const [loadingRooms, setLoadingRooms] = useState(false);
@@ -144,7 +83,8 @@ export default function App() {
   const deferredRoomSearch = useDeferredValue(roomSearch);
   const selectedProject = useMemo(() => projects.find((project) => project.id === projectId) ?? null, [projectId, projects]);
   const selectedRoom = useMemo(() => rooms.find((room) => room.id === roomId) ?? null, [roomId, rooms]);
-  const roomSections = useMemo(() => buildRoomSections(rooms, deferredRoomSearch), [deferredRoomSearch, rooms]);
+  const roomSections = useMemo(() => buildRoomSections(rooms, deferredRoomSearch, roomLevelFilter), [deferredRoomSearch, roomLevelFilter, rooms]);
+  const roomLevelFilters = useMemo(() => roomLevelNames(rooms), [rooms]);
   const filteredPhotos = useMemo(() => {
     if (!photoRoomFilter) return photos;
     return photos.filter((photo) => photo.room_id === photoRoomFilter);
@@ -153,8 +93,10 @@ export default function App() {
   const isUploadStage = isAuthenticated && images.length > 0;
   const canAddPhotos = Boolean(projectId) && !loadingRooms && !loadingProjects;
   const readyToUpload = Boolean(token && projectId && roomId && images.length > 0) && !uploading;
-  const roomProgress = selectedRoom ? roomProgressLabel(selectedRoom, meta.work_surface) : "방 선택 필요";
-  const roomProgressTone = selectedRoom ? progressTone(selectedRoom, meta.work_surface) : "gray";
+  const { width: screenWidth } = useWindowDimensions();
+  const compactLayout = screenWidth < 380;
+  const safeTopPadding = Platform.OS === "android" ? Math.max(24, RNStatusBar.currentHeight ?? 0) + 14 : 12;
+  const safeBottomPadding = Platform.OS === "android" ? 36 : 28;
 
   useEffect(() => {
     if (!token || !projectId) return;
@@ -320,12 +262,18 @@ export default function App() {
     setProjectId(nextProjectId);
     setPhotoRoomFilter("");
     setRoomSearch("");
+    setRoomLevelFilter("");
     try {
       await loadRooms(token, nextProjectId);
       await loadPhotos(token, nextProjectId, "");
     } catch (error) {
       showMessage("오류", getErrorMessage(error, "프로젝트 정보를 새로고침하지 못했습니다."));
     }
+  }
+
+  async function openProjectPhotos(nextProjectId: string) {
+    await selectProject(nextProjectId);
+    setProjectPhotosVisible(true);
   }
 
   function choosePhotoSource() {
@@ -351,7 +299,7 @@ export default function App() {
       Alert.alert("카메라 권한 필요", "현장 사진을 촬영할 수 있도록 카메라 접근을 허용해 주세요.");
       return;
     }
-    const result = await ImagePicker.launchCameraAsync({ mediaTypes: ImagePicker.MediaTypeOptions.Images, quality: 0.85 });
+    const result = await ImagePicker.launchCameraAsync({ mediaTypes: ["images"], quality: 0.85 });
     if (result.canceled) return;
     setImages((current) => [...current, ...result.assets]);
     setStatus(`${result.assets.length}장 사진을 업로드 초안에 추가했습니다.`);
@@ -368,7 +316,7 @@ export default function App() {
       return;
     }
     const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      mediaTypes: ["images"],
       allowsMultipleSelection: true,
       quality: 0.85
     });
@@ -459,6 +407,7 @@ export default function App() {
     setPhotos([]);
     setPhotoRoomFilter("");
     setRoomSearch("");
+    setRoomLevelFilter("");
     setRoomPickerVisible(false);
     setEmail("");
     setPassword("");
@@ -473,6 +422,7 @@ export default function App() {
       return;
     }
     setRoomSearch("");
+    setRoomLevelFilter("");
     setRoomPickerVisible(true);
   }
 
@@ -482,12 +432,16 @@ export default function App() {
   }
 
   return (
-    <SafeAreaView style={styles.safe}>
+    <View style={styles.safe}>
       <StatusBar style="dark" />
-      <KeyboardAvoidingView style={styles.keyboardRoot} behavior={Platform.OS === "ios" ? "padding" : undefined}>
+      <KeyboardAvoidingView style={styles.keyboardRoot} behavior={Platform.OS === "ios" ? "padding" : "height"}>
         <ScrollView
           contentInsetAdjustmentBehavior="automatic"
-          contentContainerStyle={[styles.screenContainer, isAuthenticated && !isUploadStage ? styles.screenWithTabs : null]}
+          contentContainerStyle={[
+            styles.screenContainer,
+            { paddingTop: safeTopPadding, paddingBottom: isAuthenticated && !isUploadStage ? safeBottomPadding + 112 : safeBottomPadding },
+            compactLayout ? styles.screenContainerCompact : null
+          ]}
           keyboardDismissMode="interactive"
           keyboardShouldPersistTaps="handled"
         >
@@ -522,6 +476,7 @@ export default function App() {
               projectId={projectId}
               rooms={rooms}
               selectedProject={selectedProject}
+              openProjectPicker={() => setProjectPickerVisible(true)}
               selectProject={selectProject}
             />
           ) : null}
@@ -531,14 +486,17 @@ export default function App() {
               joinKey={joinKey}
               loadingPhotos={loadingPhotos}
               photoRoomFilter={photoRoomFilter}
+              photosVisible={projectPhotosVisible}
               photos={filteredPhotos}
               previewJoinProject={previewJoinProject}
               projects={projects}
               projectId={projectId}
               rooms={rooms}
+              openProjectPhotos={openProjectPhotos}
               selectProject={selectProject}
               selectedProject={selectedProject}
               setJoinKey={setJoinKey}
+              setPhotosVisible={setProjectPhotosVisible}
               setPhotoRoomFilter={setPhotoRoomFilter}
             />
           ) : null}
@@ -549,13 +507,12 @@ export default function App() {
             <UploadScreen
               choosePhotoSource={choosePhotoSource}
               clearDraft={clearDraft}
+              compact={compactLayout}
               images={images}
               meta={meta}
               openRoomPicker={openRoomPicker}
               readyToUpload={readyToUpload}
               removeImage={removeImage}
-              roomProgress={roomProgress}
-              roomProgressTone={roomProgressTone}
               selectedProject={selectedProject}
               selectedRoom={selectedRoom}
               setImages={setImages}
@@ -565,11 +522,19 @@ export default function App() {
             />
           ) : null}
 
-          {status ? <Text style={styles.statusBanner}>{status}</Text> : null}
+          {!isAuthenticated && status ? <Text style={styles.statusBanner}>{status}</Text> : null}
         </ScrollView>
       </KeyboardAvoidingView>
 
-      {isAuthenticated && !isUploadStage ? <BottomTabs active={tab} setActive={setTab} /> : null}
+      {isAuthenticated && !isUploadStage ? (
+        <BottomTabs
+          active={tab}
+          setActive={(nextTab) => {
+            if (nextTab === "projects") setProjectPhotosVisible(false);
+            setTab(nextTab);
+          }}
+        />
+      ) : null}
 
       <RoomPickerModal
         loadingRooms={loadingRooms}
@@ -577,98 +542,25 @@ export default function App() {
         roomId={roomId}
         roomSearch={roomSearch}
         roomSections={roomSections}
+        roomLevelFilter={roomLevelFilter}
+        roomLevelFilters={roomLevelFilters}
         selectedProject={selectedProject}
         setRoomId={setRoomId}
+        setRoomLevelFilter={setRoomLevelFilter}
         setRoomPickerVisible={setRoomPickerVisible}
         setRoomSearch={setRoomSearch}
         setStatus={setStatus}
         visible={roomPickerVisible}
       />
-    </SafeAreaView>
-  );
-}
 
-function AuthScreen(props: {
-  authBusy: boolean;
-  authMode: AuthMode;
-  companyName: string;
-  email: string;
-  name: string;
-  password: string;
-  registerRole: RegisterRole;
-  rememberLogin: boolean;
-  setAuthMode: (value: AuthMode) => void;
-  setCompanyName: (value: string) => void;
-  setEmail: (value: string) => void;
-  setName: (value: string) => void;
-  setPassword: (value: string) => void;
-  setRegisterRole: (value: RegisterRole) => void;
-  setRememberLogin: (value: boolean) => void;
-  submit: () => Promise<void>;
-}) {
-  return (
-    <View style={styles.authLayout}>
-      <LogoLockup centered />
-      <Text style={styles.loginSubtitle}>현장 사진과 BIM 모델을 연결하여 프로젝트를 더 효율적으로 관리하세요.</Text>
-      <Image source={require("./assets/login-hero.png")} style={styles.loginHeroImage} resizeMode="contain" />
-
-      <View style={styles.authCard}>
-        <View style={styles.segmented}>
-          <Pressable style={[styles.segment, props.authMode === "login" && styles.segmentActive]} onPress={() => props.setAuthMode("login")}>
-            <Text style={[styles.segmentText, props.authMode === "login" && styles.segmentTextActive]}>로그인</Text>
-          </Pressable>
-          <Pressable style={[styles.segment, props.authMode === "register" && styles.segmentActive]} onPress={() => props.setAuthMode("register")}>
-            <Text style={[styles.segmentText, props.authMode === "register" && styles.segmentTextActive]}>회원가입</Text>
-          </Pressable>
-        </View>
-
-        {props.authMode === "register" ? (
-          <View style={styles.roleRow}>
-            <RoleButton label="현장 작업자" active={props.registerRole === "WORKER"} onPress={() => props.setRegisterRole("WORKER")} />
-            <RoleButton label="회사 관리자" active={props.registerRole === "COMPANY_ADMIN"} onPress={() => props.setRegisterRole("COMPANY_ADMIN")} />
-          </View>
-        ) : null}
-
-        <Input
-          icon={<MailIcon />}
-          value={props.email}
-          onChangeText={props.setEmail}
-          placeholder="이메일 주소"
-          autoCapitalize="none"
-          autoCorrect={false}
-          keyboardType="email-address"
-        />
-        <Input
-          icon={<LockIcon />}
-          value={props.password}
-          onChangeText={props.setPassword}
-          placeholder="비밀번호"
-          secureTextEntry
-          autoCapitalize="none"
-          autoCorrect={false}
-        />
-
-        {props.authMode === "register" ? (
-          <>
-            <Input value={props.name} onChangeText={props.setName} placeholder="이름" />
-            <Input value={props.companyName} onChangeText={props.setCompanyName} placeholder="회사명" />
-          </>
-        ) : null}
-
-        {props.authMode === "login" ? (
-          <View style={styles.loginOptionRow}>
-            <Pressable style={styles.checkRow} onPress={() => props.setRememberLogin(!props.rememberLogin)}>
-              <View style={[styles.checkbox, props.rememberLogin && styles.checkboxActive]}>{props.rememberLogin ? <Text style={styles.checkboxMark}>✓</Text> : null}</View>
-              <Text style={styles.checkText}>로그인 상태 유지</Text>
-            </Pressable>
-            <Text style={styles.linkText}>비밀번호 찾기</Text>
-          </View>
-        ) : null}
-
-        <Pressable style={[styles.primaryAction, props.authBusy && styles.disabledButton]} disabled={props.authBusy} onPress={() => void props.submit()}>
-          {props.authBusy ? <ActivityIndicator color="#FFFFFF" /> : <Text style={styles.primaryActionText}>{props.authMode === "login" ? "로그인" : "계정 생성"}</Text>}
-        </Pressable>
-      </View>
+      <ProjectPickerModal
+        loadingProjects={loadingProjects}
+        projectId={projectId}
+        projects={projects}
+        selectProject={selectProject}
+        setProjectPickerVisible={setProjectPickerVisible}
+        visible={projectPickerVisible}
+      />
     </View>
   );
 }
@@ -682,35 +574,26 @@ function HomeScreen(props: {
   projectId: string;
   rooms: Room[];
   selectedProject: Project | null;
+  openProjectPicker: () => void;
   selectProject: (projectId: string) => Promise<void>;
 }) {
   return (
     <View style={styles.homeLayout}>
       <View style={styles.homeHeader}>
         <LogoLockup />
-        <View style={styles.bellIcon}>
-          <View style={styles.bellBody} />
-          <View style={styles.bellDot} />
-        </View>
       </View>
 
       <Text style={styles.pageTitle}>프로젝트 선택</Text>
-      <View style={styles.projectHeroCard}>
-        <ConstructionThumb />
+      <Pressable style={styles.projectHeroCard} onPress={props.openProjectPicker}>
         <View style={styles.projectHeroText}>
+          <Text style={styles.projectEyebrow}>현재 프로젝트</Text>
           <Text style={styles.projectSelectorTitle}>{props.selectedProject?.name ?? "프로젝트를 선택하세요"}</Text>
           <Text style={styles.projectSelectorMeta}>
-            {props.selectedProject ? `${props.selectedProject.member_role ?? "참여중"} | ${props.rooms.length}개 방` : "접근키로 프로젝트에 참여하세요"}
+            {props.selectedProject ? `${props.selectedProject.code} | ${props.rooms.length}개 방` : "프로젝트 탭에서 접근키로 참여하세요"}
           </Text>
         </View>
         {props.loadingProjects || props.loadingRooms ? <ActivityIndicator color="#2563EB" /> : <ChevronDownIcon />}
-      </View>
-
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.projectDotsRow}>
-        {props.projects.map((project) => (
-          <Pressable key={project.id} style={[styles.dot, project.id === props.projectId && styles.dotActive]} onPress={() => void props.selectProject(project.id)} />
-        ))}
-      </ScrollView>
+      </Pressable>
 
       <View style={styles.captureFrame}>
         <View style={styles.cornerTopLeft} />
@@ -723,17 +606,6 @@ function HomeScreen(props: {
         <Text style={styles.captureTitle}>사진 촬영</Text>
         <Text style={styles.captureDescription}>버튼을 눌러 사진을 촬영하거나 갤러리에서 추가하세요.</Text>
       </View>
-
-      <View style={styles.guideCard}>
-        <View style={styles.guideIcon}>
-          <BulbIcon />
-        </View>
-        <View style={styles.flexOne}>
-          <Text style={styles.guideTitle}>촬영 가이드</Text>
-          <Text style={styles.guideBody}>명확한 기록을 위해 밝은 환경에서 안정적으로 촬영해 주세요.</Text>
-        </View>
-        <ChevronRightIcon />
-      </View>
     </View>
   );
 }
@@ -742,16 +614,52 @@ function ProjectsScreen(props: {
   joinKey: string;
   loadingPhotos: boolean;
   photoRoomFilter: string;
+  photosVisible: boolean;
   photos: Photo[];
   previewJoinProject: () => Promise<void>;
   projects: Project[];
   projectId: string;
   rooms: Room[];
+  openProjectPhotos: (projectId: string) => Promise<void>;
   selectProject: (projectId: string) => Promise<void>;
   selectedProject: Project | null;
   setJoinKey: (value: string) => void;
+  setPhotosVisible: (value: boolean) => void;
   setPhotoRoomFilter: (value: string) => void;
 }) {
+  if (props.photosVisible) {
+    return (
+      <View style={styles.homeLayout}>
+        <View style={styles.detailTopRow}>
+          <Pressable style={styles.backPill} onPress={() => props.setPhotosVisible(false)}>
+            <Text style={styles.backPillText}>‹ 프로젝트</Text>
+          </Pressable>
+          {props.loadingPhotos ? <ActivityIndicator color="#2563EB" /> : <StatusPill label={`${props.photos.length}장`} tone={props.photos.length > 0 ? "blue" : "gray"} />}
+        </View>
+        <Text style={styles.pageTitle}>{props.selectedProject?.name ?? "프로젝트"} 사진</Text>
+        <Text style={styles.pageDescription}>방별 필터로 업로드된 현장 사진을 확인합니다.</Text>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.roomFilterRow}>
+          <FilterChip label="전체" active={!props.photoRoomFilter} onPress={() => props.setPhotoRoomFilter("")} />
+          {props.rooms.map((room) => (
+            <FilterChip key={room.id} label={roomTitle(room)} active={props.photoRoomFilter === room.id} onPress={() => props.setPhotoRoomFilter(room.id)} />
+          ))}
+        </ScrollView>
+        <View style={styles.photoGrid}>
+          {props.photos.map((photo) => (
+            <View key={photo.id} style={styles.photoCard}>
+              <Image source={{ uri: photo.photo_url }} style={styles.photoImage} resizeMode="cover" />
+              <View style={styles.photoCardBody}>
+                <Text style={styles.photoTitle} numberOfLines={1}>{photoTitle(photo, props.rooms)}</Text>
+                <Text style={styles.photoMeta} numberOfLines={3}>{photo.work_date} | {labelFor(surfaces, photo.work_surface)} | {photo.description ?? "작업 내용 없음"}</Text>
+              </View>
+            </View>
+          ))}
+          {props.photos.length === 0 ? <Text style={styles.emptyText}>선택 조건에 맞는 사진이 없습니다.</Text> : null}
+        </View>
+      </View>
+    );
+  }
+
   return (
     <View style={styles.homeLayout}>
       <Text style={styles.pageTitle}>프로젝트</Text>
@@ -760,8 +668,7 @@ function ProjectsScreen(props: {
       <View style={styles.card}>
         <Text style={styles.sectionTitle}>참여 중인 프로젝트</Text>
         {props.projects.map((project) => (
-          <Pressable key={project.id} style={[styles.projectListItem, project.id === props.projectId && styles.projectListItemActive]} onPress={() => void props.selectProject(project.id)}>
-            <ConstructionThumb small />
+          <Pressable key={project.id} style={[styles.projectListItem, project.id === props.projectId && styles.projectListItemActive]} onPress={() => void props.openProjectPhotos(project.id)}>
             <View style={styles.flexOne}>
               <Text style={styles.projectName}>{project.name}</Text>
               <Text style={styles.projectCode}>{project.code} | {project.member_role ?? "참여중"}</Text>
@@ -779,32 +686,6 @@ function ProjectsScreen(props: {
         <Pressable style={styles.secondaryActionWide} onPress={() => void props.previewJoinProject()}>
           <Text style={styles.secondaryActionText}>확인 후 참여</Text>
         </Pressable>
-      </View>
-
-      <View style={styles.card}>
-        <View style={styles.cardHeaderRow}>
-          <View style={styles.flexOne}>
-            <Text style={styles.sectionTitle}>{props.selectedProject?.name ?? "프로젝트"} 사진</Text>
-            <Text style={styles.cardDescription}>방별 필터로 업로드된 사진을 확인합니다.</Text>
-          </View>
-          {props.loadingPhotos ? <ActivityIndicator color="#2563EB" /> : <StatusPill label={`${props.photos.length}장`} tone={props.photos.length > 0 ? "blue" : "gray"} />}
-        </View>
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.roomFilterRow}>
-          <FilterChip label="전체" active={!props.photoRoomFilter} onPress={() => props.setPhotoRoomFilter("")} />
-          {props.rooms.map((room) => (
-            <FilterChip key={room.id} label={roomTitle(room)} active={props.photoRoomFilter === room.id} onPress={() => props.setPhotoRoomFilter(room.id)} />
-          ))}
-        </ScrollView>
-        <View style={styles.photoGrid}>
-          {props.photos.map((photo) => (
-            <View key={photo.id} style={styles.photoCard}>
-              <Image source={{ uri: photo.photo_url }} style={styles.photoImage} />
-              <Text style={styles.photoTitle} numberOfLines={1}>{photo.room ? roomTitle(photo.room) : photo.work_date}</Text>
-              <Text style={styles.photoMeta} numberOfLines={2}>{photo.work_date} | {labelFor(surfaces, photo.work_surface)} | {photo.description ?? "작업 내용 없음"}</Text>
-            </View>
-          ))}
-          {props.photos.length === 0 ? <Text style={styles.emptyText}>선택 조건에 맞는 사진이 없습니다.</Text> : null}
-        </View>
       </View>
     </View>
   );
@@ -842,13 +723,12 @@ function ProfileScreen({ logout, projects, rooms, user }: { logout: () => void; 
 function UploadScreen(props: {
   choosePhotoSource: () => void;
   clearDraft: () => void;
+  compact: boolean;
   images: ImagePicker.ImagePickerAsset[];
   meta: UploadMeta;
   openRoomPicker: () => void;
   readyToUpload: boolean;
   removeImage: (index: number) => void;
-  roomProgress: string;
-  roomProgressTone: PillTone;
   selectedProject: Project | null;
   selectedRoom: Room | null;
   setImages: React.Dispatch<React.SetStateAction<ImagePicker.ImagePickerAsset[]>>;
@@ -856,7 +736,6 @@ function UploadScreen(props: {
   upload: () => Promise<void>;
   uploading: boolean;
 }) {
-  const heroImage = props.images[0]?.uri;
   return (
     <View style={styles.uploadLayout}>
       <View style={styles.uploadTopBar}>
@@ -869,9 +748,26 @@ function UploadScreen(props: {
         </Pressable>
       </View>
 
-      <View style={styles.uploadIntro}>
-        <View style={styles.uploadIntroImage}>{heroImage ? <Image source={{ uri: heroImage }} style={styles.heroPreview} /> : <CameraLineIcon />}</View>
-        <Text style={styles.uploadIntroText}>프로젝트, 방, 공사면, 공종, 내용을 함께 저장합니다. 작업일자와 작성자는 업로드 시점에 자동 기록됩니다.</Text>
+      <View style={styles.card}>
+        <View style={styles.cardHeaderRow}>
+          <Text style={styles.sectionTitle}>사진</Text>
+          <StatusPill label={`${props.images.length}장`} tone={props.images.length > 0 ? "blue" : "gray"} />
+        </View>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.thumbnailRow}>
+          {props.images.map((image, index) => (
+            <View key={`${image.uri}-${index}`} style={props.compact ? styles.thumbnailCardCompact : styles.thumbnailCard}>
+              <Image source={{ uri: image.uri }} style={props.compact ? styles.thumbnailImageCompact : styles.thumbnailImage} />
+              <Pressable style={styles.thumbnailRemoveButton} onPress={() => props.removeImage(index)}>
+                <Text style={styles.thumbnailRemoveText}>삭제</Text>
+              </Pressable>
+            </View>
+          ))}
+          <Pressable style={props.compact ? styles.addPhotoCardCompact : styles.addPhotoCard} onPress={props.choosePhotoSource}>
+            <ImageIcon />
+            <Text style={styles.addPhotoText}>사진 추가</Text>
+            <Text style={styles.addPhotoHint}>카메라 / 갤러리</Text>
+          </Pressable>
+        </ScrollView>
       </View>
 
       <View style={styles.card}>
@@ -894,33 +790,7 @@ function UploadScreen(props: {
         />
       </View>
 
-      <View style={styles.card}>
-        <View style={styles.cardHeaderRow}>
-          <Text style={styles.sectionTitle}>사진</Text>
-          <StatusPill label={`${props.images.length}장`} tone={props.images.length > 0 ? "blue" : "gray"} />
-        </View>
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.thumbnailRow}>
-          {props.images.map((image, index) => (
-            <View key={`${image.uri}-${index}`} style={styles.thumbnailCard}>
-              <Image source={{ uri: image.uri }} style={styles.thumbnailImage} />
-              <Pressable style={styles.thumbnailRemoveButton} onPress={() => props.removeImage(index)}>
-                <Text style={styles.thumbnailRemoveText}>삭제</Text>
-              </Pressable>
-            </View>
-          ))}
-          <Pressable style={styles.addPhotoCard} onPress={props.choosePhotoSource}>
-            <ImageIcon />
-            <Text style={styles.addPhotoText}>사진 추가</Text>
-            <Text style={styles.addPhotoHint}>카메라 / 갤러리</Text>
-          </Pressable>
-        </ScrollView>
-      </View>
-
       <View style={styles.submitPanel}>
-        <View style={styles.infoRow}>
-          <StatusPill label={props.selectedRoom ? props.roomProgress : "방 선택 필요"} tone={props.selectedRoom ? props.roomProgressTone : "gray"} />
-          <StatusPill label="일자/작성자 자동 저장" tone="gray" />
-        </View>
         <Pressable style={[styles.uploadButton, !props.readyToUpload && styles.disabledButton]} disabled={!props.readyToUpload} onPress={() => void props.upload()}>
           {props.uploading ? <ActivityIndicator color="#FFFFFF" /> : <Text style={styles.primaryActionText}>업로드</Text>}
         </Pressable>
@@ -933,10 +803,13 @@ function RoomPickerModal(props: {
   loadingRooms: boolean;
   meta: UploadMeta;
   roomId: string;
+  roomLevelFilter: string;
+  roomLevelFilters: string[];
   roomSearch: string;
   roomSections: RoomSection[];
   selectedProject: Project | null;
   setRoomId: (value: string) => void;
+  setRoomLevelFilter: (value: string) => void;
   setRoomPickerVisible: (value: boolean) => void;
   setRoomSearch: (value: string) => void;
   setStatus: (value: string) => void;
@@ -944,10 +817,10 @@ function RoomPickerModal(props: {
 }) {
   return (
     <Modal visible={props.visible} transparent animationType="slide" statusBarTranslucent onRequestClose={() => props.setRoomPickerVisible(false)}>
-      <KeyboardAvoidingView style={styles.modalKeyboardRoot} behavior={Platform.OS === "ios" ? "padding" : undefined}>
+      <KeyboardAvoidingView style={styles.modalKeyboardRoot} behavior={Platform.OS === "ios" ? "padding" : "height"}>
         <View style={styles.modalBackdrop}>
           <Pressable style={styles.modalDismissArea} onPress={() => props.setRoomPickerVisible(false)} />
-          <SafeAreaView style={styles.sheetSafe}>
+          <View style={styles.sheetSafe}>
             <View style={styles.sheet}>
               <View style={styles.sheetHandle} />
               <View style={styles.sheetHeader}>
@@ -967,10 +840,17 @@ function RoomPickerModal(props: {
                 autoCorrect={false}
                 returnKeyType="search"
               />
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.levelFilterRow} keyboardShouldPersistTaps="handled">
+                <FilterChip label="전체" active={!props.roomLevelFilter} onPress={() => props.setRoomLevelFilter("")} />
+                {props.roomLevelFilters.map((level) => (
+                  <FilterChip key={level} label={level} active={props.roomLevelFilter === level} onPress={() => props.setRoomLevelFilter(level)} />
+                ))}
+              </ScrollView>
               <SectionList
                 sections={props.roomSections}
                 keyExtractor={(item) => item.id}
                 stickySectionHeadersEnabled={false}
+                contentInsetAdjustmentBehavior="automatic"
                 keyboardDismissMode="on-drag"
                 keyboardShouldPersistTaps="handled"
                 contentContainerStyle={styles.sectionListContent}
@@ -1006,9 +886,61 @@ function RoomPickerModal(props: {
                 }
               />
             </View>
-          </SafeAreaView>
+          </View>
         </View>
       </KeyboardAvoidingView>
+    </Modal>
+  );
+}
+
+function ProjectPickerModal(props: {
+  loadingProjects: boolean;
+  projectId: string;
+  projects: Project[];
+  selectProject: (projectId: string) => Promise<void>;
+  setProjectPickerVisible: (visible: boolean) => void;
+  visible: boolean;
+}) {
+  return (
+    <Modal visible={props.visible} transparent animationType="slide" statusBarTranslucent onRequestClose={() => props.setProjectPickerVisible(false)}>
+      <View style={styles.modalBackdrop}>
+        <Pressable style={styles.modalDismissArea} onPress={() => props.setProjectPickerVisible(false)} />
+        <View style={styles.sheetSafe}>
+          <View style={styles.projectSheet}>
+            <View style={styles.sheetHandle} />
+            <View style={styles.sheetHeader}>
+              <View style={styles.flexOne}>
+                <Text style={styles.sheetTitle}>프로젝트 선택</Text>
+                <Text style={styles.sheetSubtitle}>참여 중인 프로젝트를 선택하세요.</Text>
+              </View>
+              {props.loadingProjects ? <ActivityIndicator color="#0F172A" /> : <StatusPill label={`${props.projects.length}개`} tone={props.projects.length > 0 ? "blue" : "gray"} />}
+            </View>
+
+            <ScrollView contentContainerStyle={styles.projectSheetList} showsVerticalScrollIndicator={false}>
+              {props.projects.map((project) => (
+                <Pressable
+                  key={project.id}
+                  style={[styles.projectPickerItem, project.id === props.projectId && styles.projectPickerItemActive]}
+                  onPress={() => {
+                    props.setProjectPickerVisible(false);
+                    void props.selectProject(project.id);
+                  }}
+                >
+                  <View style={styles.projectPickerIcon}>
+                    <ProjectLineIcon active={project.id === props.projectId} />
+                  </View>
+                  <View style={styles.flexOne}>
+                    <Text style={styles.projectName}>{project.name}</Text>
+                    <Text style={styles.projectCode}>{project.code} | {project.member_role ?? "참여중"}</Text>
+                  </View>
+                  {project.id === props.projectId ? <Feather name="check" size={30} color="#1669F2" /> : <ChevronRightIcon />}
+                </Pressable>
+              ))}
+              {props.projects.length === 0 ? <Text style={styles.emptyText}>참여 중인 프로젝트가 없습니다.</Text> : null}
+            </ScrollView>
+          </View>
+        </View>
+      </View>
     </Modal>
   );
 }
@@ -1029,34 +961,6 @@ function TabButton({ active, icon, label, onPress }: { active: boolean; icon: Re
       {icon}
       <Text style={[styles.tabText, active && styles.tabTextActive]}>{label}</Text>
     </Pressable>
-  );
-}
-
-function LogoLockup({ centered }: { centered?: boolean }) {
-  return (
-    <View style={[styles.logoLockup, centered && styles.logoLockupCentered]}>
-      <View style={styles.logoMark}>
-        <View style={styles.logoCubeA} />
-        <View style={styles.logoCubeB} />
-      </View>
-      <Text style={styles.logoText}>
-        BIM <Text style={styles.logoTextBlue}>PhotoSync</Text>
-      </Text>
-    </View>
-  );
-}
-
-function ConstructionThumb({ small }: { small?: boolean }) {
-  return (
-    <View style={[styles.constructionThumb, small && styles.constructionThumbSmall]}>
-      <View style={styles.thumbSky} />
-      <View style={styles.thumbBuilding}>
-        <View style={styles.thumbSlab} />
-        <View style={styles.thumbSlab} />
-        <View style={styles.thumbSlab} />
-      </View>
-      <View style={styles.thumbCrane} />
-    </View>
   );
 }
 
@@ -1124,14 +1028,6 @@ function Selector(props: {
   );
 }
 
-function RoleButton({ label, active, onPress }: { label: string; active: boolean; onPress: () => void }) {
-  return (
-    <Pressable style={[styles.roleButton, active && styles.roleButtonActive]} onPress={onPress}>
-      <Text style={[styles.roleButtonText, active && styles.roleButtonTextActive]}>{label}</Text>
-    </Pressable>
-  );
-}
-
 function StatusPill({ label, tone }: { label: string; tone: PillTone }) {
   return (
     <View style={[styles.statusPill, styles[`pill${capitalize(tone)}`]]}>
@@ -1157,12 +1053,16 @@ function InfoRow({ label, value }: { label: string; value: string }) {
   );
 }
 
-function buildRoomSections(rooms: Room[], rawQuery: string) {
+function buildRoomSections(rooms: Room[], rawQuery: string, levelFilter: string) {
   const query = rawQuery.trim().toLowerCase();
-  const filteredRooms = query ? rooms.filter((room) => roomSearchText(room).includes(query)) : rooms;
+  const filteredRooms = rooms.filter((room) => {
+    const matchesLevel = !levelFilter || roomLevelTitle(room) === levelFilter;
+    const matchesQuery = !query || roomSearchText(room).includes(query);
+    return matchesLevel && matchesQuery;
+  });
   const grouped = new Map<string, Room[]>();
   for (const room of filteredRooms) {
-    const level = room.level_name?.trim() || "층 정보 없음";
+    const level = roomLevelTitle(room);
     const existing = grouped.get(level);
     if (existing) existing.push(room);
     else grouped.set(level, [room]);
@@ -1171,6 +1071,14 @@ function buildRoomSections(rooms: Room[], rawQuery: string) {
     title,
     data: [...data].sort((firstRoom, secondRoom) => roomTitle(firstRoom).localeCompare(roomTitle(secondRoom)))
   }));
+}
+
+function roomLevelNames(rooms: Room[]) {
+  return Array.from(new Set(rooms.map(roomLevelTitle))).sort((firstLevel, secondLevel) => firstLevel.localeCompare(secondLevel, "ko"));
+}
+
+function roomLevelTitle(room: Room) {
+  return room.level_name?.trim() || "층 정보 없음";
 }
 
 function roomSearchText(room: Room) {
@@ -1188,7 +1096,16 @@ function roleLabel(role: string) {
 }
 
 function roomTitle(room: Room) {
-  return `${room.room_number ?? ""} ${room.room_name}`.trim();
+  return `${room.room_number ?? ""} ${room.room_name ?? ""}`.trim();
+}
+
+function photoTitle(photo: Photo, rooms: Room[]) {
+  const embeddedTitle = photo.room ? roomTitle(photo.room) : "";
+  if (embeddedTitle) return embeddedTitle;
+  const matchingRoom = rooms.find((room) => room.id === photo.room_id);
+  const matchingTitle = matchingRoom ? roomTitle(matchingRoom) : "";
+  if (matchingTitle) return matchingTitle;
+  return photo.work_date || "사진";
 }
 
 function roomCount(sections: RoomSection[]) {
@@ -1269,115 +1186,68 @@ function capitalize(value: PillTone) {
   return `${value.slice(0, 1).toUpperCase()}${value.slice(1)}` as "Blue" | "Green" | "Yellow" | "Red" | "Gray";
 }
 
-function MailIcon() {
-  return <View style={styles.mailIcon}><View style={styles.mailFlap} /></View>;
-}
-
-function LockIcon() {
-  return <View style={styles.lockIcon}><View style={styles.lockShackle} /><View style={styles.lockDot} /></View>;
-}
-
 function CameraLineIcon({ white }: { white?: boolean }) {
-  return <View style={[styles.cameraLineIcon, white && styles.iconWhite]}><View style={[styles.cameraLineTop, white && styles.iconWhite]} /><View style={[styles.cameraLineLens, white && styles.iconWhite]} /></View>;
+  return <Feather name="camera" size={white ? 56 : 30} color={white ? "#FFFFFF" : "#1669F2"} />;
 }
 
 function UploadCloudIcon() {
-  return <View style={styles.uploadCloud}><View style={styles.uploadArrow} /></View>;
+  return <Feather name="upload-cloud" size={30} color="#101828" />;
 }
 
 function ImageIcon() {
-  return <View style={styles.imageIcon}><View style={styles.imageSun} /><View style={styles.imageMountain} /></View>;
+  return <Feather name="image" size={30} color="#64748B" />;
 }
 
 function HomeIcon({ active }: { active: boolean }) {
-  return <View style={[styles.homeIcon, active && styles.activeIcon]}><View style={[styles.homeRoof, active && styles.activeIcon]} /></View>;
+  return <Feather name="home" size={28} color={active ? "#1669F2" : "#667085"} />;
 }
 
 function FolderIcon({ active }: { active: boolean }) {
-  return <View style={[styles.folderIcon, active && styles.activeIcon]}><View style={[styles.folderTab, active && styles.activeIcon]} /></View>;
+  return <Feather name="folder" size={28} color={active ? "#1669F2" : "#667085"} />;
 }
 
 function UserIcon({ active }: { active: boolean }) {
-  return <View style={styles.userIcon}><View style={[styles.userHead, active && styles.activeIcon]} /><View style={[styles.userBody, active && styles.activeIcon]} /></View>;
-}
-
-function BulbIcon() {
-  return <View style={styles.bulbIcon}><View style={styles.bulbTop} /><View style={styles.bulbBase} /></View>;
+  return <Feather name="user" size={28} color={active ? "#1669F2" : "#667085"} />;
 }
 
 function ChevronRightIcon() {
-  return <Text style={styles.chevronText}>›</Text>;
+  return <Feather name="chevron-right" size={28} color="#98A2B3" />;
 }
 
 function ChevronDownIcon() {
-  return <Text style={styles.chevronDownText}>⌄</Text>;
+  return <Feather name="chevron-down" size={30} color="#475569" />;
+}
+
+function ProjectLineIcon({ active }: { active: boolean }) {
+  return <Feather name="briefcase" size={28} color={active ? "#1669F2" : "#64748B"} />;
 }
 
 const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: "#F7FAFF" },
+  safe: { flex: 1, backgroundColor: "#FFFFFF" },
   keyboardRoot: { flex: 1 },
-  screenContainer: { flexGrow: 1, paddingHorizontal: 24, paddingTop: 10, paddingBottom: 34, gap: 18 },
-  screenWithTabs: { paddingBottom: 120 },
-  authLayout: { flexGrow: 1, justifyContent: "center", gap: 18 },
-  logoLockup: { flexDirection: "row", alignItems: "center", gap: 12 },
-  logoLockupCentered: { alignSelf: "center" },
-  logoMark: { width: 42, height: 42, borderRadius: 14, backgroundColor: "#1D4ED8", transform: [{ rotate: "45deg" }] },
-  logoCubeA: { position: "absolute", left: 10, top: 10, width: 14, height: 14, borderRadius: 3, backgroundColor: "#FFFFFF" },
-  logoCubeB: { position: "absolute", right: 8, bottom: 8, width: 12, height: 12, borderRadius: 3, backgroundColor: "#93C5FD" },
-  logoText: { color: "#13233A", fontSize: 30, fontWeight: "900", letterSpacing: 0 },
-  logoTextBlue: { color: "#1D6FEA" },
-  loginSubtitle: { color: "#667085", fontSize: 17, lineHeight: 27, textAlign: "center", paddingHorizontal: 18 },
-  loginHeroImage: { width: "100%", height: 260, marginVertical: 4 },
-  authCard: { gap: 14 },
-  segmented: { flexDirection: "row", gap: 8 },
-  segment: { flex: 1, minHeight: 44, borderRadius: 14, borderWidth: 1, borderColor: "#D6DEE9", alignItems: "center", justifyContent: "center", backgroundColor: "#FFFFFF" },
-  segmentActive: { borderColor: "#2F7DE1", backgroundColor: "#EAF3FF" },
-  segmentText: { color: "#64748B", fontWeight: "900" },
-  segmentTextActive: { color: "#1D4ED8" },
-  roleRow: { flexDirection: "row", gap: 8 },
-  roleButton: { flex: 1, minHeight: 44, borderRadius: 14, borderWidth: 1, borderColor: "#D6DEE9", alignItems: "center", justifyContent: "center", backgroundColor: "#FFFFFF" },
-  roleButtonActive: { borderColor: "#2F7DE1", backgroundColor: "#EAF3FF" },
-  roleButtonText: { color: "#475569", fontWeight: "900" },
-  roleButtonTextActive: { color: "#1D4ED8" },
+  screenContainer: { flexGrow: 1, paddingHorizontal: 24, gap: 18 },
+  screenContainerCompact: { paddingHorizontal: 18, gap: 14 },
   field: { gap: 7 },
   label: { color: "#64748B", fontSize: 13, fontWeight: "800" },
   inputFrame: { minHeight: 64, borderRadius: 16, borderWidth: 1, borderColor: "#D6DEE9", backgroundColor: "#FFFFFF", flexDirection: "row", alignItems: "center", paddingHorizontal: 16, gap: 12 },
   textareaFrame: { minHeight: 168, alignItems: "flex-start", paddingTop: 14 },
-  inputIcon: { width: 30, alignItems: "center" },
+  inputIcon: { width: 30, alignItems: "center", justifyContent: "center" },
   input: { flex: 1, minHeight: 48, color: "#101828", fontSize: 17, padding: 0 },
   textarea: { minHeight: 140, textAlignVertical: "top" },
   staticInputValue: { color: "#101828", fontSize: 17, fontWeight: "700" },
-  loginOptionRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 12 },
-  checkRow: { flexDirection: "row", alignItems: "center", gap: 10 },
-  checkbox: { width: 24, height: 24, borderRadius: 6, borderWidth: 1, borderColor: "#CBD5E1", alignItems: "center", justifyContent: "center", backgroundColor: "#FFFFFF" },
-  checkboxActive: { backgroundColor: "#2F7DE1", borderColor: "#2F7DE1" },
-  checkboxMark: { color: "#FFFFFF", fontSize: 16, fontWeight: "900" },
-  checkText: { color: "#101828", fontSize: 14, fontWeight: "700" },
-  linkText: { color: "#667085", fontSize: 14, fontWeight: "800" },
   primaryAction: { minHeight: 62, borderRadius: 16, alignItems: "center", justifyContent: "center", backgroundColor: "#1669F2", shadowColor: "#1669F2", shadowOpacity: 0.24, shadowRadius: 14, shadowOffset: { width: 0, height: 8 } },
   primaryActionText: { color: "#FFFFFF", fontSize: 18, fontWeight: "900" },
   disabledButton: { opacity: 0.48 },
-  homeLayout: { gap: 20 },
+  homeLayout: { gap: 16 },
   homeHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", marginTop: 10 },
-  bellIcon: { width: 42, height: 42, alignItems: "center", justifyContent: "center" },
-  bellBody: { width: 24, height: 28, borderRadius: 12, borderWidth: 3, borderColor: "#475569", borderBottomWidth: 0 },
-  bellDot: { width: 12, height: 3, borderRadius: 2, backgroundColor: "#475569" },
   pageTitle: { color: "#101828", fontSize: 28, lineHeight: 36, fontWeight: "900" },
   pageDescription: { color: "#64748B", fontSize: 15, lineHeight: 22 },
-  projectHeroCard: { minHeight: 108, borderRadius: 20, borderWidth: 1, borderColor: "#E1E8F0", backgroundColor: "#FFFFFF", padding: 16, flexDirection: "row", alignItems: "center", gap: 16 },
-  constructionThumb: { width: 90, height: 74, borderRadius: 12, backgroundColor: "#DCEEFF", overflow: "hidden" },
-  constructionThumbSmall: { width: 58, height: 52, borderRadius: 10 },
-  thumbSky: { position: "absolute", left: 0, right: 0, top: 0, height: 22, backgroundColor: "#BFE0FF" },
-  thumbBuilding: { position: "absolute", left: 12, right: 12, bottom: 12, gap: 4 },
-  thumbSlab: { height: 9, borderRadius: 3, backgroundColor: "#FFFFFF" },
-  thumbCrane: { position: "absolute", left: 18, top: 8, width: 50, height: 2, backgroundColor: "#F59E0B", transform: [{ rotate: "-12deg" }] },
+  projectHeroCard: { minHeight: 102, borderRadius: 20, borderWidth: 1, borderColor: "#DCE6F2", backgroundColor: "#FFFFFF", padding: 16, flexDirection: "row", alignItems: "center", gap: 14 },
   projectHeroText: { flex: 1, gap: 6 },
-  projectSelectorTitle: { color: "#101828", fontSize: 20, lineHeight: 26, fontWeight: "900" },
+  projectEyebrow: { color: "#1669F2", fontSize: 12, fontWeight: "900" },
+  projectSelectorTitle: { color: "#101828", fontSize: 19, lineHeight: 25, fontWeight: "900" },
   projectSelectorMeta: { color: "#667085", fontSize: 15, lineHeight: 21, fontWeight: "700" },
-  projectDotsRow: { alignSelf: "center", gap: 8, paddingHorizontal: 4 },
-  dot: { width: 10, height: 10, borderRadius: 5, backgroundColor: "#D5DAE1" },
-  dotActive: { backgroundColor: "#1669F2" },
-  captureFrame: { minHeight: 390, alignItems: "center", justifyContent: "center", gap: 16 },
+  captureFrame: { minHeight: 360, alignItems: "center", justifyContent: "center", gap: 14 },
   cornerTopLeft: { position: "absolute", left: 0, top: 10, width: 58, height: 58, borderLeftWidth: 3, borderTopWidth: 3, borderColor: "#BDD6FF", borderTopLeftRadius: 28 },
   cornerTopRight: { position: "absolute", right: 0, top: 10, width: 58, height: 58, borderRightWidth: 3, borderTopWidth: 3, borderColor: "#BDD6FF", borderTopRightRadius: 28 },
   cornerBottomLeft: { position: "absolute", left: 0, bottom: 10, width: 58, height: 58, borderLeftWidth: 3, borderBottomWidth: 3, borderColor: "#BDD6FF", borderBottomLeftRadius: 28 },
@@ -1385,14 +1255,10 @@ const styles = StyleSheet.create({
   cameraCircle: { width: 160, height: 160, borderRadius: 80, backgroundColor: "#1669F2", alignItems: "center", justifyContent: "center", shadowColor: "#1669F2", shadowOpacity: 0.25, shadowRadius: 22, shadowOffset: { width: 0, height: 14 } },
   captureTitle: { color: "#101828", fontSize: 25, fontWeight: "900", textAlign: "center" },
   captureDescription: { color: "#667085", fontSize: 16, lineHeight: 24, textAlign: "center" },
-  guideCard: { minHeight: 112, borderRadius: 20, backgroundColor: "#FFFFFF", padding: 18, flexDirection: "row", alignItems: "center", gap: 14, borderWidth: 1, borderColor: "#EEF2F7" },
-  guideIcon: { width: 56, height: 56, borderRadius: 28, backgroundColor: "#EAF3FF", alignItems: "center", justifyContent: "center" },
-  guideTitle: { color: "#101828", fontSize: 18, fontWeight: "900" },
-  guideBody: { color: "#667085", fontSize: 15, lineHeight: 23, marginTop: 4 },
   card: { borderRadius: 22, backgroundColor: "#FFFFFF", padding: 16, gap: 12, borderWidth: 1, borderColor: "#E1E8F0" },
   sectionTitle: { color: "#101828", fontSize: 19, lineHeight: 25, fontWeight: "900" },
   cardDescription: { color: "#667085", fontSize: 14, lineHeight: 21 },
-  projectListItem: { borderRadius: 18, borderWidth: 1, borderColor: "#E2E8F0", padding: 12, flexDirection: "row", alignItems: "center", gap: 12 },
+  projectListItem: { minHeight: 76, borderRadius: 18, borderWidth: 1, borderColor: "#E2E8F0", paddingHorizontal: 16, paddingVertical: 14, flexDirection: "row", alignItems: "center", gap: 12 },
   projectListItemActive: { borderColor: "#1669F2", backgroundColor: "#F0F6FF" },
   projectName: { color: "#101828", fontSize: 16, fontWeight: "900" },
   projectCode: { color: "#667085", fontSize: 13, fontWeight: "700", marginTop: 3 },
@@ -1400,17 +1266,21 @@ const styles = StyleSheet.create({
   secondaryActionWide: { minHeight: 52, borderRadius: 16, paddingHorizontal: 18, alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: "#1669F2", backgroundColor: "#F8FAFF" },
   secondaryActionText: { color: "#1669F2", fontWeight: "900", textAlign: "center", fontSize: 16 },
   cardHeaderRow: { flexDirection: "row", alignItems: "flex-start", justifyContent: "space-between", gap: 12 },
+  detailTopRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 12 },
+  backPill: { minHeight: 42, borderRadius: 999, borderWidth: 1, borderColor: "#D6DEE9", backgroundColor: "#FFFFFF", paddingHorizontal: 14, alignItems: "center", justifyContent: "center" },
+  backPillText: { color: "#1669F2", fontSize: 14, fontWeight: "900" },
   flexOne: { flex: 1 },
   roomFilterRow: { gap: 8, paddingVertical: 2 },
   filterChip: { maxWidth: 170, borderRadius: 999, borderWidth: 1, borderColor: "#D6DEE9", paddingHorizontal: 14, paddingVertical: 10, backgroundColor: "#FFFFFF" },
   filterChipActive: { borderColor: "#1669F2", backgroundColor: "#EAF3FF" },
   filterChipText: { color: "#475569", fontWeight: "800" },
   filterChipTextActive: { color: "#1669F2" },
-  photoGrid: { flexDirection: "row", flexWrap: "wrap", gap: 10 },
-  photoCard: { width: "48%", borderRadius: 16, borderWidth: 1, borderColor: "#E2E8F0", overflow: "hidden", backgroundColor: "#FFFFFF" },
-  photoImage: { width: "100%", height: 132, backgroundColor: "#E2E8F0" },
-  photoTitle: { color: "#101828", fontWeight: "900", paddingHorizontal: 10, paddingTop: 9 },
-  photoMeta: { color: "#667085", fontSize: 12, lineHeight: 17, paddingHorizontal: 10, paddingTop: 4, paddingBottom: 10 },
+  photoGrid: { gap: 10, paddingBottom: 112 },
+  photoCard: { width: "100%", minHeight: 112, borderRadius: 16, borderWidth: 1, borderColor: "#E2E8F0", overflow: "hidden", backgroundColor: "#FFFFFF", flexDirection: "row" },
+  photoImage: { width: 112, minHeight: 112, backgroundColor: "#E2E8F0" },
+  photoCardBody: { flex: 1, paddingHorizontal: 12, paddingVertical: 10, justifyContent: "center" },
+  photoTitle: { color: "#101828", fontWeight: "900", fontSize: 14 },
+  photoMeta: { color: "#667085", fontSize: 12, lineHeight: 17, marginTop: 5 },
   profileCard: { borderRadius: 24, backgroundColor: "#FFFFFF", padding: 22, alignItems: "center", gap: 10, borderWidth: 1, borderColor: "#E1E8F0" },
   avatarCircle: { width: 72, height: 72, borderRadius: 36, backgroundColor: "#EAF3FF", alignItems: "center", justifyContent: "center" },
   avatarText: { color: "#1669F2", fontSize: 26, fontWeight: "900" },
@@ -1426,10 +1296,6 @@ const styles = StyleSheet.create({
   uploadTitle: { color: "#101828", fontSize: 22, fontWeight: "900" },
   roundIconButton: { width: 44, height: 44, borderRadius: 22, alignItems: "center", justifyContent: "center", backgroundColor: "#FFFFFF" },
   backArrow: { color: "#101828", fontSize: 40, lineHeight: 40 },
-  uploadIntro: { flexDirection: "row", alignItems: "center", gap: 16 },
-  uploadIntroImage: { width: 112, height: 112, borderRadius: 18, overflow: "hidden", backgroundColor: "#EAF3FF", alignItems: "center", justifyContent: "center" },
-  uploadIntroText: { flex: 1, color: "#667085", fontSize: 15, lineHeight: 24, fontWeight: "700" },
-  heroPreview: { width: "100%", height: "100%" },
   selectBox: { minHeight: 64, borderRadius: 16, borderWidth: 1, borderColor: "#D6DEE9", backgroundColor: "#FFFFFF", flexDirection: "row", alignItems: "center", paddingHorizontal: 16, gap: 12 },
   selectValue: { color: "#101828", fontSize: 16, lineHeight: 22, fontWeight: "800" },
   selectorGrid: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
@@ -1439,14 +1305,16 @@ const styles = StyleSheet.create({
   selectorChipTextActive: { color: "#1669F2" },
   thumbnailRow: { gap: 10, paddingVertical: 2 },
   thumbnailCard: { width: 112, gap: 6 },
+  thumbnailCardCompact: { width: 92, gap: 6 },
   thumbnailImage: { width: 112, height: 112, borderRadius: 16, backgroundColor: "#E2E8F0" },
+  thumbnailImageCompact: { width: 92, height: 92, borderRadius: 14, backgroundColor: "#E2E8F0" },
   thumbnailRemoveButton: { minHeight: 34, borderRadius: 12, alignItems: "center", justifyContent: "center", backgroundColor: "#FEE2E2" },
   thumbnailRemoveText: { color: "#B91C1C", fontSize: 12, fontWeight: "900" },
   addPhotoCard: { width: 132, height: 112, borderRadius: 16, borderWidth: 1, borderColor: "#D6DEE9", backgroundColor: "#F8FAFF", alignItems: "center", justifyContent: "center", gap: 5 },
+  addPhotoCardCompact: { width: 112, height: 92, borderRadius: 16, borderWidth: 1, borderColor: "#D6DEE9", backgroundColor: "#F8FAFF", alignItems: "center", justifyContent: "center", gap: 5 },
   addPhotoText: { color: "#101828", fontSize: 14, fontWeight: "900" },
   addPhotoHint: { color: "#667085", fontSize: 12, fontWeight: "700" },
   submitPanel: { borderRadius: 20, backgroundColor: "#FFFFFF", padding: 14, gap: 12, borderWidth: 1, borderColor: "#E1E8F0" },
-  infoRow: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
   uploadButton: { minHeight: 60, borderRadius: 16, paddingHorizontal: 18, alignItems: "center", justifyContent: "center", backgroundColor: "#1669F2" },
   statusBanner: { borderRadius: 16, paddingHorizontal: 16, paddingVertical: 12, backgroundColor: "#FFFFFF", color: "#667085", fontSize: 13, lineHeight: 19, borderWidth: 1, borderColor: "#E1E8F0" },
   statusPill: { minHeight: 30, borderRadius: 999, paddingHorizontal: 12, alignItems: "center", justifyContent: "center" },
@@ -1462,11 +1330,17 @@ const styles = StyleSheet.create({
   modalDismissArea: { flex: 1 },
   sheetSafe: { backgroundColor: "#FFFFFF", borderTopLeftRadius: 28, borderTopRightRadius: 28 },
   sheet: { height: "82%", borderTopLeftRadius: 28, borderTopRightRadius: 28, backgroundColor: "#FFFFFF", paddingHorizontal: 18, paddingTop: 10, paddingBottom: 12 },
+  projectSheet: { height: 560, maxHeight: "78%", borderTopLeftRadius: 28, borderTopRightRadius: 28, backgroundColor: "#FFFFFF", paddingHorizontal: 18, paddingTop: 10, paddingBottom: 18 },
   sheetHandle: { alignSelf: "center", width: 44, height: 5, borderRadius: 999, backgroundColor: "#CBD5E1", marginBottom: 12 },
   sheetHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: 12 },
   sheetTitle: { color: "#101828", fontSize: 21, fontWeight: "900" },
   sheetSubtitle: { color: "#667085", fontSize: 13 },
+  projectSheetList: { gap: 10, paddingBottom: 8 },
+  projectPickerItem: { minHeight: 68, borderRadius: 18, borderWidth: 1, borderColor: "#E2E8F0", backgroundColor: "#FFFFFF", paddingHorizontal: 14, paddingVertical: 10, flexDirection: "row", alignItems: "center", gap: 12 },
+  projectPickerItemActive: { borderColor: "#1669F2", backgroundColor: "#F0F6FF" },
+  projectPickerIcon: { width: 44, height: 44, borderRadius: 14, backgroundColor: "#F3F8FF", alignItems: "center", justifyContent: "center" },
   searchInput: { minHeight: 48, borderRadius: 15, borderWidth: 1, borderColor: "#D6DEE9", paddingHorizontal: 14, color: "#101828", backgroundColor: "#F8FAFC", marginBottom: 10 },
+  levelFilterRow: { gap: 8, paddingBottom: 10 },
   sectionListContent: { paddingBottom: 26 },
   sectionHeader: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingTop: 12, paddingBottom: 7 },
   sectionHeaderText: { color: "#667085", fontSize: 12, fontWeight: "900", textTransform: "uppercase" },
@@ -1483,31 +1357,6 @@ const styles = StyleSheet.create({
   tabButton: { flex: 1, alignItems: "center", justifyContent: "center", gap: 6 },
   tabText: { color: "#667085", fontSize: 13, fontWeight: "900" },
   tabTextActive: { color: "#1669F2" },
-  activeIcon: { borderColor: "#1669F2", backgroundColor: "#1669F2" },
-  chevronText: { color: "#98A2B3", fontSize: 38, lineHeight: 38, fontWeight: "300" },
-  chevronDownText: { color: "#475569", fontSize: 30, lineHeight: 30, fontWeight: "900" },
-  mailIcon: { width: 25, height: 19, borderRadius: 3, borderWidth: 3, borderColor: "#6B7280" },
-  mailFlap: { position: "absolute", left: 4, top: 3, width: 13, height: 13, borderLeftWidth: 3, borderBottomWidth: 3, borderColor: "#6B7280", transform: [{ rotate: "-45deg" }] },
-  lockIcon: { width: 25, height: 20, borderRadius: 4, borderWidth: 3, borderColor: "#6B7280", marginTop: 9 },
-  lockShackle: { position: "absolute", left: 4, top: -13, width: 13, height: 15, borderRadius: 8, borderWidth: 3, borderBottomWidth: 0, borderColor: "#6B7280" },
-  lockDot: { alignSelf: "center", marginTop: 6, width: 4, height: 4, borderRadius: 2, backgroundColor: "#6B7280" },
-  cameraLineIcon: { width: 42, height: 30, borderRadius: 8, borderWidth: 4, borderColor: "#1669F2", alignItems: "center", justifyContent: "center" },
-  iconWhite: { borderColor: "#FFFFFF" },
-  cameraLineTop: { position: "absolute", top: -9, width: 22, height: 10, borderTopLeftRadius: 5, borderTopRightRadius: 5, borderWidth: 4, borderBottomWidth: 0, borderColor: "#1669F2" },
-  cameraLineLens: { width: 15, height: 15, borderRadius: 8, borderWidth: 4, borderColor: "#1669F2" },
-  uploadCloud: { width: 28, height: 18, borderRadius: 9, borderWidth: 3, borderColor: "#101828", borderBottomWidth: 0 },
-  uploadArrow: { alignSelf: "center", marginTop: 9, width: 10, height: 10, borderLeftWidth: 3, borderTopWidth: 3, borderColor: "#101828", transform: [{ rotate: "45deg" }] },
-  imageIcon: { width: 34, height: 30, borderRadius: 6, borderWidth: 2, borderColor: "#64748B" },
-  imageSun: { position: "absolute", right: 6, top: 5, width: 6, height: 6, borderRadius: 3, backgroundColor: "#64748B" },
-  imageMountain: { position: "absolute", left: 6, bottom: 6, width: 16, height: 16, borderLeftWidth: 2, borderTopWidth: 2, borderColor: "#64748B", transform: [{ rotate: "45deg" }] },
-  homeIcon: { width: 24, height: 22, borderWidth: 3, borderColor: "#667085", borderTopWidth: 0, borderRadius: 4 },
-  homeRoof: { position: "absolute", left: 1, top: -10, width: 17, height: 17, borderLeftWidth: 3, borderTopWidth: 3, borderColor: "#667085", transform: [{ rotate: "45deg" }] },
-  folderIcon: { width: 28, height: 22, borderRadius: 4, borderWidth: 3, borderColor: "#667085" },
-  folderTab: { position: "absolute", left: 3, top: -7, width: 12, height: 8, borderTopLeftRadius: 3, borderTopRightRadius: 3, borderWidth: 3, borderBottomWidth: 0, borderColor: "#667085" },
-  userIcon: { width: 32, height: 30, alignItems: "center" },
-  userHead: { width: 14, height: 14, borderRadius: 7, borderWidth: 3, borderColor: "#667085" },
-  userBody: { marginTop: 3, width: 26, height: 14, borderRadius: 13, borderWidth: 3, borderColor: "#667085", borderBottomWidth: 0 },
-  bulbIcon: { width: 30, height: 34, alignItems: "center" },
-  bulbTop: { width: 22, height: 22, borderRadius: 11, borderWidth: 2, borderColor: "#7DAEF5" },
-  bulbBase: { width: 12, height: 8, borderRadius: 3, backgroundColor: "#7DAEF5", marginTop: -2 }
+  navIconFrame: { width: 34, height: 34, borderRadius: 17, alignItems: "center", justifyContent: "center" },
+  navIconFrameActive: { backgroundColor: "#EAF3FF" }
 });

@@ -1,5 +1,5 @@
 import { ReportFormat, Trade, WorkSurface } from "@prisma/client";
-import { IsDateString, IsEnum, IsOptional, IsString, IsUUID, MaxLength } from "class-validator";
+import { IsDateString, IsEnum, IsIn, IsOptional, IsString, IsUUID, MaxLength } from "class-validator";
 
 export class ReportQueryDto {
   @IsOptional()
@@ -58,6 +58,10 @@ export class GenerateReportDto {
   @IsString()
   @MaxLength(3000)
   ai_prompt?: string;
+
+  @IsOptional()
+  @IsIn(["GEMINI", "ANTHROPIC"])
+  model_provider?: "GEMINI" | "ANTHROPIC";
 }
 
 export class ReportChatDto {
