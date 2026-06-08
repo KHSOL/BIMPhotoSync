@@ -68,6 +68,7 @@ export default function DrawingViewer({ mode }: { mode: DrawingViewerMode }) {
   const [floorPlanAssetUrl, setFloorPlanAssetUrl] = useState("");
   const [modelAssets, setModelAssets] = useState<RevitModel3D[]>([]);
   const [modelAssetId, setModelAssetId] = useState("");
+  const [staleModelAssetIds, setStaleModelAssetIds] = useState<ReadonlySet<string>>(new Set());
   const [sheets, setSheets] = useState<RevitSheet[]>([]);
   const [sheetId, setSheetId] = useState("");
   const [sheetAssetUrl, setSheetAssetUrl] = useState("");
@@ -95,8 +96,8 @@ export default function DrawingViewer({ mode }: { mode: DrawingViewerMode }) {
     [isFloorPlanMode, sheetId, sheets]
   );
   const matchingModelAssets = useMemo(
-    () => (selectedPlan ? modelAssets.filter((asset) => modelAssetMatchesPlan(asset, selectedPlan)) : []),
-    [modelAssets, selectedPlan]
+    () => (selectedPlan ? modelAssets.filter((asset) => modelAssetMatchesPlan(asset, selectedPlan) && !staleModelAssetIds.has(asset.id)) : []),
+    [modelAssets, selectedPlan, staleModelAssetIds]
   );
   const selectedModelAsset = useMemo(() => {
     const selectedAsset = matchingModelAssets.find((asset) => asset.id === modelAssetId);
@@ -242,6 +243,7 @@ export default function DrawingViewer({ mode }: { mode: DrawingViewerMode }) {
     const nextTradeCategories = Array.isArray(tradeCategoryJson.data) ? tradeCategoryJson.data : [];
     setPlans(nextPlans);
     setModelAssets(nextModelAssets);
+    setStaleModelAssetIds(new Set());
     setSheets(nextSheets);
     setTradeCategories(nextTradeCategories);
     setRoomTradeProgressByBimId(
@@ -315,6 +317,34 @@ export default function DrawingViewer({ mode }: { mode: DrawingViewerMode }) {
     setPlanId(nextPlanId);
     setModelAssetId(pickModelAssetForPlan(modelAssets, nextPlan)?.id ?? "");
     setSelectedRoomId(nextPlan?.rooms[0]?.bim_photo_room_id ?? "");
+  }
+
+  async function refreshModelAssetsAfterAssetError(statusCode: number | null) {
+    if (statusCode !== 404 || !token || !projectId || !selectedPlan || !selectedModelAsset) {
+      setStatus("3D 모델 asset을 불러오지 못했습니다. 3D Model 동기화 후 새로고침해 주세요.");
+      return;
+    }
+
+    const staleAssetId = selectedModelAsset.id;
+    setStaleModelAssetIds((current) => {
+      const next = new Set(current);
+      next.add(staleAssetId);
+      return next;
+    });
+
+    const json = await apiJson<Model3DList>(`/revit/projects/${projectId}/3d-models`, { headers: authHeaders(token) });
+    const nextModelAssets = Array.isArray(json.data) ? json.data : [];
+    setModelAssets(nextModelAssets);
+
+    const replacement = nextModelAssets.find(
+      (asset) => asset.id !== staleAssetId && modelAssetMatchesPlan(asset, selectedPlan)
+    );
+    setModelAssetId(replacement?.id ?? "");
+    setStatus(
+      replacement
+        ? "이전 3D asset이 만료되어 최신 3D 모델로 다시 불러왔습니다."
+        : "현재 평면도와 연결된 사용 가능한 3D asset이 없습니다. Revit add-in에서 3D Model을 다시 실행해 주세요."
+    );
   }
 
   if (!token) {
@@ -449,6 +479,9 @@ export default function DrawingViewer({ mode }: { mode: DrawingViewerMode }) {
               roomTradeProgressByBimId={roomTradeProgressByBimId}
               tradeCategories={tradeCategories}
               onSelect={setSelectedRoomId}
+              onAssetError={(statusCode) => {
+                void refreshModelAssetsAfterAssetError(statusCode).catch((err: Error) => setStatus(err.message));
+              }}
             />
           ) : isFloorPlanMode && selectedPlan && floorPlanViewMode === "3d" ? (
             <div className="floor-plan-3d-fallback">

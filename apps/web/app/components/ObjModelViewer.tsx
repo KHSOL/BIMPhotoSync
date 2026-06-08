@@ -48,7 +48,8 @@ export function ObjModelViewer({
   selectedRoomId,
   roomTradeProgressByBimId,
   tradeCategories = [],
-  onSelect
+  onSelect,
+  onAssetError
 }: {
   assetUrl: string;
   token: string;
@@ -58,16 +59,19 @@ export function ObjModelViewer({
   roomTradeProgressByBimId?: Record<string, Room["progress_by_trade_category"]>;
   tradeCategories?: TradeCategory[];
   onSelect?: (roomId: string) => void;
+  onAssetError?: (status: number | null) => void;
 }) {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const selectedRoomIdRef = useRef(selectedRoomId ?? "");
   const onSelectRef = useRef(onSelect);
+  const onAssetErrorRef = useRef(onAssetError);
   const [state, setState] = useState<"loading" | "ready" | "error">("loading");
 
   useEffect(() => {
     selectedRoomIdRef.current = selectedRoomId ?? "";
     onSelectRef.current = onSelect;
-  }, [onSelect, selectedRoomId]);
+    onAssetErrorRef.current = onAssetError;
+  }, [onAssetError, onSelect, selectedRoomId]);
 
   useEffect(() => {
     const host = hostRef.current;
@@ -147,7 +151,7 @@ export function ObjModelViewer({
       setState("loading");
       try {
         const response = await fetch(assetUrl, { headers: authHeaders(token) });
-        if (!response.ok) throw new Error(`OBJ asset ${response.status}`);
+        if (!response.ok) throw new ObjAssetError(response.status);
         const text = await response.text();
         if (disposed) return;
 
@@ -155,11 +159,11 @@ export function ObjModelViewer({
         object.traverse((child) => {
           if (child instanceof Mesh) {
             const material = new MeshStandardMaterial({
-              color: 0xf8fafc,
-              roughness: 0.72,
-              metalness: 0.02,
-              transparent: true,
-              opacity: 0.84,
+              color: 0xe5e7eb,
+              roughness: 0.82,
+              metalness: 0,
+              transparent: false,
+              opacity: 1,
               side: DoubleSide
             });
             child.material = material;
@@ -182,11 +186,11 @@ export function ObjModelViewer({
         addModelEdges(object, disposables, maxDimension);
         if (plan) {
           const roomGroup = createRoomOverlay(plan, center, maxDimension, roomTradeProgressByBimId ?? {}, tradeCategories, roomMeshes, disposables);
-          roomGroup.position.y = Math.max(maxDimension * 0.006, 0.04);
+          roomGroup.position.y = Math.max(maxDimension * 0.003, 0.02);
           scene.add(roomGroup);
         }
 
-        const grid = new GridHelper(maxDimension * 1.2, 24, 0xcbd5e1, 0xeef2ff);
+        const grid = new GridHelper(maxDimension * 1.12, 24, 0xe2e8f0, 0xf3f6fb);
         grid.position.y = 0;
         scene.add(grid);
 
@@ -196,7 +200,12 @@ export function ObjModelViewer({
         controls.maxDistance = maxDimension * 2.5;
         controls.update();
         setState("ready");
-      } catch {
+      } catch (error) {
+        if (error instanceof ObjAssetError) {
+          onAssetErrorRef.current?.(error.status);
+        } else {
+          onAssetErrorRef.current?.(null);
+        }
         if (!disposed) setState("error");
       }
     }
@@ -206,7 +215,7 @@ export function ObjModelViewer({
         const isSelected = mesh.userData.roomId === selectedRoomIdRef.current;
         const isHovered = mesh.userData.roomId === hoveredRoomId;
         mesh.material.color.set(isSelected ? 0xbfdbfe : isHovered ? 0xccfbf1 : progressColor(mesh.userData.progressStatus));
-        mesh.material.opacity = isSelected ? 0.58 : isHovered ? 0.48 : 0.36;
+        mesh.material.opacity = isSelected ? 0.36 : isHovered ? 0.28 : 0.14;
         mesh.material.emissive.set(isSelected ? 0x2563eb : isHovered ? 0x0f766e : 0x000000);
         mesh.material.emissiveIntensity = isSelected ? 0.16 : isHovered ? 0.08 : 0;
       }
@@ -250,6 +259,12 @@ export function ObjModelViewer({
   );
 }
 
+class ObjAssetError extends Error {
+  constructor(public readonly status: number) {
+    super(`OBJ asset ${status}`);
+  }
+}
+
 function addModelEdges(object: Group, disposables: DisposableResource[], maxDimension: number) {
   object.traverse((child) => {
     if (!(child instanceof Mesh) || !child.visible) return;
@@ -258,7 +273,7 @@ function addModelEdges(object: Group, disposables: DisposableResource[], maxDime
     if (shouldSkipEdgeMesh(childSize, maxDimension)) return;
 
     const geometry = new EdgesGeometry(child.geometry, 78);
-    const material = new LineBasicMaterial({ color: 0x334155, transparent: true, opacity: 0.13 });
+    const material = new LineBasicMaterial({ color: 0x475569, transparent: true, opacity: 0.24 });
     const edges = new LineSegments(geometry, material);
     edges.renderOrder = 3;
     child.add(edges);
@@ -339,7 +354,7 @@ function createRoomOverlay(
       roughness: 0.9,
       metalness: 0,
       transparent: true,
-      opacity: 0.42,
+      opacity: 0.16,
       side: DoubleSide,
       depthTest: false
     });

@@ -14,6 +14,7 @@ public sealed class SyncRoomsExternalHandler : IExternalEventHandler
     private const string SharedParameterName = "BIM_PHOTO_ROOM_ID";
     private const string SharedParameterGuid = "5E6A21CE-7829-4A8A-A354-448246AD687D";
     private sealed record FloorPlanSectionBoxResult(BoundingBoxXYZ? SectionBox, string Diagnostic);
+    private sealed record FloorPlanSyncResult(bool Synced, int RoomCount);
     public UIApplication? UiApplication { get; set; }
     public RevitSyncOperation Operation { get; set; } = RevitSyncOperation.Rooms;
 
@@ -145,10 +146,12 @@ public sealed class SyncRoomsExternalHandler : IExternalEventHandler
                 : $"Synced current Sheet {activeSheet.SheetNumber} - {activeSheet.Name}.";
         }
 
-        int floorPlanRoomCount = SyncFloorPlan(doc, activeView, mappingsByElementId);
-        return floorPlanRoomCount == 0
+        FloorPlanSyncResult floorPlanResult = SyncFloorPlan(doc, activeView, mappingsByElementId);
+        return !floorPlanResult.Synced
             ? "Skipped current view sync: active view has no bounded Rooms."
-            : $"Synced current view {activeView.Name} with {floorPlanRoomCount} Room overlays.";
+            : floorPlanResult.RoomCount == 0
+                ? $"Synced current view {activeView.Name} without Room overlays."
+                : $"Synced current view {activeView.Name} with {floorPlanResult.RoomCount} Room overlays.";
     }
 
     private static int SyncFloorPlans(Document doc, IReadOnlyList<RoomMappingDto> mappings)
@@ -167,6 +170,8 @@ public sealed class SyncRoomsExternalHandler : IExternalEventHandler
             return 0;
         }
 
+        ValidationLog.Write($"Syncable Floor Plan views: {string.Join(", ", floorPlans.Select(view => view.Name))}.");
+
         new ApiClient()
             .ClearFloorPlansAsync(AddinSettings.ProjectId)
             .GetAwaiter()
@@ -177,7 +182,7 @@ public sealed class SyncRoomsExternalHandler : IExternalEventHandler
         {
             try
             {
-                if (SyncFloorPlan(doc, floorPlan, mappingsByElementId) > 0)
+                if (SyncFloorPlan(doc, floorPlan, mappingsByElementId).Synced)
                 {
                     syncedCount++;
                 }
@@ -198,9 +203,9 @@ public sealed class SyncRoomsExternalHandler : IExternalEventHandler
         return syncedCount;
     }
 
-    private static int SyncFloorPlan(Document doc, View view, IReadOnlyDictionary<string, RoomMappingDto> mappingsByElementId)
+    private static FloorPlanSyncResult SyncFloorPlan(Document doc, View view, IReadOnlyDictionary<string, RoomMappingDto> mappingsByElementId)
     {
-        if (mappingsByElementId.Count == 0) return 0;
+        if (mappingsByElementId.Count == 0) return new FloorPlanSyncResult(false, 0);
 
         string levelName = GetViewLevelName(doc, view);
         Transform? modelToViewTransform = GetModelToViewTransform(view);
@@ -232,11 +237,21 @@ public sealed class SyncRoomsExternalHandler : IExternalEventHandler
 
         if (planRooms.Count == 0)
         {
-            ValidationLog.Write($"Skipped floor plan sync: {view.Name} has no bounded Rooms.");
-            return 0;
+            ValidationLog.Write($"Floor plan {view.Name} has no bounded Room overlays. The drawing asset will still be synced.");
         }
 
-        PlanBoundsDto bounds = GetViewPlanBounds(view, modelToViewTransform) ?? CalculateBounds(planRooms.SelectMany(room => room.Polygon));
+        PlanBoundsDto? bounds = GetViewPlanBounds(view, modelToViewTransform);
+        if (bounds == null && planRooms.Count > 0)
+        {
+            bounds = CalculateBounds(planRooms.SelectMany(room => room.Polygon));
+        }
+
+        if (bounds == null)
+        {
+            ValidationLog.Write($"Skipped floor plan sync: {view.Name} has no usable crop bounds or Room overlays.");
+            return new FloorPlanSyncResult(false, 0);
+        }
+
         SheetAssetDto? asset = ExportAndUploadViewImage(doc, view, $"{levelName}_{view.Name}", bounds);
         SyncFloorPlanResponse? floorPlanResponse = new ApiClient()
             .SyncFloorPlanAsync(new SyncFloorPlanRequest(
@@ -255,7 +270,7 @@ public sealed class SyncRoomsExternalHandler : IExternalEventHandler
             floorPlanResponse == null
                 ? "Floor plan sync returned null."
                 : $"Synced floor plan {floorPlanResponse.Data.Id} for {levelName} with {planRooms.Count} rooms.");
-        return floorPlanResponse == null ? 0 : planRooms.Count;
+        return new FloorPlanSyncResult(floorPlanResponse != null, planRooms.Count);
     }
 
     private static List<FloorPlanRoomDto> BuildFloorPlanRooms(
@@ -335,6 +350,8 @@ public sealed class SyncRoomsExternalHandler : IExternalEventHandler
         {
             return "Skipped 3D model sync: no syncable Floor Plan views were found.";
         }
+
+        ValidationLog.Write($"Syncable 3D Floor Plan views: {string.Join(", ", floorPlans.Select(view => view.Name))}.");
 
         int syncedCount = 0;
         foreach (ViewPlan floorPlan in floorPlans)
@@ -1055,7 +1072,7 @@ public sealed class SyncRoomsExternalHandler : IExternalEventHandler
         return new FilteredElementCollector(doc)
             .OfClass(typeof(ViewPlan))
             .Cast<ViewPlan>()
-            .Where(view => IsSyncableFloorPlanView(doc, view))
+            .Where(view => IsCanonicalFloorPlanView(doc, view))
             .GroupBy(view => view.GenLevel!.Id.Value)
             .Select(group => group
                 .OrderByDescending(view => FloorPlanSelectionScore(doc, view))
@@ -1113,11 +1130,7 @@ public sealed class SyncRoomsExternalHandler : IExternalEventHandler
 
     private static bool IsSyncableFloorPlanView(Document doc, ViewPlan view)
     {
-        if (view.IsTemplate) return false;
-        if (view.ViewType != ViewType.FloorPlan) return false;
-        if (view.GenLevel == null) return false;
-        if (doc.GetElement(view.GetTypeId()) is not ViewFamilyType viewFamilyType) return false;
-        return viewFamilyType.ViewFamily == ViewFamily.FloorPlan;
+        return IsCanonicalFloorPlanView(doc, view);
     }
 
     private static bool IsCanonicalFloorPlanView(Document doc, ViewPlan view)
@@ -1129,14 +1142,55 @@ public sealed class SyncRoomsExternalHandler : IExternalEventHandler
         if (doc.GetElement(view.GetTypeId()) is not ViewFamilyType viewFamilyType) return false;
         if (viewFamilyType.ViewFamily != ViewFamily.FloorPlan) return false;
 
-        string viewTypeName = viewFamilyType.Name.Trim();
-        bool defaultFloorPlanType =
-            viewTypeName.Equals("Floor Plan", StringComparison.OrdinalIgnoreCase) ||
-            viewTypeName.Equals("평면", StringComparison.OrdinalIgnoreCase) ||
-            viewTypeName.Equals("평면도", StringComparison.OrdinalIgnoreCase);
-        if (!defaultFloorPlanType) return false;
+        return IsPrimaryBuildingFloorPlanName(view.Name);
+    }
 
-        return NormalizePlanName(view.Name) == NormalizePlanName(view.GenLevel.Name);
+    private static bool IsPrimaryBuildingFloorPlanName(string name)
+    {
+        string normalized = NormalizePlanName(name);
+        if (string.IsNullOrWhiteSpace(normalized)) return false;
+        if (normalized == "PARKING") return true;
+
+        string[] excludedTokens =
+        {
+            "SITE",
+            "ROOF",
+            "HARDSCAPE",
+            "PARAPET",
+            "MEZZANINE",
+            "ENLARGED",
+            "BLOCK",
+            "PLAN"
+        };
+
+        if (excludedTokens.Any(token => normalized.Contains(token, StringComparison.Ordinal)))
+        {
+            return false;
+        }
+
+        if (IsPrefixedNumber(normalized, "L")) return true;
+        if (IsPrefixedNumber(normalized, "R")) return true;
+        if (IsPrefixedNumber(normalized, "B")) return true;
+        if (IsPrefixedNumber(normalized, "P")) return true;
+        if (IsSuffixedNumber(normalized, "F")) return true;
+        if (IsPrefixedNumber(normalized, "LEVEL")) return true;
+        if (IsPrefixedNumber(normalized, "FLOOR")) return true;
+
+        return normalized.All(char.IsDigit);
+    }
+
+    private static bool IsPrefixedNumber(string normalized, string prefix)
+    {
+        if (!normalized.StartsWith(prefix, StringComparison.Ordinal)) return false;
+        string suffix = normalized[prefix.Length..];
+        return suffix.Length > 0 && suffix.All(char.IsDigit);
+    }
+
+    private static bool IsSuffixedNumber(string normalized, string suffix)
+    {
+        if (!normalized.EndsWith(suffix, StringComparison.Ordinal)) return false;
+        string prefix = normalized[..^suffix.Length];
+        return prefix.Length > 0 && prefix.All(char.IsDigit);
     }
 
     private static string NormalizePlanName(string value)
