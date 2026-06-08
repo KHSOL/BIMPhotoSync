@@ -74,7 +74,6 @@ export default function DrawingViewer({ mode }: { mode: DrawingViewerMode }) {
   const [floorPlanViewMode, setFloorPlanViewMode] = useState<"2d" | "3d">("2d");
   const [selectedRoomId, setSelectedRoomId] = useState("");
   const [treeQuery, setTreeQuery] = useState("");
-  const [roomProgressByBimId, setRoomProgressByBimId] = useState<Record<string, Room["progress_by_surface"]>>({});
   const [roomTradeProgressByBimId, setRoomTradeProgressByBimId] = useState<Record<string, Room["progress_by_trade_category"]>>({});
   const [tradeCategories, setTradeCategories] = useState<TradeCategory[]>([]);
   const [photos, setPhotos] = useState<Photo[]>([]);
@@ -245,12 +244,6 @@ export default function DrawingViewer({ mode }: { mode: DrawingViewerMode }) {
     setModelAssets(nextModelAssets);
     setSheets(nextSheets);
     setTradeCategories(nextTradeCategories);
-    setRoomProgressByBimId(
-      nextRooms.reduce<Record<string, Room["progress_by_surface"]>>((result, room) => {
-        result[room.bim_photo_room_id] = room.progress_by_surface;
-        return result;
-      }, {})
-    );
     setRoomTradeProgressByBimId(
       nextRooms.reduce<Record<string, Room["progress_by_trade_category"]>>((result, room) => {
         result[room.bim_photo_room_id] = room.progress_by_trade_category;
@@ -453,7 +446,8 @@ export default function DrawingViewer({ mode }: { mode: DrawingViewerMode }) {
               label={`${selectedModelAsset.view_name} Revit 3D model`}
               plan={selectedPlan}
               selectedRoomId={selectedRoomId}
-              roomProgressByBimId={roomProgressByBimId}
+              roomTradeProgressByBimId={roomTradeProgressByBimId}
+              tradeCategories={tradeCategories}
               onSelect={setSelectedRoomId}
             />
           ) : isFloorPlanMode && selectedPlan && floorPlanViewMode === "3d" ? (
@@ -462,7 +456,8 @@ export default function DrawingViewer({ mode }: { mode: DrawingViewerMode }) {
                 plan={selectedPlan}
                 assetUrl={floorPlanAssetUrl}
                 selectedRoomId={selectedRoomId}
-                roomProgressByBimId={roomProgressByBimId}
+                roomTradeProgressByBimId={roomTradeProgressByBimId}
+                tradeCategories={tradeCategories}
                 onSelect={setSelectedRoomId}
               />
               <div className="model-viewer-status warning">
@@ -474,7 +469,8 @@ export default function DrawingViewer({ mode }: { mode: DrawingViewerMode }) {
               plan={selectedPlan}
               assetUrl={floorPlanAssetUrl}
               selectedRoomId={selectedRoomId}
-              roomProgressByBimId={roomProgressByBimId}
+              roomTradeProgressByBimId={roomTradeProgressByBimId}
+              tradeCategories={tradeCategories}
               onSelect={setSelectedRoomId}
             />
           ) : !isFloorPlanMode && selectedSheet ? (
@@ -482,7 +478,8 @@ export default function DrawingViewer({ mode }: { mode: DrawingViewerMode }) {
               sheet={selectedSheet}
               assetUrl={sheetAssetUrl}
               selectedRoomId={selectedRoomId}
-              roomProgressByBimId={roomProgressByBimId}
+              roomTradeProgressByBimId={roomTradeProgressByBimId}
+              tradeCategories={tradeCategories}
               onSelect={setSelectedRoomId}
             />
           ) : (
@@ -599,13 +596,15 @@ function SheetViewer({
   sheet,
   assetUrl,
   selectedRoomId,
-  roomProgressByBimId,
+  roomTradeProgressByBimId,
+  tradeCategories,
   onSelect
 }: {
   sheet: RevitSheet;
   assetUrl: string;
   selectedRoomId: string;
-  roomProgressByBimId: Record<string, Room["progress_by_surface"]>;
+  roomTradeProgressByBimId: Record<string, Room["progress_by_trade_category"]>;
+  tradeCategories: TradeCategory[];
   onSelect: (roomId: string) => void;
 }) {
   const isPdf = sheet.asset?.mime_type === "application/pdf";
@@ -633,7 +632,7 @@ function SheetViewer({
               key={overlay.id}
               overlay={overlay}
               selected={overlay.bim_photo_room_id === selectedRoomId}
-              progressStatus={roomDisplayProgress(roomProgressByBimId[overlay.bim_photo_room_id])}
+              progressStatus={roomDisplayProgress(roomTradeProgressByBimId[overlay.bim_photo_room_id], tradeCategories)}
               onSelect={onSelect}
             />
           ))}
@@ -777,13 +776,15 @@ function FloorPlanSvg({
   plan,
   assetUrl,
   selectedRoomId,
-  roomProgressByBimId,
+  roomTradeProgressByBimId,
+  tradeCategories,
   onSelect
 }: {
   plan: RevitFloorPlan;
   assetUrl: string;
   selectedRoomId: string;
-  roomProgressByBimId: Record<string, Room["progress_by_surface"]>;
+  roomTradeProgressByBimId: Record<string, Room["progress_by_trade_category"]>;
+  tradeCategories: TradeCategory[];
   onSelect: (roomId: string) => void;
 }) {
   const viewBox = `${plan.bounds.min_x} ${-plan.bounds.max_y} ${plan.bounds.width} ${plan.bounds.height}`;
@@ -818,7 +819,7 @@ function FloorPlanSvg({
               room={room}
               bounds={plan.bounds}
               selected={room.bim_photo_room_id === selectedRoomId}
-              progressStatus={roomDisplayProgress(roomProgressByBimId[room.bim_photo_room_id])}
+              progressStatus={roomDisplayProgress(roomTradeProgressByBimId[room.bim_photo_room_id], tradeCategories)}
               onSelect={onSelect}
             />
           ))}
@@ -865,13 +866,13 @@ function PlanRoomShape({
 
 type RoomProgressStatus = "not-started" | "in-progress" | "completed";
 
-function roomDisplayProgress(progress: Room["progress_by_surface"] | undefined): RoomProgressStatus {
-  const wall = progress?.WALL;
-  if (wall?.status === "COMPLETED") return "completed";
-  if (wall?.status === "IN_PROGRESS") return "in-progress";
-  const values = Object.values(progress ?? {});
-  if (values.some((item) => item.status === "COMPLETED")) return "completed";
-  if (values.some((item) => item.status === "IN_PROGRESS")) return "in-progress";
+function roomDisplayProgress(progress: Room["progress_by_trade_category"] | undefined, tradeCategories: TradeCategory[]): RoomProgressStatus {
+  const activeTradeIds = tradeCategories.filter((category) => category.is_active).map((category) => category.id);
+  const values = activeTradeIds.length > 0
+    ? activeTradeIds.map((id) => progress?.[id] ?? { status: "NOT_STARTED" as const, photo_count: 0 })
+    : Object.values(progress ?? {});
+  if (values.length > 0 && values.every((item) => item.status === "COMPLETED")) return "completed";
+  if (values.some((item) => item.status === "IN_PROGRESS" || item.status === "COMPLETED" || item.photo_count > 0)) return "in-progress";
   return "not-started";
 }
 

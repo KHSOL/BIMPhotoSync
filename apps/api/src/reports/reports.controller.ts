@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Post, Query, Res, UseGuards } from "@nestjs/common";
+import { Body, Controller, Delete, Get, Param, Post, Query, Res, UseGuards } from "@nestjs/common";
 import { Response } from "express";
 import { CurrentUser, JwtUser } from "../common/current-user";
 import { JwtAuthGuard } from "../common/jwt-auth.guard";
@@ -26,6 +26,11 @@ export class ReportsController {
     res.setHeader("Content-Type", file.contentType);
     res.setHeader("Content-Disposition", `attachment; filename="${encodeURIComponent(file.filename)}"`);
     res.send(file.buffer);
+  }
+
+  @Delete(":reportId")
+  delete(@CurrentUser() user: JwtUser, @Param("reportId") reportId: string) {
+    return this.reports.delete(user, reportId);
   }
 
   @Post("generate")

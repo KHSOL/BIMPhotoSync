@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Param, Post, Query, UseGuards } from "@nestjs/common";
+import { Body, Controller, Delete, Get, Param, Patch, Post, Query, UseGuards } from "@nestjs/common";
 import { CurrentUser, JwtUser } from "../common/current-user";
 import { JwtAuthGuard } from "../common/jwt-auth.guard";
 import { CreateProjectDto, CreateTradeCategoryDto, JoinProjectDto, PreviewProjectAccessKeyDto } from "./dto";
@@ -37,6 +37,11 @@ export class ProjectsController {
   @Get(":projectId/members")
   members(@CurrentUser() user: JwtUser, @Param("projectId") projectId: string) {
     return this.projects.members(user, projectId);
+  }
+
+  @Patch(":projectId/members/:memberId/promote-manager")
+  promoteMemberToManager(@CurrentUser() user: JwtUser, @Param("projectId") projectId: string, @Param("memberId") memberId: string) {
+    return this.projects.promoteMemberToManager(user, projectId, memberId);
   }
 
   @Get(":projectId/trade-categories")

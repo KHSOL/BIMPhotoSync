@@ -1,7 +1,7 @@
 "use client";
 
 import { CalendarDays, Download, KeyRound, RotateCcw, Search, ShieldCheck, Trash2, UserPlus, Wand2 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import { apiJson, AuditEvent, authHeaders, canAccessAdminBoards, Project, ProjectMember, readProjectId, readSession, saveProjectId, type User } from "../client";
 
 export default function AuditPage() {
@@ -14,6 +14,7 @@ export default function AuditPage() {
   const [auditEvents, setAuditEvents] = useState<AuditEvent[]>([]);
   const [selectedMemberId, setSelectedMemberId] = useState("");
   const [status, setStatus] = useState("");
+  const [promoting, setPromoting] = useState(false);
 
   useEffect(() => {
     const session = readSession();
@@ -83,11 +84,35 @@ export default function AuditPage() {
   }
 
   const selectedMember = members.find((member) => member.id === selectedMemberId) ?? members[0];
+  const canPromoteSelectedMember = selectedMember ? selectedMember.role !== "MANAGER" && selectedMember.user.role !== "MANAGER" : false;
+  const activityCounts = useMemo(() => ({
+    create: auditEvents.filter((event) => event.action === "CREATE").length,
+    update: auditEvents.filter((event) => event.action === "UPDATE" || event.action === "REVIEW").length,
+    delete: auditEvents.filter((event) => event.action === "DELETE").length
+  }), [auditEvents]);
   const filteredEvents = useMemo(() => {
     const userId = selectedMember?.user.id;
     if (!selectedMemberId || !userId) return auditEvents;
     return auditEvents.filter((event) => event.actor?.id === userId);
   }, [auditEvents, selectedMember, selectedMemberId]);
+
+  async function promoteSelectedMember() {
+    if (!selectedMember) return;
+    const confirmed = window.confirm(`${selectedMember.user.name} 작업자를 관리자로 승급할까요?`);
+    if (!confirmed) return;
+    setPromoting(true);
+    try {
+      await apiJson<{ data: ProjectMember }>(`/projects/${projectId}/members/${selectedMember.id}/promote-manager`, {
+        method: "PATCH",
+        headers: authHeaders(token)
+      });
+      setStatus(`${selectedMember.user.name} 작업자를 관리자로 승급했습니다.`);
+      await loadProjectAudit(token, projectId);
+      setSelectedMemberId(selectedMember.id);
+    } finally {
+      setPromoting(false);
+    }
+  }
 
   if (!hasSession) {
     return (
@@ -137,9 +162,9 @@ export default function AuditPage() {
 
       <section className="metric-grid four">
         <Metric icon={<ShieldCheck />} label="전체 활동" value={String(auditEvents.length)} sub="현재 프로젝트" tone="blue" />
-        <Metric icon={<UserPlus />} label="생성" value={String(auditEvents.filter((event) => event.action === "CREATE").length)} sub="실제 로그" tone="green" />
-        <Metric icon={<Wand2 />} label="수정" value={String(auditEvents.filter((event) => event.action === "UPDATE").length)} sub="실제 로그" tone="orange" />
-        <Metric icon={<Trash2 />} label="삭제" value={String(auditEvents.filter((event) => event.action === "DELETE").length)} sub="실제 로그" tone="purple" />
+        <Metric icon={<UserPlus />} label="생성" value={String(activityCounts.create)} sub="실제 로그" tone="green" />
+        <Metric icon={<Wand2 />} label="수정" value={String(activityCounts.update)} sub="실제 로그" tone="orange" />
+        <Metric icon={<Trash2 />} label="삭제" value={String(activityCounts.delete)} sub="실제 로그" tone="purple" />
       </section>
 
       <section className="panel ref-card">
@@ -162,6 +187,14 @@ export default function AuditPage() {
             <div><dt>전역 권한</dt><dd>{selectedMember ? roleLabel(selectedMember.user.role) : "-"}</dd></div>
             <div><dt>프로젝트 권한</dt><dd>{selectedMember ? roleLabel(selectedMember.role) : "-"}</dd></div>
             <div><dt>참여일</dt><dd>{selectedMember ? new Date(selectedMember.created_at).toLocaleString("ko-KR") : "-"}</dd></div>
+            <div className="member-detail-action">
+              <dt>권한 관리</dt>
+              <dd>
+                <button className="button" type="button" disabled={!canPromoteSelectedMember || promoting} onClick={() => promoteSelectedMember().catch((error: Error) => setStatus(error.message))}>
+                  {promoting ? "승급 중" : "관리자로 승급"}
+                </button>
+              </dd>
+            </div>
           </dl>
         </div>
       </section>
@@ -203,11 +236,11 @@ export default function AuditPage() {
           <section className="panel ref-card">
             <h2 className="section-title">작업 유형별 활동</h2>
             <div className="donut-card compact">
-              <div className="donut big audit"><strong>{auditEvents.length}</strong><span>전체</span></div>
+              <div className="donut big audit" style={auditDonutStyle(activityCounts)}><strong>{auditEvents.length}</strong><span>전체</span></div>
               <ul className="legend-list">
-                <li><i className="green-dot" />생성 <strong>{auditEvents.filter((event) => event.action === "CREATE").length}</strong></li>
-                <li><i className="blue-dot" />수정 <strong>{auditEvents.filter((event) => event.action === "UPDATE").length}</strong></li>
-                <li><i className="purple-dot" />삭제 <strong>{auditEvents.filter((event) => event.action === "DELETE").length}</strong></li>
+                <li><i className="green-dot" />생성 <strong>{activityCounts.create}</strong></li>
+                <li><i className="blue-dot" />수정 <strong>{activityCounts.update}</strong></li>
+                <li><i className="purple-dot" />삭제 <strong>{activityCounts.delete}</strong></li>
               </ul>
             </div>
           </section>
@@ -267,4 +300,14 @@ function resourceTypeLabel(resourceType: string) {
   if (resourceType === "PROJECT") return "프로젝트";
   if (resourceType === "ROOM") return "방";
   return resourceType;
+}
+
+function auditDonutStyle(counts: { create: number; update: number; delete: number }): CSSProperties {
+  const total = counts.create + counts.update + counts.delete;
+  if (total === 0) return { background: "conic-gradient(#CBD5E1 0 100%)" };
+  const createEnd = (counts.create / total) * 100;
+  const updateEnd = createEnd + (counts.update / total) * 100;
+  return {
+    background: `conic-gradient(#16C784 0 ${createEnd}%, #1D70F7 ${createEnd}% ${updateEnd}%, #8B5CF6 ${updateEnd}% 100%)`
+  };
 }

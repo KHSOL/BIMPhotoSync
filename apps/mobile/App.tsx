@@ -18,6 +18,8 @@ import {
   type TextInputProps
 } from "react-native";
 import * as ImagePicker from "expo-image-picker";
+import * as FileSystem from "expo-file-system/legacy";
+import * as MediaLibrary from "expo-media-library";
 import { StatusBar } from "expo-status-bar";
 import { Feather } from "@expo/vector-icons";
 
@@ -94,6 +96,7 @@ export default function App() {
   const isUploadStage = isAuthenticated && images.length > 0;
   const canAddPhotos = Boolean(projectId) && !loadingRooms && !loadingProjects;
   const readyToUpload = Boolean(token && projectId && roomId && images.length > 0) && !uploading;
+  const canManagePhotos = isManagerRole(user?.role) || isManagerRole(selectedProject?.member_role);
   const { width: screenWidth } = useWindowDimensions();
   const compactLayout = screenWidth < 380;
   const safeTopPadding = Platform.OS === "android" ? Math.max(24, RNStatusBar.currentHeight ?? 0) + 14 : 12;
@@ -272,6 +275,49 @@ export default function App() {
     await selectProject(nextProjectId);
     setSelectedPhoto(null);
     setProjectPhotosVisible(true);
+  }
+
+  async function downloadPhoto(photo: Photo) {
+    if (!token) return;
+    try {
+      const filename = photoDownloadFilename(photo, rooms);
+      const baseDirectory = FileSystem.cacheDirectory ?? FileSystem.documentDirectory;
+      if (!baseDirectory) throw new Error("다운로드 저장 위치를 찾을 수 없습니다.");
+      const targetUri = `${baseDirectory}${filename}`;
+      const result = await FileSystem.downloadAsync(`${photo.photo_url}?download=1`, targetUri, { headers: authHeaders(token) });
+      const permission = await MediaLibrary.requestPermissionsAsync();
+      if (!permission.granted) {
+        showMessage("권한 필요", "사진을 기기에 저장하려면 사진 접근 권한이 필요합니다.");
+        return;
+      }
+      await MediaLibrary.saveToLibraryAsync(result.uri);
+      showMessage("다운로드 완료", "사진을 기기 사진함에 저장했습니다.");
+    } catch (error) {
+      showMessage("오류", getErrorMessage(error, "사진 다운로드에 실패했습니다."));
+    }
+  }
+
+  async function deletePhoto(photo: Photo) {
+    if (!token) return;
+    Alert.alert("사진 삭제", "선택한 사진을 삭제할까요?", [
+      { text: "취소", style: "cancel" },
+      {
+        text: "삭제",
+        style: "destructive",
+        onPress: () => {
+          void (async () => {
+            try {
+              await apiJson<{ data: Photo }>(`/photos/${photo.id}`, { method: "DELETE", headers: authHeaders(token) });
+              setSelectedPhoto(null);
+              await loadPhotos(token, projectId);
+              setStatus("사진을 삭제했습니다.");
+            } catch (error) {
+              showMessage("오류", getErrorMessage(error, "사진 삭제에 실패했습니다."));
+            }
+          })();
+        }
+      }
+    ]);
   }
 
   function choosePhotoSource() {
@@ -489,8 +535,11 @@ export default function App() {
               photoRoomFilter={photoRoomFilter}
               photosVisible={projectPhotosVisible}
               selectedPhoto={selectedPhoto}
+              canManagePhotos={canManagePhotos}
               photos={filteredPhotos}
               allPhotos={photos}
+              deletePhoto={deletePhoto}
+              downloadPhoto={downloadPhoto}
               previewJoinProject={previewJoinProject}
               projects={projects}
               projectId={projectId}
@@ -623,6 +672,9 @@ function ProjectsScreen(props: {
   selectedPhoto: Photo | null;
   photos: Photo[];
   allPhotos: Photo[];
+  canManagePhotos: boolean;
+  deletePhoto: (photo: Photo) => Promise<void>;
+  downloadPhoto: (photo: Photo) => Promise<void>;
   previewJoinProject: () => Promise<void>;
   projects: Project[];
   projectId: string;
@@ -644,6 +696,9 @@ function ProjectsScreen(props: {
       return (
         <PhotoDetailScreen
           authToken={props.authToken}
+          canManagePhotos={props.canManagePhotos}
+          deletePhoto={props.deletePhoto}
+          downloadPhoto={props.downloadPhoto}
           photo={props.selectedPhoto}
           roomTitleValue={photoTitle(props.selectedPhoto, props.rooms)}
           onBack={() => props.setSelectedPhoto(null)}
@@ -680,10 +735,6 @@ function ProjectsScreen(props: {
           {props.photos.map((photo) => (
             <Pressable key={photo.id} style={styles.photoCard} onPress={() => props.setSelectedPhoto(photo)}>
               <Image source={photoImageSource(photo, props.authToken)} style={styles.photoImage} resizeMode="cover" />
-              <View style={styles.photoCardBody}>
-                <Text style={styles.photoTitle} numberOfLines={1}>{photoTitle(photo, props.rooms)}</Text>
-                <Text style={styles.photoMeta} numberOfLines={3}>{photo.work_date} | {labelFor(surfaces, photo.work_surface)} | {photo.description ?? "작업 내용 없음"}</Text>
-              </View>
             </Pressable>
           ))}
           {props.photos.length === 0 ? <Text style={styles.emptyText}>선택 조건에 맞는 사진이 없습니다.</Text> : null}
@@ -761,11 +812,17 @@ function ProfileScreen({ logout, projects, rooms, user }: { logout: () => void; 
 
 function PhotoDetailScreen({
   authToken,
+  canManagePhotos,
+  deletePhoto,
+  downloadPhoto,
   onBack,
   photo,
   roomTitleValue
 }: {
   authToken: string;
+  canManagePhotos: boolean;
+  deletePhoto: (photo: Photo) => Promise<void>;
+  downloadPhoto: (photo: Photo) => Promise<void>;
   onBack: () => void;
   photo: Photo;
   roomTitleValue: string;
@@ -782,6 +839,22 @@ function PhotoDetailScreen({
       <Text style={styles.pageTitle}>{roomTitleValue}</Text>
       <Text style={styles.pageDescription}>{photo.work_date} | {labelFor(surfaces, photo.work_surface)} | {labelFor(trades, photo.trade)}</Text>
       <Image source={photoImageSource(photo, authToken)} style={styles.photoDetailImage} resizeMode="cover" />
+      <View style={styles.photoDetailActionRow}>
+        <Pressable style={styles.secondaryActionWide} onPress={() => void downloadPhoto(photo)}>
+          <Feather name="download" size={18} color="#1669F2" />
+          <Text style={styles.secondaryActionText}>다운로드</Text>
+        </Pressable>
+        {canManagePhotos ? (
+          <Pressable style={styles.dangerActionWide} onPress={() => void deletePhoto(photo)}>
+            <Feather name="trash-2" size={18} color="#DC2626" />
+            <Text style={styles.dangerActionText}>삭제</Text>
+          </Pressable>
+        ) : null}
+      </View>
+      <View style={styles.card}>
+        <Text style={styles.sectionTitle}>AI 요약</Text>
+        <Text style={styles.detailBodyText}>{photoAiSummary(photo)}</Text>
+      </View>
       <View style={styles.card}>
         <Text style={styles.sectionTitle}>작업 내용</Text>
         <Text style={styles.detailBodyText}>{photo.description?.trim() || "입력된 작업 내용이 없습니다."}</Text>
@@ -805,7 +878,21 @@ function PhotoRoomFilterModal(props: {
   visible: boolean;
   onClose: () => void;
 }) {
-  const filterOptions = (
+  const selectedFilterRoom = props.rooms.find(({ room }) => room.id === props.photoRoomFilter);
+  const selectedFilterLevel = selectedFilterRoom ? roomLevelTitle(selectedFilterRoom.room) : "";
+  const [selectedLevel, setSelectedLevel] = useState("");
+  const levelOptions = useMemo(() => photoRoomLevelOptions(props.rooms), [props.rooms]);
+  const levelRooms = useMemo(
+    () => props.rooms.filter(({ room }) => roomLevelTitle(room) === selectedLevel),
+    [props.rooms, selectedLevel]
+  );
+
+  useEffect(() => {
+    if (!props.visible) return;
+    setSelectedLevel(selectedFilterLevel);
+  }, [props.visible, selectedFilterLevel]);
+
+  const levelPicker = (
     <>
       <Pressable
         style={[styles.filterPickerItem, !props.photoRoomFilter && styles.projectPickerItemActive]}
@@ -820,7 +907,26 @@ function PhotoRoomFilterModal(props: {
         </View>
         {!props.photoRoomFilter ? <Feather name="check" size={28} color="#1669F2" /> : <ChevronRightIcon />}
       </Pressable>
-      {props.rooms.map(({ room, count }) => (
+      {levelOptions.map((level) => (
+        <Pressable
+          key={level.name}
+          style={[styles.filterPickerItem, selectedLevel === level.name && styles.projectPickerItemActive]}
+          onPress={() => setSelectedLevel(level.name)}
+        >
+          <View style={styles.flexOne}>
+            <Text style={styles.projectName}>{level.name}</Text>
+            <Text style={styles.projectCode}>{level.roomCount}개 방 | {level.photoCount}장</Text>
+          </View>
+          <ChevronRightIcon />
+        </Pressable>
+      ))}
+      {levelOptions.length === 0 ? <Text style={styles.emptyText}>사진이 등록된 방이 없습니다.</Text> : null}
+    </>
+  );
+
+  const roomPicker = (
+    <>
+      {levelRooms.map(({ room, count }) => (
         <Pressable
           key={room.id}
           style={[styles.filterPickerItem, props.photoRoomFilter === room.id && styles.projectPickerItemActive]}
@@ -836,9 +942,13 @@ function PhotoRoomFilterModal(props: {
           {props.photoRoomFilter === room.id ? <Feather name="check" size={28} color="#1669F2" /> : <ChevronRightIcon />}
         </Pressable>
       ))}
-      {props.rooms.length === 0 ? <Text style={styles.emptyText}>사진이 등록된 방이 없습니다.</Text> : null}
+      {levelRooms.length === 0 ? <Text style={styles.emptyText}>이 층에 사진이 등록된 방이 없습니다.</Text> : null}
     </>
   );
+  const filterOptions = selectedLevel ? roomPicker : levelPicker;
+  const itemCount = selectedLevel ? levelRooms.length : levelOptions.length + 1;
+  const headerTitle = selectedLevel || "방 필터";
+  const headerSubtitle = selectedLevel ? "해당 층의 방만 표시됩니다." : "층을 먼저 선택한 뒤 방을 선택합니다.";
 
   return (
     <Modal visible={props.visible} transparent animationType="slide" statusBarTranslucent onRequestClose={props.onClose}>
@@ -848,16 +958,25 @@ function PhotoRoomFilterModal(props: {
           <View style={styles.filterSheet}>
             <View style={styles.sheetHandle} />
             <View style={styles.sheetHeader}>
-              <Pressable style={styles.sheetBackButton} onPress={props.onClose}>
+              <Pressable style={styles.sheetBackButton} onPress={() => {
+                if (selectedLevel) {
+                  setSelectedLevel("");
+                  return;
+                }
+                props.onClose();
+              }}>
                 <Feather name="chevron-left" size={30} color="#1669F2" />
               </Pressable>
               <View style={styles.flexOne}>
-                <Text style={styles.sheetTitle}>방 필터</Text>
-                <Text style={styles.sheetSubtitle}>사진이 등록된 방만 표시됩니다.</Text>
+                <Text style={styles.sheetTitle}>{headerTitle}</Text>
+                <Text style={styles.sheetSubtitle}>{headerSubtitle}</Text>
               </View>
-              <StatusPill label={`${props.rooms.length}개 방`} tone={props.rooms.length > 0 ? "blue" : "gray"} />
+              <StatusPill
+                label={selectedLevel ? `${levelRooms.length}개 방` : `${levelOptions.length}개 층`}
+                tone={props.rooms.length > 0 ? "blue" : "gray"}
+              />
             </View>
-            {props.rooms.length <= 7 ? (
+            {itemCount <= 7 ? (
               <View style={styles.projectSheetList}>{filterOptions}</View>
             ) : (
               <ScrollView contentContainerStyle={styles.projectSheetList} showsVerticalScrollIndicator={false}>{filterOptions}</ScrollView>
@@ -1244,6 +1363,10 @@ function roleLabel(role: string) {
   return "현장 작업자";
 }
 
+function isManagerRole(role: string | null | undefined) {
+  return role === "SUPER_ADMIN" || role === "COMPANY_ADMIN" || role === "PROJECT_ADMIN" || role === "BIM_MANAGER" || role === "MANAGER";
+}
+
 function roomTitle(room: Room) {
   return `${room.room_number ?? ""} ${room.room_name ?? ""}`.trim();
 }
@@ -1255,6 +1378,14 @@ function photoTitle(photo: Photo, rooms: Room[]) {
   const matchingTitle = matchingRoom ? roomTitle(matchingRoom) : "";
   if (matchingTitle) return matchingTitle;
   return photo.work_date || "사진";
+}
+
+function photoAiSummary(photo: Photo) {
+  const directSummary = photo.ai_description?.trim();
+  if (directSummary) return directSummary;
+  const latestSummary = photo.latest_analysis?.summary?.trim();
+  if (latestSummary) return latestSummary;
+  return "AI 요약이 아직 없습니다.";
 }
 
 function photoImageSource(photo: Photo, token: string) {
@@ -1287,7 +1418,26 @@ function roomsWithPhotos(rooms: Room[], photos: Photo[]) {
   return rooms
     .map((room) => ({ room, count: counts.get(room.id) ?? 0 }))
     .filter(({ count }) => count > 0)
-    .sort((first, second) => roomTitle(first.room).localeCompare(roomTitle(second.room), "ko"));
+    .sort((first, second) => {
+      const levelOrder = roomLevelTitle(first.room).localeCompare(roomLevelTitle(second.room), "ko");
+      if (levelOrder !== 0) return levelOrder;
+      return roomTitle(first.room).localeCompare(roomTitle(second.room), "ko");
+    });
+}
+
+function photoRoomLevelOptions(rooms: Array<{ room: Room; count: number }>) {
+  const levels = new Map<string, { name: string; roomCount: number; photoCount: number }>();
+  for (const { room, count } of rooms) {
+    const levelName = roomLevelTitle(room);
+    const existing = levels.get(levelName);
+    if (existing) {
+      existing.roomCount += 1;
+      existing.photoCount += count;
+    } else {
+      levels.set(levelName, { name: levelName, roomCount: 1, photoCount: count });
+    }
+  }
+  return Array.from(levels.values()).sort((firstLevel, secondLevel) => firstLevel.name.localeCompare(secondLevel.name, "ko"));
 }
 
 function formatDateTime(value?: string | null) {
@@ -1301,6 +1451,12 @@ function formatDateTime(value?: string | null) {
     hour: "2-digit",
     minute: "2-digit"
   }).format(date);
+}
+
+function photoDownloadFilename(photo: Photo, rooms: Room[]) {
+  const title = photoTitle(photo, rooms).replace(/[\\/:*?"<>|\s]+/g, "_") || "photo";
+  const extension = photo.photo_url.toLowerCase().includes(".png") ? "png" : "jpg";
+  return `${title}_${photo.work_date || "date"}_${photo.id.slice(0, 8)}.${extension}`;
 }
 
 function progressLabel(status: string) {
@@ -1465,8 +1621,11 @@ const styles = StyleSheet.create({
   projectName: { color: "#101828", fontSize: 16, fontWeight: "900" },
   projectCode: { color: "#667085", fontSize: 13, fontWeight: "700", marginTop: 3 },
   emptyText: { color: "#667085", fontSize: 14, lineHeight: 21 },
-  secondaryActionWide: { minHeight: 52, borderRadius: 16, paddingHorizontal: 18, alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: "#1669F2", backgroundColor: "#F8FAFF" },
+  secondaryActionWide: { minHeight: 52, borderRadius: 16, paddingHorizontal: 18, alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: "#1669F2", backgroundColor: "#F8FAFF", flexDirection: "row", gap: 8 },
   secondaryActionText: { color: "#1669F2", fontWeight: "900", textAlign: "center", fontSize: 16 },
+  dangerActionWide: { minHeight: 52, borderRadius: 16, paddingHorizontal: 18, alignItems: "center", justifyContent: "center", borderWidth: 1, borderColor: "#FECACA", backgroundColor: "#FFF7F7", flexDirection: "row", gap: 8 },
+  dangerActionText: { color: "#DC2626", fontWeight: "900", textAlign: "center", fontSize: 16 },
+  photoDetailActionRow: { flexDirection: "row", flexWrap: "wrap", gap: 10 },
   cardHeaderRow: { flexDirection: "row", alignItems: "flex-start", justifyContent: "space-between", gap: 12 },
   detailTopRow: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 12 },
   backPill: { minHeight: 42, borderRadius: 999, borderWidth: 1, borderColor: "#D6DEE9", backgroundColor: "#FFFFFF", paddingHorizontal: 12, alignItems: "center", justifyContent: "center", flexDirection: "row", gap: 3 },
@@ -1479,12 +1638,9 @@ const styles = StyleSheet.create({
   filterChipActive: { borderColor: "#1669F2", backgroundColor: "#EAF3FF" },
   filterChipText: { color: "#475569", fontWeight: "800" },
   filterChipTextActive: { color: "#1669F2" },
-  photoGrid: { gap: 10, paddingBottom: 112 },
-  photoCard: { width: "100%", minHeight: 112, borderRadius: 16, borderWidth: 1, borderColor: "#E2E8F0", overflow: "hidden", backgroundColor: "#FFFFFF", flexDirection: "row" },
-  photoImage: { width: 112, minHeight: 112, backgroundColor: "#E2E8F0" },
-  photoCardBody: { flex: 1, paddingHorizontal: 12, paddingVertical: 10, justifyContent: "center" },
-  photoTitle: { color: "#101828", fontWeight: "900", fontSize: 14 },
-  photoMeta: { color: "#667085", fontSize: 12, lineHeight: 17, marginTop: 5 },
+  photoGrid: { flexDirection: "row", flexWrap: "wrap", gap: 8, paddingBottom: 112 },
+  photoCard: { width: "31.8%", aspectRatio: 1, borderRadius: 14, borderWidth: 1, borderColor: "#E2E8F0", overflow: "hidden", backgroundColor: "#FFFFFF" },
+  photoImage: { width: "100%", height: "100%", backgroundColor: "#E2E8F0" },
   photoDetailImage: { width: "100%", aspectRatio: 1, borderRadius: 22, backgroundColor: "#E2E8F0" },
   detailBodyText: { color: "#334155", fontSize: 15, lineHeight: 23, fontWeight: "700" },
   profileCard: { borderRadius: 24, backgroundColor: "#FFFFFF", padding: 22, alignItems: "center", gap: 10, borderWidth: 1, borderColor: "#E1E8F0" },

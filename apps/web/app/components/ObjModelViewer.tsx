@@ -26,7 +26,7 @@ import {
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { OBJLoader } from "three/examples/jsm/loaders/OBJLoader.js";
 import { useEffect, useRef, useState } from "react";
-import { authHeaders, type FloorPlanRoom, type RevitFloorPlan, type Room } from "../client";
+import { authHeaders, type FloorPlanRoom, type RevitFloorPlan, type Room, type TradeCategory } from "../client";
 
 type RoomProgressStatus = "not-started" | "in-progress" | "completed";
 
@@ -46,7 +46,8 @@ export function ObjModelViewer({
   label,
   plan,
   selectedRoomId,
-  roomProgressByBimId,
+  roomTradeProgressByBimId,
+  tradeCategories = [],
   onSelect
 }: {
   assetUrl: string;
@@ -54,7 +55,8 @@ export function ObjModelViewer({
   label: string;
   plan?: RevitFloorPlan;
   selectedRoomId?: string;
-  roomProgressByBimId?: Record<string, Room["progress_by_surface"]>;
+  roomTradeProgressByBimId?: Record<string, Room["progress_by_trade_category"]>;
+  tradeCategories?: TradeCategory[];
   onSelect?: (roomId: string) => void;
 }) {
   const hostRef = useRef<HTMLDivElement | null>(null);
@@ -179,7 +181,7 @@ export function ObjModelViewer({
 
         addModelEdges(object, disposables, maxDimension);
         if (plan) {
-          const roomGroup = createRoomOverlay(plan, center, maxDimension, roomProgressByBimId ?? {}, roomMeshes, disposables);
+          const roomGroup = createRoomOverlay(plan, center, maxDimension, roomTradeProgressByBimId ?? {}, tradeCategories, roomMeshes, disposables);
           roomGroup.position.y = Math.max(maxDimension * 0.006, 0.04);
           scene.add(roomGroup);
         }
@@ -238,7 +240,7 @@ export function ObjModelViewer({
       renderer.dispose();
       renderer.domElement.remove();
     };
-  }, [assetUrl, plan, roomProgressByBimId, token]);
+  }, [assetUrl, plan, roomTradeProgressByBimId, token, tradeCategories]);
 
   return (
     <div className="obj-model-viewer" ref={hostRef} aria-label={label}>
@@ -320,7 +322,8 @@ function createRoomOverlay(
   plan: RevitFloorPlan,
   center: Vector3,
   maxDimension: number,
-  roomProgressByBimId: Record<string, Room["progress_by_surface"]>,
+  roomTradeProgressByBimId: Record<string, Room["progress_by_trade_category"]>,
+  tradeCategories: TradeCategory[],
   roomMeshes: SelectableRoomMesh[],
   disposables: DisposableResource[]
 ) {
@@ -329,7 +332,7 @@ function createRoomOverlay(
     const shape = createRoomShape(room);
     if (!shape) continue;
 
-    const status = roomDisplayProgress(roomProgressByBimId[room.bim_photo_room_id]);
+    const status = roomDisplayProgress(roomTradeProgressByBimId[room.bim_photo_room_id], tradeCategories);
     const geometry = new ShapeGeometry(shape);
     const material = new MeshStandardMaterial({
       color: progressColor(status),
@@ -371,13 +374,13 @@ function createRoomShape(room: FloorPlanRoom) {
   return shape;
 }
 
-function roomDisplayProgress(progress: Room["progress_by_surface"] | undefined): RoomProgressStatus {
-  const wall = progress?.WALL;
-  if (wall?.status === "COMPLETED") return "completed";
-  if (wall?.status === "IN_PROGRESS" || (wall?.photo_count ?? 0) > 0) return "in-progress";
-  const values = Object.values(progress ?? {});
-  if (values.some((item) => item.status === "COMPLETED")) return "completed";
-  if (values.some((item) => item.status === "IN_PROGRESS" || item.photo_count > 0)) return "in-progress";
+function roomDisplayProgress(progress: Room["progress_by_trade_category"] | undefined, tradeCategories: TradeCategory[]): RoomProgressStatus {
+  const activeTradeIds = tradeCategories.filter((category) => category.is_active).map((category) => category.id);
+  const values = activeTradeIds.length > 0
+    ? activeTradeIds.map((id) => progress?.[id] ?? { status: "NOT_STARTED" as const, photo_count: 0 })
+    : Object.values(progress ?? {});
+  if (values.length > 0 && values.every((item) => item.status === "COMPLETED")) return "completed";
+  if (values.some((item) => item.status === "IN_PROGRESS" || item.status === "COMPLETED" || item.photo_count > 0)) return "in-progress";
   return "not-started";
 }
 

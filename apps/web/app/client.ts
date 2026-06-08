@@ -11,7 +11,7 @@ export type User = {
   avatar_url?: string | null;
 };
 
-export const upperManagerRoles = ["SUPER_ADMIN", "COMPANY_ADMIN", "PROJECT_ADMIN", "BIM_MANAGER"] as const;
+export const upperManagerRoles = ["SUPER_ADMIN", "COMPANY_ADMIN", "PROJECT_ADMIN", "BIM_MANAGER", "MANAGER"] as const;
 
 export function isSuperAdmin(user: User | null | undefined) {
   return user?.role === "SUPER_ADMIN";

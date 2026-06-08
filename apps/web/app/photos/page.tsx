@@ -1,8 +1,8 @@
 "use client";
 
-import { Bot, CheckCircle2, ImagePlus, UploadCloud } from "lucide-react";
+import { Bot, CheckCircle2, Download, ImagePlus, Trash2, UploadCloud } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
-import { apiJson, authHeaders, canAccessAdminBoards, Photo, Project, readProjectId, readSession, Room, saveProjectId, TradeCategory, User } from "../client";
+import { API_BASE, apiJson, authHeaders, canAccessAdminBoards, Photo, Project, readProjectId, readSession, Room, saveProjectId, TradeCategory, User } from "../client";
 import { defaultSurfaceOptions, defaultTradeOptions, labelForOption, legacyTradeValue, type PhotoOption } from "../photo-options";
 
 type PhotoTab = "list" | "upload";
@@ -26,6 +26,7 @@ export default function PhotosPage() {
   const [user, setUser] = useState<User | null>(null);
   const [projects, setProjects] = useState<Project[]>([]);
   const [projectId, setProjectId] = useState("");
+  const [levelName, setLevelName] = useState("");
   const [rooms, setRooms] = useState<Room[]>([]);
   const [roomId, setRoomId] = useState("");
   const [photos, setPhotos] = useState<Photo[]>([]);
@@ -54,6 +55,8 @@ export default function PhotosPage() {
 
   const selectedPhoto = useMemo(() => photos.find((photo) => photo.id === selectedId) ?? photos[0], [photos, selectedId]);
   const selectedRoom = rooms.find((room) => room.id === roomId);
+  const levelOptions = useMemo(() => uniqueLevels(rooms), [rooms]);
+  const roomOptions = useMemo(() => rooms.filter((room) => !levelName || normalizeLevel(room.level_name) === levelName), [levelName, rooms]);
   const tradeOptions: PhotoOption[] = tradeCategories.length
     ? tradeCategories.map((category) => ({ value: `category:${category.id}`, label: category.label, isSystem: category.is_system }))
     : defaultTradeOptions;
@@ -73,6 +76,7 @@ export default function PhotosPage() {
     const requestedTab = params.get("tab");
     if (requestedTab === "upload" || requestedTab === "list") setActiveTab(requestedTab);
     setProjectId(storedProjectId);
+    setLevelName("");
     setRoomId(storedRoomId);
     void loadProjects(session.token, storedProjectId, storedRoomId);
   }, []);
@@ -108,7 +112,9 @@ export default function PhotosPage() {
     if (!nextProjectId) return "";
     const json = await apiJson<RoomList>(`/projects/${nextProjectId}/rooms`, { headers: authHeaders(nextToken) });
     setRooms(json.data);
-    const nextRoomId = json.data.some((room) => room.id === preferredRoomId) ? preferredRoomId : preferredRoomId ? "" : json.data[0]?.id ?? "";
+    const nextRoomId = json.data.some((room) => room.id === preferredRoomId) ? preferredRoomId : "";
+    const nextLevel = json.data.find((room) => room.id === nextRoomId)?.level_name ?? "";
+    setLevelName(normalizeLevel(nextLevel));
     setRoomId(nextRoomId);
     return nextRoomId;
   }
@@ -117,7 +123,7 @@ export default function PhotosPage() {
     nextToken = token,
     nextProjectId = projectId,
     nextRoomId = roomId,
-    nextFilters = { trade: filterTrade, surface: filterSurface, from: dateFrom, to: dateTo }
+    nextFilters = { trade: filterTrade, surface: filterSurface, from: dateFrom, to: dateTo, level: levelName }
   ) {
     if (!nextProjectId) {
       setStatus("프로젝트를 먼저 선택하세요.");
@@ -133,10 +139,12 @@ export default function PhotosPage() {
     if (nextFilters.from) params.set("date_from", nextFilters.from);
     if (nextFilters.to) params.set("date_to", nextFilters.to);
     const json = await apiJson<PhotoList>(`/photos?${params}`, { headers: authHeaders(nextToken) });
-    const hydrated = await hydratePreviews(nextToken, json.data);
+    const levelRoomIds = new Set(rooms.filter((room) => normalizeLevel(room.level_name) === normalizeLevel(nextFilters.level)).map((room) => room.id));
+    const levelFilteredRows = !nextRoomId && nextFilters.level ? json.data.filter((photo) => levelRoomIds.has(photo.room_id)) : json.data;
+    const hydrated = await hydratePreviews(nextToken, levelFilteredRows);
     setPhotos(hydrated);
     setSelectedId(hydrated[0]?.id ?? "");
-    setStatus(`${json.total}개 사진을 시간순으로 불러왔습니다.`);
+    setStatus(`${hydrated.length}개 사진을 시간순으로 불러왔습니다.`);
   }
 
   async function hydratePreviews(nextToken: string, rows: Photo[]) {
@@ -157,6 +165,7 @@ export default function PhotosPage() {
   function changeProject(nextProjectId: string) {
     setProjectId(nextProjectId);
     saveProjectId(nextProjectId);
+    setLevelName("");
     setRoomId("");
     void loadTradeCategories(token, nextProjectId).catch((err: Error) => setStatus(err.message));
     void loadRooms(token, nextProjectId).catch((err: Error) => setStatus(err.message));
@@ -169,24 +178,30 @@ export default function PhotosPage() {
     void loadPhotos(token, projectId, nextRoomId).catch((err: Error) => setStatus(err.message));
   }
 
+  function changeLevel(nextLevelName: string) {
+    setLevelName(nextLevelName);
+    setRoomId("");
+    void loadPhotos(token, projectId, "", { trade: filterTrade, surface: filterSurface, from: dateFrom, to: dateTo, level: nextLevelName }).catch((err: Error) => setStatus(err.message));
+  }
+
   function changeTradeFilter(nextTrade: string) {
     setFilterTrade(nextTrade);
-    void loadPhotos(token, projectId, roomId, { trade: nextTrade, surface: filterSurface, from: dateFrom, to: dateTo }).catch((err: Error) => setStatus(err.message));
+    void loadPhotos(token, projectId, roomId, { trade: nextTrade, surface: filterSurface, from: dateFrom, to: dateTo, level: levelName }).catch((err: Error) => setStatus(err.message));
   }
 
   function changeSurfaceFilter(nextSurface: string) {
     setFilterSurface(nextSurface);
-    void loadPhotos(token, projectId, roomId, { trade: filterTrade, surface: nextSurface, from: dateFrom, to: dateTo }).catch((err: Error) => setStatus(err.message));
+    void loadPhotos(token, projectId, roomId, { trade: filterTrade, surface: nextSurface, from: dateFrom, to: dateTo, level: levelName }).catch((err: Error) => setStatus(err.message));
   }
 
   function changeDateFrom(nextDate: string) {
     setDateFrom(nextDate);
-    void loadPhotos(token, projectId, roomId, { trade: filterTrade, surface: filterSurface, from: nextDate, to: dateTo }).catch((err: Error) => setStatus(err.message));
+    void loadPhotos(token, projectId, roomId, { trade: filterTrade, surface: filterSurface, from: nextDate, to: dateTo, level: levelName }).catch((err: Error) => setStatus(err.message));
   }
 
   function changeDateTo(nextDate: string) {
     setDateTo(nextDate);
-    void loadPhotos(token, projectId, roomId, { trade: filterTrade, surface: filterSurface, from: dateFrom, to: nextDate }).catch((err: Error) => setStatus(err.message));
+    void loadPhotos(token, projectId, roomId, { trade: filterTrade, surface: filterSurface, from: dateFrom, to: nextDate, level: levelName }).catch((err: Error) => setStatus(err.message));
   }
 
   async function uploadPhoto() {
@@ -232,7 +247,7 @@ export default function PhotosPage() {
       setDateFrom("");
       setDateTo("");
       setActiveTab("list");
-      await loadPhotos(token, projectId, roomId, { trade: "", surface: "", from: "", to: "" });
+      await loadPhotos(token, projectId, roomId, { trade: "", surface: "", from: "", to: "", level: levelName });
       setSelectedId(lastCommitted?.id ?? "");
       setUploadNotice(`${files.length}개 사진 업로드가 완료됐습니다. AI 분석 큐에 등록했고, 아래 사진 조회 목록에서 바로 확인할 수 있습니다.`);
       setStatus(`${files.length}개 사진 업로드가 완료됐고 AI 분석 큐에 등록됐습니다.`);
@@ -263,6 +278,24 @@ export default function PhotosPage() {
     }
   }
 
+  async function deleteSelectedPhoto() {
+    if (!selectedPhoto) return;
+    const confirmed = window.confirm("선택한 사진을 삭제할까요?");
+    if (!confirmed) return;
+    await apiJson<{ data: Photo }>(`/photos/${selectedPhoto.id}`, { method: "DELETE", headers: authHeaders(token) });
+    setStatus("선택한 사진을 삭제했습니다.");
+    await loadPhotos();
+  }
+
+  async function downloadSelectedPhoto() {
+    if (!selectedPhoto) return;
+    const res = await fetch(`${API_BASE}/photos/${selectedPhoto.id}/object?download=1`, { headers: authHeaders(token) });
+    if (!res.ok) throw new Error(`사진 다운로드 실패: ${res.status}`);
+    const blob = await res.blob();
+    downloadBlob(blob, filenameFromDisposition(res.headers.get("content-disposition")) ?? photoDownloadName(selectedPhoto, rooms));
+    setStatus("선택한 사진을 다운로드했습니다.");
+  }
+
   return (
     <main className="app-main">
       <section className="page-hero compact">
@@ -286,10 +319,17 @@ export default function PhotosPage() {
             </select>
           </label>
           <label className="field compact">
+            <span className="label">층</span>
+            <select className="input" value={levelName} onChange={(event) => changeLevel(event.target.value)}>
+              <option value="">전체 층</option>
+              {levelOptions.map((level) => <option key={level} value={level}>{level}</option>)}
+            </select>
+          </label>
+          <label className="field compact">
             <span className="label">방</span>
             <select className="input" value={roomId} onChange={(event) => changeRoom(event.target.value)}>
               <option value="">전체 방</option>
-              {rooms.map((room) => <option key={room.id} value={room.id}>{room.level_name ?? "-"} / {room.room_number ?? ""} {room.room_name}</option>)}
+              {roomOptions.map((room) => <option key={room.id} value={room.id}>{room.room_number ?? ""} {room.room_name}</option>)}
             </select>
           </label>
             <label className="field compact">
@@ -341,7 +381,11 @@ export default function PhotosPage() {
           <section className="panel photo-detail-panel">
             <div className="panel-header">
               <h2 className="panel-title">선택 사진 상세</h2>
-              <span className={roomProgressStatus(selectedRoom, tradeCategories).badgeClass}>{roomProgressStatus(selectedRoom, tradeCategories).label}</span>
+              <div className="photo-detail-actions">
+                <button className="filter-button" type="button" disabled={!selectedPhoto} onClick={() => downloadSelectedPhoto().catch((err: Error) => setStatus(err.message))}><Download size={16} />다운로드</button>
+                {canManageFilters ? <button className="filter-button danger" type="button" disabled={!selectedPhoto} onClick={() => deleteSelectedPhoto().catch((err: Error) => setStatus(err.message))}><Trash2 size={16} />삭제</button> : null}
+                <span className={roomProgressStatus(selectedRoom, tradeCategories).badgeClass}>{roomProgressStatus(selectedRoom, tradeCategories).label}</span>
+              </div>
             </div>
             {selectedRoom ? (
               <div className="photo-room-context">
@@ -359,7 +403,7 @@ export default function PhotosPage() {
                     <dt>공종</dt><dd>{selectedPhoto.trade_category?.label ?? labelForOption(defaultTradeOptions, selectedPhoto.trade)}</dd>
                     <dt>공사면</dt><dd>{labelForOption(defaultSurfaceOptions, selectedPhoto.work_surface)}</dd>
                     <dt>작업자</dt><dd>{selectedPhoto.worker_name ?? "-"}</dd>
-                    <dt>위치</dt><dd>{selectedPhoto.room?.level_name ?? "-"} &gt; {selectedPhoto.room?.room_number ?? ""} {selectedPhoto.room?.room_name ?? selectedPhoto.room_id}</dd>
+                    <dt>위치</dt><dd>{photoLocationLabel(selectedPhoto, rooms)}</dd>
                   </dl>
                 </div>
                 <div className="callout"><div className="callout-title"><Bot size={18} color="#2563eb" /> AI 요약</div><p className="muted" style={{ margin: 0 }}>{selectedPhoto.ai_description ?? selectedPhoto.latest_analysis?.summary ?? "분석 대기 중입니다."}</p></div>
@@ -406,10 +450,16 @@ export default function PhotosPage() {
                 {projects.map((project) => <option key={project.id} value={project.id}>{project.name} / {project.code}</option>)}
               </select>
             </Field>
+            <Field label="층">
+              <select className="input" value={levelName} onChange={(event) => changeLevel(event.target.value)}>
+                <option value="">전체 층</option>
+                {levelOptions.map((level) => <option key={level} value={level}>{level}</option>)}
+              </select>
+            </Field>
             <Field label="방">
               <select className="input" value={roomId} onChange={(event) => setRoomId(event.target.value)}>
                 <option value="">방 선택</option>
-                {rooms.map((room) => <option key={room.id} value={room.id}>{room.level_name ?? "-"} / {room.room_number ?? ""} {room.room_name}</option>)}
+                {roomOptions.map((room) => <option key={room.id} value={room.id}>{room.room_number ?? ""} {room.room_name}</option>)}
               </select>
             </Field>
             <Field label="공사면">
@@ -460,4 +510,48 @@ function roomProgressStatus(room: Room | undefined, tradeCategories: TradeCatego
 function roomTradeProgressValues(room: Room | undefined, tradeCategories: TradeCategory[]) {
   if (!room) return [];
   return tradeCategories.map((category) => room.progress_by_trade_category?.[category.id] ?? { status: "NOT_STARTED" as const, photo_count: 0 });
+}
+
+function downloadBlob(blob: Blob, filename: string) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
+function filenameFromDisposition(disposition: string | null) {
+  if (!disposition) return null;
+  const utf8Match = /filename\*=UTF-8''([^;]+)/i.exec(disposition);
+  if (utf8Match?.[1]) return decodeURIComponent(utf8Match[1].replace(/"/g, ""));
+  const fallbackMatch = /filename="?([^";]+)"?/i.exec(disposition);
+  return fallbackMatch?.[1] ?? null;
+}
+
+function uniqueLevels(rooms: Room[]) {
+  return Array.from(new Set(rooms.map((room) => normalizeLevel(room.level_name)).filter(Boolean))).sort((first, second) => first.localeCompare(second, "ko"));
+}
+
+function normalizeLevel(levelName: string | null | undefined) {
+  return levelName?.trim() ?? "";
+}
+
+function photoLocationLabel(photo: Photo, rooms: Room[]) {
+  const room = photo.room ?? rooms.find((candidate) => candidate.id === photo.room_id);
+  if (!room) return "-";
+  const roomName = [room.room_number, room.room_name].filter(isNonEmptyString).join(" ");
+  return [room.level_name, roomName].filter(isNonEmptyString).join(" / ") || "-";
+}
+
+function photoDownloadName(photo: Photo, rooms: Room[]) {
+  const location = photoLocationLabel(photo, rooms).replace(/[\\/:*?"<>|\s]+/g, "_");
+  const extension = photo.photo_url.toLowerCase().includes(".png") ? "png" : "jpg";
+  return `${location || "photo"}_${photo.work_date}_${photo.id.slice(0, 8)}.${extension}`;
+}
+
+function isNonEmptyString(value: unknown): value is string {
+  return typeof value === "string" && value.trim().length > 0;
 }

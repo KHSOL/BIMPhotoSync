@@ -337,6 +337,12 @@ a {
   cursor: pointer;
 }
 
+.icon-button.danger {
+  border-color: #fecaca;
+  color: #dc2626;
+  background: #fff7f7;
+}
+
 .segmented {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -1771,6 +1777,28 @@ a {
   display: flex;
   justify-content: space-between;
   color: var(--gray-600);
+}
+
+.photo-detail-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.filter-button.danger {
+  border-color: #fecaca;
+  color: #dc2626;
+  background: #fff7f7;
+}
+
+.filter-button.danger:hover:not(:disabled) {
+  background: #fee2e2;
+}
+
+.member-detail-action {
+  align-items: center;
 }
 
 .job-queue-card {
@@ -4178,6 +4206,17 @@ body {
 
 .photo-detail-panel {
   min-width: 0;
+}
+
+@media (min-width: 1181px) {
+  .photo-detail-panel {
+    position: sticky;
+    top: 24px;
+    align-self: start;
+    max-height: calc(100vh - 48px);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
 }
 
 .photo-detail-panel .detail-layout {

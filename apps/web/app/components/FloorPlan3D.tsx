@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef } from "react";
-import type { FloorPlanRoom, RevitFloorPlan, Room } from "../client";
+import type { FloorPlanRoom, RevitFloorPlan, Room, TradeCategory } from "../client";
 
 type RoomProgressStatus = "not-started" | "in-progress" | "completed";
 type ThreeModule = typeof import("three");
@@ -28,13 +28,15 @@ export function FloorPlan3D({
   plan,
   assetUrl,
   selectedRoomId,
-  roomProgressByBimId,
+  roomTradeProgressByBimId,
+  tradeCategories,
   onSelect
 }: {
   plan: RevitFloorPlan;
   assetUrl: string;
   selectedRoomId: string;
-  roomProgressByBimId: Record<string, Room["progress_by_surface"]>;
+  roomTradeProgressByBimId: Record<string, Room["progress_by_trade_category"]>;
+  tradeCategories: TradeCategory[];
   onSelect: (roomId: string) => void;
 }) {
   const hostRef = useRef<HTMLDivElement | null>(null);
@@ -44,10 +46,10 @@ export function FloorPlan3D({
   const roomProgress = useMemo(
     () =>
       plan.rooms.reduce<Record<string, RoomProgressStatus>>((result, room) => {
-        result[room.bim_photo_room_id] = roomDisplayProgress(roomProgressByBimId[room.bim_photo_room_id]);
+        result[room.bim_photo_room_id] = roomDisplayProgress(roomTradeProgressByBimId[room.bim_photo_room_id], tradeCategories);
         return result;
       }, {}),
-    [plan.rooms, roomProgressByBimId]
+    [plan.rooms, roomTradeProgressByBimId, tradeCategories]
   );
 
   useEffect(() => {
@@ -498,12 +500,12 @@ function simplifyPolygon(polygon: FloorPlanRoom["polygon"], epsilon: number): Fl
   });
 }
 
-function roomDisplayProgress(progress: Room["progress_by_surface"] | undefined): RoomProgressStatus {
-  const wall = progress?.WALL;
-  if (wall?.status === "COMPLETED") return "completed";
-  if (wall?.status === "IN_PROGRESS") return "in-progress";
-  const values = Object.values(progress ?? {});
-  if (values.some((item) => item.status === "COMPLETED")) return "completed";
-  if (values.some((item) => item.status === "IN_PROGRESS")) return "in-progress";
+function roomDisplayProgress(progress: Room["progress_by_trade_category"] | undefined, tradeCategories: TradeCategory[]): RoomProgressStatus {
+  const activeTradeIds = tradeCategories.filter((category) => category.is_active).map((category) => category.id);
+  const values = activeTradeIds.length > 0
+    ? activeTradeIds.map((id) => progress?.[id] ?? { status: "NOT_STARTED" as const, photo_count: 0 })
+    : Object.values(progress ?? {});
+  if (values.length > 0 && values.every((item) => item.status === "COMPLETED")) return "completed";
+  if (values.some((item) => item.status === "IN_PROGRESS" || item.status === "COMPLETED" || item.photo_count > 0)) return "in-progress";
   return "not-started";
 }
