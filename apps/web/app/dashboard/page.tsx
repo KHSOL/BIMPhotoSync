@@ -1,6 +1,6 @@
 "use client";
 
-import { AlertCircle, Building2, Camera, CheckCircle2, FileText, Home, KeyRound, RefreshCw } from "lucide-react";
+import { Building2, Camera, CheckCircle2, FileText, Home, KeyRound, RefreshCw } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { apiJson, authHeaders, canAccessAdminBoards, clearProjectId, readProjectId, readSession, saveProjectId, type User } from "../client";
 import { defaultSurfaceOptions, defaultTradeOptions, labelForOption } from "../photo-options";
@@ -138,11 +138,10 @@ export default function DashboardPage() {
         </div>
       </header>
 
-      <section className={`metric-grid dashboard-metric-grid ${showAdminBoards ? "six" : "five"}`}>
+      <section className={`metric-grid dashboard-metric-grid ${showAdminBoards ? "five" : "four"}`}>
         <Metric icon={<Home />} label="방" value={summary.totals.rooms} sub="동기화된 방" tone="blue" />
         <Metric icon={<Camera />} label="사진" value={summary.totals.photos} sub="업로드 사진" tone="sky" />
         <Metric icon={<CheckCircle2 />} label="AI 분석 완료" value={summary.totals.analyzed_photos} sub="분석 내용 저장" tone="green" />
-        <Metric icon={<AlertCircle />} label="이슈 사진" value={summary.totals.issue_photos} sub="차단 상태" tone="red" />
         {showAdminBoards ? <Metric icon={<FileText />} label="보고서" value={summary.totals.reports} sub="생성 보고서" tone="orange" /> : null}
         <Metric icon={<Building2 />} label="Revit 모델" value={summary.totals.revit_models} sub="연결 모델" tone="purple" />
       </section>

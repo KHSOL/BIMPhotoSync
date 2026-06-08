@@ -1,6 +1,6 @@
 "use client";
 
-import { Download, Eye, FileText, KeyRound, Plus, Search } from "lucide-react";
+import { Download, Eye, FileText, KeyRound, Plus, Search, Trash2 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import {
   API_BASE,
@@ -41,6 +41,7 @@ export default function ReportsPage() {
   const [status, setStatus] = useState("로그인 후 프로젝트를 선택하세요.");
   const [generating, setGenerating] = useState(false);
   const [filters, setFilters] = useState({
+    level_name: "",
     room_id: "",
     work_surface: "",
     trade: "",
@@ -101,8 +102,12 @@ export default function ReportsPage() {
     setProjectId(nextProjectId);
     saveProjectId(nextProjectId);
     setSelectedId("");
-    setFilters((current) => ({ ...current, room_id: "", trade: "", trade_category_id: "" }));
+    setFilters((current) => ({ ...current, level_name: "", room_id: "", trade: "", trade_category_id: "" }));
     void Promise.all([loadRooms(token, nextProjectId), loadTradeCategories(token, nextProjectId), loadReports(token, nextProjectId)]).catch((err: Error) => setStatus(err.message));
+  }
+
+  function changeLevel(nextLevelName: string) {
+    setFilters((current) => ({ ...current, level_name: nextLevelName, room_id: "" }));
   }
 
   function changeTrade(value: string) {
@@ -168,7 +173,24 @@ export default function ReportsPage() {
     void downloadReportFile(report).catch((err: Error) => setStatus(err.message));
   }
 
+  async function deleteReport(report: GeneratedReport) {
+    const confirmed = window.confirm(`${report.title} 보고서를 삭제할까요?`);
+    if (!confirmed) return;
+    await apiJson<ReportResult>(`/reports/${report.id}`, { method: "DELETE", headers: authHeaders(token) });
+    setStatus(`${report.title} 보고서를 삭제했습니다.`);
+    await loadReports(token, projectId);
+  }
+
+  function requestDelete(report: GeneratedReport) {
+    void deleteReport(report).catch((err: Error) => setStatus(err.message));
+  }
+
   const canGenerate = isUpperManager(user);
+  const levelOptions = useMemo(() => uniqueLevels(rooms), [rooms]);
+  const roomOptions = useMemo(() => {
+    if (!filters.level_name) return rooms;
+    return rooms.filter((room) => normalizeLevel(room.level_name) === normalizeLevel(filters.level_name));
+  }, [filters.level_name, rooms]);
   const filteredReports = useMemo(() => {
     const keyword = filters.title.trim().toLowerCase();
     return reports.filter((report) => {
@@ -228,10 +250,17 @@ export default function ReportsPage() {
           </select>
         </label>
         <label className="field compact">
+          <span className="label">층</span>
+          <select className="input" value={filters.level_name} onChange={(event) => changeLevel(event.target.value)}>
+            <option value="">전체 층</option>
+            {levelOptions.map((level) => <option key={level} value={level}>{level}</option>)}
+          </select>
+        </label>
+        <label className="field compact">
           <span className="label">방</span>
           <select className="input" value={filters.room_id} onChange={(event) => setFilters({ ...filters, room_id: event.target.value })}>
-            <option value="">전체</option>
-            {rooms.map((room) => <option key={room.id} value={room.id}>{room.level_name ?? "-"} / {room.room_number ?? ""} {room.room_name}</option>)}
+            <option value="">전체 방</option>
+            {roomOptions.map((room) => <option key={room.id} value={room.id}>{room.room_number ? `${room.room_number} ` : ""}{room.room_name}</option>)}
           </select>
         </label>
         <label className="field compact">
@@ -319,6 +348,7 @@ export default function ReportsPage() {
                     <td className="table-actions">
                       <button className="icon-button" type="button" aria-label="미리보기" onClick={(event) => { event.stopPropagation(); setSelectedId(report.id); }}><Eye size={16} /></button>
                       <button className="icon-button" type="button" aria-label="Word 다운로드" onClick={(event) => { event.stopPropagation(); requestDownload(report); }}><Download size={16} /></button>
+                      <button className="icon-button danger" type="button" aria-label="보고서 삭제" onClick={(event) => { event.stopPropagation(); requestDelete(report); }}><Trash2 size={16} /></button>
                     </td>
                   </tr>
                 ))}
@@ -346,6 +376,7 @@ export default function ReportsPage() {
               {selectedReport.error_message ? <p className="muted">Gemini 대체 결과: {selectedReport.error_message}</p> : null}
               <div className="report-actions">
                 <button className="button" type="button" onClick={() => requestDownload(selectedReport)}><FileText size={16} />Word 내보내기</button>
+                <button className="filter-button danger" type="button" onClick={() => requestDelete(selectedReport)}><Trash2 size={16} />삭제</button>
               </div>
             </>
           ) : (
@@ -385,4 +416,20 @@ function reportStatusLabel(status: string) {
   if (status === "GENERATED") return "생성 완료";
   if (status === "FAILED") return "생성 실패";
   return status;
+}
+
+function uniqueLevels(rooms: Room[]) {
+  const seen = new Set<string>();
+  const levels: string[] = [];
+  for (const room of rooms) {
+    const level = room.level_name?.trim();
+    if (!level || seen.has(normalizeLevel(level))) continue;
+    seen.add(normalizeLevel(level));
+    levels.push(level);
+  }
+  return levels;
+}
+
+function normalizeLevel(value: string | null | undefined) {
+  return value?.trim().toLowerCase() ?? "";
 }

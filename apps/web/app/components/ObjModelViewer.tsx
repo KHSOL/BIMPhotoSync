@@ -26,7 +26,7 @@ import {
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { OBJLoader } from "three/examples/jsm/loaders/OBJLoader.js";
 import { useEffect, useRef, useState } from "react";
-import { authHeaders, type FloorPlanRoom, type RevitFloorPlan, type Room } from "../client";
+import { authHeaders, type FloorPlanRoom, type RevitFloorPlan, type Room, type TradeCategory } from "../client";
 
 type RoomProgressStatus = "not-started" | "in-progress" | "completed";
 
@@ -46,26 +46,32 @@ export function ObjModelViewer({
   label,
   plan,
   selectedRoomId,
-  roomProgressByBimId,
-  onSelect
+  roomTradeProgressByBimId,
+  tradeCategories = [],
+  onSelect,
+  onAssetError
 }: {
   assetUrl: string;
   token: string;
   label: string;
   plan?: RevitFloorPlan;
   selectedRoomId?: string;
-  roomProgressByBimId?: Record<string, Room["progress_by_surface"]>;
+  roomTradeProgressByBimId?: Record<string, Room["progress_by_trade_category"]>;
+  tradeCategories?: TradeCategory[];
   onSelect?: (roomId: string) => void;
+  onAssetError?: (status: number | null) => void;
 }) {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const selectedRoomIdRef = useRef(selectedRoomId ?? "");
   const onSelectRef = useRef(onSelect);
+  const onAssetErrorRef = useRef(onAssetError);
   const [state, setState] = useState<"loading" | "ready" | "error">("loading");
 
   useEffect(() => {
     selectedRoomIdRef.current = selectedRoomId ?? "";
     onSelectRef.current = onSelect;
-  }, [onSelect, selectedRoomId]);
+    onAssetErrorRef.current = onAssetError;
+  }, [onAssetError, onSelect, selectedRoomId]);
 
   useEffect(() => {
     const host = hostRef.current;
@@ -145,7 +151,7 @@ export function ObjModelViewer({
       setState("loading");
       try {
         const response = await fetch(assetUrl, { headers: authHeaders(token) });
-        if (!response.ok) throw new Error(`OBJ asset ${response.status}`);
+        if (!response.ok) throw new ObjAssetError(response.status);
         const text = await response.text();
         if (disposed) return;
 
@@ -153,11 +159,11 @@ export function ObjModelViewer({
         object.traverse((child) => {
           if (child instanceof Mesh) {
             const material = new MeshStandardMaterial({
-              color: 0xf8fafc,
-              roughness: 0.72,
-              metalness: 0.02,
-              transparent: true,
-              opacity: 0.84,
+              color: 0xe5e7eb,
+              roughness: 0.82,
+              metalness: 0,
+              transparent: false,
+              opacity: 1,
               side: DoubleSide
             });
             child.material = material;
@@ -179,12 +185,12 @@ export function ObjModelViewer({
 
         addModelEdges(object, disposables, maxDimension);
         if (plan) {
-          const roomGroup = createRoomOverlay(plan, center, maxDimension, roomProgressByBimId ?? {}, roomMeshes, disposables);
-          roomGroup.position.y = Math.max(maxDimension * 0.006, 0.04);
+          const roomGroup = createRoomOverlay(plan, center, maxDimension, roomTradeProgressByBimId ?? {}, tradeCategories, roomMeshes, disposables);
+          roomGroup.position.y = Math.max(maxDimension * 0.003, 0.02);
           scene.add(roomGroup);
         }
 
-        const grid = new GridHelper(maxDimension * 1.2, 24, 0xcbd5e1, 0xeef2ff);
+        const grid = new GridHelper(maxDimension * 1.12, 24, 0xe2e8f0, 0xf3f6fb);
         grid.position.y = 0;
         scene.add(grid);
 
@@ -194,7 +200,12 @@ export function ObjModelViewer({
         controls.maxDistance = maxDimension * 2.5;
         controls.update();
         setState("ready");
-      } catch {
+      } catch (error) {
+        if (error instanceof ObjAssetError) {
+          onAssetErrorRef.current?.(error.status);
+        } else {
+          onAssetErrorRef.current?.(null);
+        }
         if (!disposed) setState("error");
       }
     }
@@ -204,7 +215,7 @@ export function ObjModelViewer({
         const isSelected = mesh.userData.roomId === selectedRoomIdRef.current;
         const isHovered = mesh.userData.roomId === hoveredRoomId;
         mesh.material.color.set(isSelected ? 0xbfdbfe : isHovered ? 0xccfbf1 : progressColor(mesh.userData.progressStatus));
-        mesh.material.opacity = isSelected ? 0.58 : isHovered ? 0.48 : 0.36;
+        mesh.material.opacity = isSelected ? 0.36 : isHovered ? 0.28 : 0.14;
         mesh.material.emissive.set(isSelected ? 0x2563eb : isHovered ? 0x0f766e : 0x000000);
         mesh.material.emissiveIntensity = isSelected ? 0.16 : isHovered ? 0.08 : 0;
       }
@@ -238,7 +249,7 @@ export function ObjModelViewer({
       renderer.dispose();
       renderer.domElement.remove();
     };
-  }, [assetUrl, plan, roomProgressByBimId, token]);
+  }, [assetUrl, plan, roomTradeProgressByBimId, token, tradeCategories]);
 
   return (
     <div className="obj-model-viewer" ref={hostRef} aria-label={label}>
@@ -246,6 +257,12 @@ export function ObjModelViewer({
       {state === "error" ? <div className="model-viewer-status error">3D 모델을 표시하지 못했습니다.</div> : null}
     </div>
   );
+}
+
+class ObjAssetError extends Error {
+  constructor(public readonly status: number) {
+    super(`OBJ asset ${status}`);
+  }
 }
 
 function addModelEdges(object: Group, disposables: DisposableResource[], maxDimension: number) {
@@ -256,7 +273,7 @@ function addModelEdges(object: Group, disposables: DisposableResource[], maxDime
     if (shouldSkipEdgeMesh(childSize, maxDimension)) return;
 
     const geometry = new EdgesGeometry(child.geometry, 78);
-    const material = new LineBasicMaterial({ color: 0x334155, transparent: true, opacity: 0.13 });
+    const material = new LineBasicMaterial({ color: 0x475569, transparent: true, opacity: 0.24 });
     const edges = new LineSegments(geometry, material);
     edges.renderOrder = 3;
     child.add(edges);
@@ -320,7 +337,8 @@ function createRoomOverlay(
   plan: RevitFloorPlan,
   center: Vector3,
   maxDimension: number,
-  roomProgressByBimId: Record<string, Room["progress_by_surface"]>,
+  roomTradeProgressByBimId: Record<string, Room["progress_by_trade_category"]>,
+  tradeCategories: TradeCategory[],
   roomMeshes: SelectableRoomMesh[],
   disposables: DisposableResource[]
 ) {
@@ -329,14 +347,14 @@ function createRoomOverlay(
     const shape = createRoomShape(room);
     if (!shape) continue;
 
-    const status = roomDisplayProgress(roomProgressByBimId[room.bim_photo_room_id]);
+    const status = roomDisplayProgress(roomTradeProgressByBimId[room.bim_photo_room_id], tradeCategories);
     const geometry = new ShapeGeometry(shape);
     const material = new MeshStandardMaterial({
       color: progressColor(status),
       roughness: 0.9,
       metalness: 0,
       transparent: true,
-      opacity: 0.42,
+      opacity: 0.16,
       side: DoubleSide,
       depthTest: false
     });
@@ -371,13 +389,13 @@ function createRoomShape(room: FloorPlanRoom) {
   return shape;
 }
 
-function roomDisplayProgress(progress: Room["progress_by_surface"] | undefined): RoomProgressStatus {
-  const wall = progress?.WALL;
-  if (wall?.status === "COMPLETED") return "completed";
-  if (wall?.status === "IN_PROGRESS" || (wall?.photo_count ?? 0) > 0) return "in-progress";
-  const values = Object.values(progress ?? {});
-  if (values.some((item) => item.status === "COMPLETED")) return "completed";
-  if (values.some((item) => item.status === "IN_PROGRESS" || item.photo_count > 0)) return "in-progress";
+function roomDisplayProgress(progress: Room["progress_by_trade_category"] | undefined, tradeCategories: TradeCategory[]): RoomProgressStatus {
+  const activeTradeIds = tradeCategories.filter((category) => category.is_active).map((category) => category.id);
+  const values = activeTradeIds.length > 0
+    ? activeTradeIds.map((id) => progress?.[id] ?? { status: "NOT_STARTED" as const, photo_count: 0 })
+    : Object.values(progress ?? {});
+  if (values.length > 0 && values.every((item) => item.status === "COMPLETED")) return "completed";
+  if (values.some((item) => item.status === "IN_PROGRESS" || item.status === "COMPLETED" || item.photo_count > 0)) return "in-progress";
   return "not-started";
 }
 

@@ -132,14 +132,14 @@ export class PhotosService {
       where: { id: photoId },
       include: { room: true, tradeCategory: true, analyses: { orderBy: { createdAt: "desc" }, take: 1 } }
     });
-    if (!photo) throw new NotFoundException("Photo not found.");
+    if (!photo || photo.status === "DELETED") throw new NotFoundException("Photo not found.");
     await this.projects.assertProjectAccess(user.sub, user.companyId, photo.projectId);
     return { data: toPhotoResponse(photo, this.config) };
   }
 
   async getAnalysis(user: { sub: string; companyId: string }, photoId: string) {
     const photo = await this.prisma.photo.findUnique({ where: { id: photoId } });
-    if (!photo) throw new NotFoundException("Photo not found.");
+    if (!photo || photo.status === "DELETED") throw new NotFoundException("Photo not found.");
     await this.projects.assertProjectAccess(user.sub, user.companyId, photo.projectId);
     const analysis = await this.prisma.photoAiAnalysis.findFirst({ where: { photoId }, orderBy: { createdAt: "desc" } });
     if (!analysis) throw new NotFoundException("Analysis not found.");
@@ -147,8 +147,8 @@ export class PhotosService {
   }
 
   async objectFile(user: { sub: string; companyId: string }, photoId: string) {
-    const photo = await this.prisma.photo.findUnique({ where: { id: photoId } });
-    if (!photo) throw new NotFoundException("Photo not found.");
+    const photo = await this.prisma.photo.findUnique({ where: { id: photoId }, include: { room: true } });
+    if (!photo || photo.status === "DELETED") throw new NotFoundException("Photo not found.");
     await this.projects.assertProjectAccess(user.sub, user.companyId, photo.projectId);
     const command = new GetObjectCommand({ Bucket: this.bucket, Key: photo.objectKey });
     const object = await this.s3.send(command);
@@ -158,13 +158,36 @@ export class PhotosService {
     }
     return {
       buffer: Buffer.concat(chunks),
-      contentType: object.ContentType ?? photo.mimeType
+      contentType: object.ContentType ?? photo.mimeType,
+      filename: photoDownloadFilename(photo)
     };
+  }
+
+  async delete(user: { sub: string; companyId: string; role: string }, photoId: string) {
+    const photo = await this.prisma.photo.findUnique({ where: { id: photoId } });
+    if (!photo) throw new NotFoundException("Photo not found.");
+    const project = await this.projects.assertProjectRole(user, photo.projectId, ["MANAGER", "PROJECT_ADMIN", "BIM_MANAGER", "COMPANY_ADMIN", "SUPER_ADMIN"]);
+    if (photo.status === "DELETED") return { data: toPhotoResponse(photo, this.config) };
+
+    const deleted = await this.prisma.photo.update({
+      where: { id: photoId },
+      data: { status: "DELETED" }
+    });
+    await this.projects.recordAuditEvent({
+      companyId: project.companyId,
+      projectId: photo.projectId,
+      actorUserId: user.sub,
+      action: "DELETE",
+      resourceType: "PHOTO",
+      resourceId: photoId,
+      detail: "사진 삭제"
+    });
+    return { data: toPhotoResponse(deleted, this.config) };
   }
 
   async reviewAnalysis(user: { sub: string; companyId: string; role: string }, photoId: string, dto: ReviewAnalysisDto) {
     const photo = await this.prisma.photo.findUnique({ where: { id: photoId } });
-    if (!photo) throw new NotFoundException("Photo not found.");
+    if (!photo || photo.status === "DELETED") throw new NotFoundException("Photo not found.");
     const project = await this.projects.assertProjectRole(user, photo.projectId, ["MANAGER", "PROJECT_ADMIN", "BIM_MANAGER", "COMPANY_ADMIN"]);
     const analysis = await this.prisma.photoAiAnalysis.findFirst({ where: { photoId }, orderBy: { createdAt: "desc" } });
     const summary = dto.summary ?? analysis?.summary ?? photo.aiDescription ?? photo.description ?? "관리자 검토";
@@ -287,4 +310,24 @@ export function toPhotoResponse(photo: Photo & { room?: unknown; tradeCategory?:
     room: photo.room,
     latest_analysis: photo.analyses?.[0] ?? null
   };
+}
+
+function photoDownloadFilename(photo: Photo & { room?: { roomNumber?: string | null; roomName?: string | null } | null }) {
+  const room = [photo.room?.roomNumber, photo.room?.roomName].filter(isNonEmptyString).join("_") || "photo";
+  const ext = mimeExtension(photo.mimeType);
+  return safeDownloadName(`${room}_${photo.workDate.toISOString().slice(0, 10)}_${photo.id.slice(0, 8)}.${ext}`);
+}
+
+function isNonEmptyString(value: unknown): value is string {
+  return typeof value === "string" && value.trim().length > 0;
+}
+
+function mimeExtension(mimeType: string | null | undefined) {
+  if (mimeType === "image/png") return "png";
+  if (mimeType === "image/webp") return "webp";
+  return "jpg";
+}
+
+function safeDownloadName(value: string) {
+  return value.replace(/[\\/:*?"<>|\s]+/g, "_");
 }

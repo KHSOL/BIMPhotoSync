@@ -94,6 +94,47 @@ export class ProjectsService {
     };
   }
 
+  async promoteMemberToManager(user: ProjectActor, projectId: string, memberId: string) {
+    const project = await this.assertProjectRole(user, projectId, ["MANAGER", "PROJECT_ADMIN", "BIM_MANAGER", "COMPANY_ADMIN", "SUPER_ADMIN"]);
+    const member = await this.prisma.projectMember.findFirst({
+      where: { id: memberId, projectId },
+      include: { user: { include: { company: true } } }
+    });
+    if (!member) throw new NotFoundException("Project member not found.");
+
+    const [updatedMember, updatedUser] = await this.prisma.$transaction([
+      this.prisma.projectMember.update({ where: { id: memberId }, data: { role: "MANAGER" } }),
+      this.prisma.user.update({ where: { id: member.userId }, data: { role: "MANAGER" } })
+    ]);
+
+    await this.recordAuditEvent({
+      companyId: project.companyId,
+      projectId,
+      actorUserId: user.sub,
+      action: "UPDATE",
+      resourceType: "PROJECT_MEMBER",
+      resourceId: memberId,
+      detail: `${member.user.name} 작업자를 관리자로 승급`
+    });
+
+    return {
+      data: {
+        id: updatedMember.id,
+        role: updatedMember.role,
+        created_at: updatedMember.createdAt,
+        user: {
+          id: updatedUser.id,
+          company_id: member.user.companyId,
+          company_name: member.user.company.name,
+          email: member.user.email,
+          name: member.user.name,
+          role: updatedUser.role,
+          avatar_url: null
+        }
+      }
+    };
+  }
+
   async tradeCategories(user: ProjectActor, projectId: string) {
     const project = await this.assertProjectAccess(user.sub, user.companyId, projectId);
     await this.ensureSystemTradeCategories(project.companyId, projectId);

@@ -54,6 +54,10 @@ export type Photo = {
   work_date: string;
   worker_name?: string | null;
   description?: string | null;
+  ai_description?: string | null;
+  latest_analysis?: {
+    summary?: string | null;
+  } | null;
   progress_status: string;
   photo_url: string;
   uploaded_at: string;

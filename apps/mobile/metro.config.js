@@ -7,7 +7,7 @@ const rootNodeModules = path.join(workspaceRoot, "node_modules");
 
 const config = getDefaultConfig(projectRoot);
 
-config.watchFolders = [rootNodeModules];
+config.watchFolders = [workspaceRoot, rootNodeModules];
 config.resolver.disableHierarchicalLookup = true;
 config.resolver.nodeModulesPaths = [rootNodeModules];
 config.resolver.extraNodeModules = {

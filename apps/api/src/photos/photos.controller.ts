@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Patch, Post, Query, Res, UseGuards } from "@nestjs/common";
+import { Body, Controller, Delete, Get, Param, Patch, Post, Query, Res, UseGuards } from "@nestjs/common";
 import { Response } from "express";
 import { CurrentUser, JwtUser } from "../common/current-user";
 import { JwtAuthGuard } from "../common/jwt-auth.guard";
@@ -26,10 +26,13 @@ export class PhotosController {
   }
 
   @Get("photos/:photoId/object")
-  async object(@CurrentUser() user: JwtUser, @Param("photoId") photoId: string, @Res() res: Response) {
+  async object(@CurrentUser() user: JwtUser, @Param("photoId") photoId: string, @Query("download") download: string | undefined, @Res() res: Response) {
     const file = await this.photos.objectFile(user, photoId);
     res.setHeader("Content-Type", file.contentType);
     res.setHeader("Cache-Control", "private, max-age=300");
+    if (download === "1" || download === "true") {
+      res.setHeader("Content-Disposition", `attachment; filename="${file.filename}"`);
+    }
     res.send(file.buffer);
   }
 
@@ -41,5 +44,10 @@ export class PhotosController {
   @Patch("photos/:photoId/analysis/review")
   review(@CurrentUser() user: JwtUser, @Param("photoId") photoId: string, @Body() dto: ReviewAnalysisDto) {
     return this.photos.reviewAnalysis(user, photoId, dto);
+  }
+
+  @Delete("photos/:photoId")
+  delete(@CurrentUser() user: JwtUser, @Param("photoId") photoId: string) {
+    return this.photos.delete(user, photoId);
   }
 }

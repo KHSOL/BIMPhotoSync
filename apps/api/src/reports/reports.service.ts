@@ -47,6 +47,8 @@ type ExportFile = {
   buffer: Buffer;
 };
 
+const reportManagerRoles = ["MANAGER", "PROJECT_ADMIN", "BIM_MANAGER", "COMPANY_ADMIN", "SUPER_ADMIN"];
+
 type ReportModelResult = {
   provider: "GEMINI" | "ANTHROPIC" | "HEURISTIC";
   modelName: string;
@@ -180,7 +182,7 @@ export class ReportsService {
   }
 
   async generate(user: { sub: string; companyId: string; role: string; email?: string }, dto: GenerateReportDto) {
-    await this.projects.assertProjectRole(user, dto.project_id, ["PROJECT_ADMIN", "BIM_MANAGER", "COMPANY_ADMIN"]);
+    await this.projects.assertProjectRole(user, dto.project_id, reportManagerRoles);
 
     const photos = await this.findPhotos(dto);
     const creator = await this.prisma.user.findUnique({ where: { id: user.sub }, select: { name: true } });
@@ -220,7 +222,7 @@ export class ReportsService {
   }
 
   async chat(user: { sub: string; companyId: string; role: string; email?: string }, dto: ReportChatDto) {
-    await this.projects.assertProjectRole(user, dto.project_id, ["PROJECT_ADMIN", "BIM_MANAGER", "COMPANY_ADMIN"]);
+    await this.projects.assertProjectRole(user, dto.project_id, reportManagerRoles);
     const photos = await this.findPhotos(dto);
     const prompt = dto.message.trim();
     const apiKey = this.config.get<string>("GEMINI_API_KEY");
@@ -273,6 +275,28 @@ export class ReportsService {
         }
       };
     }
+  }
+
+  async delete(user: { sub: string; companyId: string; role: string }, reportId: string) {
+    const report = await this.prisma.generatedReport.findUnique({
+      where: { id: reportId },
+      include: { project: true, createdBy: { select: { id: true, name: true, email: true, role: true } } }
+    });
+    if (!report) throw new NotFoundException("Report not found.");
+    const project = await this.projects.assertProjectRole(user, report.projectId, reportManagerRoles);
+
+    await this.prisma.generatedReport.delete({ where: { id: reportId } });
+    await this.projects.recordAuditEvent({
+      companyId: project.companyId,
+      projectId: report.projectId,
+      actorUserId: user.sub,
+      action: "DELETE",
+      resourceType: "REPORT",
+      resourceId: report.id,
+      detail: `${report.title} 보고서 삭제`
+    });
+
+    return { data: toReportResponse({ ...report, project }) };
   }
 
   private async findPhotos(dto: GenerateReportDto | ReportChatDto) {
