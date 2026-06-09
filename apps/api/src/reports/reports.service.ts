@@ -459,6 +459,14 @@ export class ReportsService {
         body: JSON.stringify({
           model: modelName,
           max_tokens: 2500,
+          tools: [
+            {
+              name: "generate_report",
+              description: "Return the BIM construction photo report as a structured JSON object.",
+              input_schema: reportToolInputSchema()
+            }
+          ],
+          tool_choice: { type: "tool", name: "generate_report" },
           messages: [
             {
               role: "user",
@@ -469,9 +477,10 @@ export class ReportsService {
       });
 
       if (!res.ok) throw new Error(`Anthropic report generation failed: ${res.status} ${await res.text()}`);
-      const json = (await res.json()) as { content?: Array<{ type?: string; text?: string }> };
+      const json = (await res.json()) as { content?: Array<{ type?: string; text?: string; name?: string; input?: unknown }> };
+      const toolInput = json.content?.find((part) => part.type === "tool_use" && part.name === "generate_report")?.input;
       const text = json.content?.map((part) => part.type === "text" ? part.text ?? "" : "").join("").trim() ?? "";
-      const parsed = parseReportJson(text);
+      const parsed = isRecord(toolInput) ? toolInput : parseReportJson(text);
       return { provider: "ANTHROPIC", modelName, content: normalizeReportContent(parsed, title, generatedBy, dto, photos), errorMessage: null };
     } catch (error) {
       return {
@@ -573,6 +582,81 @@ function buildReportGenerationPrompt(title: string, generatedBy: string, dto: Ge
     dto.ai_prompt ? `관리자 추가 지시: ${dto.ai_prompt}` : "",
     `사진 메타데이터: ${JSON.stringify(photos.map(photoSummary))}`
   ].filter(Boolean).join("\n");
+}
+
+function reportToolInputSchema(): Record<string, unknown> {
+  const stringField = { type: "string" };
+  const nullableStringField = { type: ["string", "null"] };
+  return {
+    type: "object",
+    additionalProperties: false,
+    required: ["title", "generated_at", "generated_by", "filters", "situation", "comparison_photos", "work_log", "judgment", "progress_timeline", "analysis_result", "memo"],
+    properties: {
+      title: stringField,
+      generated_at: stringField,
+      generated_by: stringField,
+      filters: { type: "object", additionalProperties: { type: ["string", "null"] } },
+      situation: {
+        type: "object",
+        additionalProperties: false,
+        required: ["project_id", "room", "work_surface", "trade", "date_range", "worker_name"],
+        properties: {
+          project_id: stringField,
+          room: nullableStringField,
+          work_surface: nullableStringField,
+          trade: nullableStringField,
+          date_range: nullableStringField,
+          worker_name: nullableStringField
+        }
+      },
+      comparison_photos: {
+        type: "array",
+        items: {
+          type: "object",
+          additionalProperties: false,
+          required: ["photo_id", "work_date", "room", "work_surface", "trade", "worker_name", "description", "ai_description"],
+          properties: {
+            photo_id: stringField,
+            work_date: stringField,
+            room: stringField,
+            work_surface: stringField,
+            trade: stringField,
+            worker_name: nullableStringField,
+            description: nullableStringField,
+            ai_description: nullableStringField
+          }
+        }
+      },
+      work_log: {
+        type: "array",
+        items: {
+          type: "object",
+          additionalProperties: false,
+          required: ["photo_id", "date", "work_item", "work_detail", "note"],
+          properties: {
+            photo_id: stringField,
+            date: stringField,
+            work_item: stringField,
+            work_detail: stringField,
+            note: stringField
+          }
+        }
+      },
+      judgment: {
+        type: "object",
+        additionalProperties: false,
+        required: ["quality_status", "special_notes", "overall_opinion"],
+        properties: {
+          quality_status: stringField,
+          special_notes: stringField,
+          overall_opinion: stringField
+        }
+      },
+      progress_timeline: { type: "array", items: stringField },
+      analysis_result: stringField,
+      memo: nullableStringField
+    }
+  };
 }
 
 function buildHeuristicReport(title: string, generatedBy: string, dto: GenerateReportDto, photos: PhotoForReport[]): ReportContent {
