@@ -2,6 +2,8 @@
 
 ![BIM Photo Sync OG Image](./OGimg.png)
 
+> 비전공자도 전체 구조와 기능을 쉽게 볼 수 있는 문서는 [README_NON_TECH.md](./README_NON_TECH.md)를 참고하세요.
+
 BIM Photo Sync는 Revit Room을 기준 객체로 삼아 현장 사진, 작업 메모, AI 분석 결과를 프로젝트 단위로 연결하는 BIM 기반 현장 사진 관리 플랫폼입니다. 현장에 없던 사람도 웹, 모바일 앱, Revit Add-in에서 특정 방의 시공 상태를 시간순으로 확인할 수 있게 만드는 것이 핵심 목적입니다.
 
 ## 현재 MVP 범위
