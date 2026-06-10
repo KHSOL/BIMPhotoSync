@@ -32,8 +32,8 @@ type PhotoForAnalysis = {
   } | null;
 };
 
-type GeminiInlineData = {
-  mime_type: string;
+type InlineImageData = {
+  mimeType: string;
   data: string;
 };
 
@@ -55,52 +55,48 @@ const surfaceValues = new Set<string>(Object.values(WorkSurface));
 const progressValues = new Set<string>(Object.values(ProgressStatus));
 
 async function analyze(photo: PhotoForAnalysis): Promise<AnalysisResult> {
-  const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey) return inferHeuristic(photo, "GEMINI_API_KEY is not configured.");
+  const apiKey = process.env.OPENAI_API_KEY;
+  if (!apiKey) return inferHeuristic(photo, "OPENAI_API_KEY is not configured.");
 
   try {
     const image = await readImageInlineData(photo);
-    const modelName = process.env.GEMINI_VISION_MODEL ?? "gemini-3.1-flash-lite";
-    const reviewExamples = await loadReviewExamples();
-    const prompt = [
-      "너는 BIM 현장 사진 분석 담당자다.",
-      "아래 사진과 메타데이터를 근거로 한국어 JSON만 반환한다. Markdown은 금지한다.",
-      "JSON 필드: summary, detected_trade, detected_surface, progress_status, confidence, observations.",
-      "enum 값은 반드시 허용 목록 중 하나만 사용한다.",
-      "공정 상태 규칙: 작업 흔적이 명확하면 IN_PROGRESS, 메모나 시각적 근거가 완료이면 COMPLETED, 문제/중단/차단이면 BLOCKED, 확신이 낮으면 PENDING_REVIEW.",
-      "관리자 검토 완료 사례가 있으면 같은 기준을 우선 적용한다.",
-      `관리자 검토 사례:\n${reviewExamples}`,
-      `방: ${photo.room?.levelName ?? "-"} / ${photo.room?.roomNumber ?? ""} ${photo.room?.roomName ?? ""}`,
-      `입력 공종: ${photo.trade}`,
-      `입력 공사면: ${photo.workSurface}`,
-      `작업자 메모: ${photo.description ?? ""}`,
-      `허용 공종: ${Object.values(Trade).join(", ")}`,
-      `허용 공사면: ${Object.values(WorkSurface).join(", ")}`,
-      `허용 공정상태: ${Object.values(ProgressStatus).join(", ")}`
-    ].join("\n");
-
-    const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${apiKey}`, {
+    const modelName = openAIModelName();
+    const res = await fetch("https://api.openai.com/v1/responses", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${apiKey}`
+      },
       body: JSON.stringify({
-        generationConfig: {
-          temperature: 0.1,
-          response_mime_type: "application/json"
-        },
-        contents: [{ role: "user", parts: [{ text: prompt }, { inline_data: image }] }]
+        model: modelName,
+        input: [
+          {
+            role: "user",
+            content: [
+              { type: "input_text", text: buildPhotoAnalysisPrompt(photo) },
+              { type: "input_image", image_url: `data:${image.mimeType};base64,${image.data}` }
+            ]
+          }
+        ],
+        text: { format: { type: "json_object" } },
+        max_output_tokens: 900
       })
     });
 
-    if (!res.ok) throw new Error(`Gemini photo analysis failed: ${res.status} ${await res.text()}`);
+    if (!res.ok) throw new Error(`OpenAI photo analysis failed: ${res.status} ${await res.text()}`);
 
-    const json = (await res.json()) as { candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }> };
-    const text = json.candidates?.[0]?.content?.parts?.map((part) => part.text ?? "").join("") ?? "{}";
-    const parsed = parseJsonObject(text);
-    const summary = typeof parsed.summary === "string" && parsed.summary.trim() ? parsed.summary.trim() : "사진 기준 현장 상태를 분석했습니다.";
+    const parsed = parseJsonObject(openAIResponseText((await res.json()) as unknown));
+    const summary = stringValue(parsed.summary)
+      || (photo.description?.trim()
+        ? `현장 사진과 작업자 메모를 참고하여 ${photo.description.trim()} 상태로 분석했습니다.`
+        : "사진을 기준으로 현장 상태를 분석했으며, 세부 판단은 관리자 검토가 필요합니다.");
     const detectedTrade = enumValue(parsed.detected_trade, tradeValues, photo.trade);
     const detectedSurface = enumValue(parsed.detected_surface, surfaceValues, photo.workSurface);
-    const progressStatus = enumValue(parsed.progress_status, progressValues, inferProgressStatus(photo.description));
+    const progressStatus = inferProgressStatus(photo.description ?? "") === ProgressStatus.COMPLETED
+      ? ProgressStatus.COMPLETED
+      : enumValue(parsed.progress_status, progressValues, inferProgressStatus(`${summary} ${photo.description ?? ""}`));
     const confidence = clampConfidence(parsed.confidence);
+    const observations = stringArray(parsed.observations);
 
     return {
       summary,
@@ -114,56 +110,36 @@ async function analyze(photo: PhotoForAnalysis): Promise<AnalysisResult> {
         detected_surface: detectedSurface,
         progress_status: progressStatus,
         confidence,
-        observations: Array.isArray(parsed.observations) ? parsed.observations : [],
-        review_examples_used: reviewExamples !== "검토 사례 없음"
+        observations,
+        review_required: booleanValue(parsed.review_required) ?? confidence < 0.75,
+        worker_note_used_as_reference: photo.description ?? null
       },
-      modelProvider: AiProvider.GEMINI,
+      modelProvider: AiProvider.OPENAI,
       modelName,
-      promptVersion: "gemini-vision-v2-review-examples",
-      requiresHumanReview: confidence < 0.82
+      promptVersion: "openai-vision-v1",
+      requiresHumanReview: confidence < 0.75
     };
   } catch (error) {
-    return inferHeuristic(photo, error instanceof Error ? error.message : "Gemini photo analysis failed.");
+    return inferHeuristic(photo, error instanceof Error ? error.message : "OpenAI photo analysis failed.");
   }
 }
 
-async function readImageInlineData(photo: PhotoForAnalysis): Promise<GeminiInlineData> {
+async function readImageInlineData(photo: PhotoForAnalysis): Promise<InlineImageData> {
   const object = await s3.send(new GetObjectCommand({ Bucket: bucket, Key: photo.objectKey }));
   const chunks: Buffer[] = [];
   for await (const chunk of object.Body as AsyncIterable<Uint8Array>) {
     chunks.push(Buffer.from(chunk));
   }
   return {
-    mime_type: object.ContentType ?? photo.mimeType,
+    mimeType: object.ContentType ?? photo.mimeType,
     data: Buffer.concat(chunks).toString("base64")
   };
-}
-
-async function loadReviewExamples() {
-  const rows = await prisma.photoAiAnalysis.findMany({
-    where: { reviewedAt: { not: null } },
-    orderBy: { reviewedAt: "desc" },
-    take: 6,
-    select: {
-      summary: true,
-      detectedTrade: true,
-      detectedSurface: true,
-      progressStatus: true
-    }
-  });
-  if (rows.length === 0) return "검토 사례 없음";
-  return rows
-    .map(
-      (row, index) =>
-        `${index + 1}. summary=${row.summary}; detected_trade=${row.detectedTrade ?? "-"}; detected_surface=${row.detectedSurface ?? "-"}; progress_status=${row.progressStatus}`
-    )
-    .join("\n");
 }
 
 function inferHeuristic(photo: PhotoForAnalysis, fallbackReason?: string): AnalysisResult {
   const progressStatus = inferProgressStatus(`${photo.description ?? ""} ${photo.trade} ${photo.workSurface}`);
   const summary = photo.description?.trim()
-    ? `현장 메모 기준으로 "${photo.description.trim()}" 상태로 판단됩니다.`
+    ? `현장 메모를 참고하여 "${photo.description.trim()}" 상태로 임시 분석했습니다. 사진 재분석이 필요합니다.`
     : `${photo.workSurface} 면의 ${photo.trade} 작업 사진으로 등록되었습니다. 관리자 검토가 필요합니다.`;
   const notes = ["Heuristic fallback analysis. Manager review required.", fallbackReason].filter((note): note is string => Boolean(note));
 
@@ -187,6 +163,29 @@ function inferHeuristic(photo: PhotoForAnalysis, fallbackReason?: string): Analy
   };
 }
 
+function openAIModelName() {
+  return process.env.OPENAI_PHOTO_ANALYSIS_MODEL ?? process.env.OPENAI_REPORT_MODEL ?? "gpt-5.5-2026-04-23";
+}
+
+function buildPhotoAnalysisPrompt(photo: PhotoForAnalysis) {
+  const room = photo.room ? `${photo.room.levelName ?? ""} ${photo.room.roomNumber ?? ""} ${photo.room.roomName}`.trim() : "selected room";
+  const note = photo.description?.trim() || "no worker note";
+  return [
+    "You are the BIM Photo Sync construction photo quality reviewer.",
+    "Prioritize the actual image evidence. Use worker-entered text only as reference context.",
+    "Do not assert details that cannot be confirmed from the image. Mark uncertain cases as review_required.",
+    "Return only a JSON object in Korean.",
+    `Room: ${room}`,
+    `Selected work surface: ${photo.workSurface}`,
+    `Selected trade: ${photo.trade}`,
+    `Worker note: ${note}`,
+    `Allowed trades: ${Object.values(Trade).join(", ")}`,
+    `Allowed work surfaces: ${Object.values(WorkSurface).join(", ")}`,
+    `Allowed progress statuses: ${Object.values(ProgressStatus).join(", ")}`,
+    "Fields: summary(string, Korean one or two sentences), detected_trade(one allowed trade), detected_surface(one allowed surface), progress_status(one allowed progress status), confidence(number 0-1), observations(string array), review_required(boolean)."
+  ].join("\n");
+}
+
 function inferProgressStatus(textValue: string | null | undefined) {
   const text = (textValue ?? "").toLowerCase();
   if (text.includes("완료") || text.includes("completed") || text.includes("done")) return ProgressStatus.COMPLETED;
@@ -194,9 +193,26 @@ function inferProgressStatus(textValue: string | null | undefined) {
   return ProgressStatus.IN_PROGRESS;
 }
 
+function openAIResponseText(value: unknown): string {
+  if (!isRecord(value)) return "";
+  const outputText = stringValue(value.output_text);
+  if (outputText) return outputText;
+  const output = Array.isArray(value.output) ? value.output : [];
+  return output.map((item) => {
+    if (!isRecord(item)) return "";
+    const content = Array.isArray(item.content) ? item.content : [];
+    return content.map((part) => {
+      if (!isRecord(part)) return "";
+      return stringValue(part.text) || stringValue(part.output_text) || "";
+    }).join("");
+  }).join("").trim();
+}
+
 function parseJsonObject(text: string) {
   const cleaned = text.replace(/^```json\s*/i, "").replace(/^```\s*/i, "").replace(/```$/i, "").trim();
-  return JSON.parse(cleaned) as Record<string, unknown>;
+  const parsed = JSON.parse(cleaned) as unknown;
+  if (!isRecord(parsed)) throw new Error("OpenAI photo analysis returned a non-object JSON value.");
+  return parsed;
 }
 
 function enumValue(value: unknown, allowed: Set<string>, fallback: string) {
@@ -207,6 +223,22 @@ function clampConfidence(value: unknown) {
   const numberValue = typeof value === "number" ? value : Number(value);
   if (!Number.isFinite(numberValue)) return 0.7;
   return Math.min(0.99, Math.max(0.01, numberValue));
+}
+
+function stringValue(value: unknown) {
+  return typeof value === "string" ? value.trim() : "";
+}
+
+function booleanValue(value: unknown) {
+  return typeof value === "boolean" ? value : null;
+}
+
+function stringArray(value: unknown) {
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string" && item.trim().length > 0) : [];
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 new Worker(
@@ -228,13 +260,16 @@ new Worker(
           detectedTrade: result.detectedTrade,
           detectedSurface: result.detectedSurface,
           progressStatus: result.progressStatus,
-          confidence: result.confidence,
+          confidence: new Prisma.Decimal(result.confidence),
           requiresHumanReview: result.requiresHumanReview
         }
       }),
       prisma.photo.update({
         where: { id: photoId },
-        data: { aiDescription: result.summary, progressStatus: result.progressStatus }
+        data: {
+          aiDescription: result.summary,
+          progressStatus: result.progressStatus
+        }
       })
     ]);
     return result.resultJson;
@@ -242,4 +277,4 @@ new Worker(
   { connection }
 );
 
-console.log("BIM Photo Sync AI worker listening on photo-ai queue");
+console.log("BIM Photo Sync AI worker listening on photo-ai queue with OpenAI image analysis");

@@ -57,7 +57,7 @@ flowchart LR
   API --> DB[("PostgreSQL\nPrisma schema")]
   API --> Storage["S3-compatible Object Storage\nCloudflare R2 production"]
   API --> Queue["Redis + BullMQ\nphoto-analysis queue"]
-  Queue --> Worker["AI Worker\nGemini vision/heuristic analysis"]
+  Queue --> Worker["AI Worker\nOpenAI vision/heuristic analysis"]
   Worker --> DB
   API --> Revit
 ```
@@ -184,7 +184,7 @@ Dynamo를 후속 도구로 추가한다면 Room 파라미터 점검, 누락 Room
 | Render | NestJS API와 Redis-compatible Key Value 배포 후보 | Railway를 쓰지 않을 때의 대체 배포 경로입니다. 무료 플랜에서는 API Web Service 안에서 `RUN_INLINE_AI_WORKER=true`로 AI 분석 worker를 함께 실행합니다. |
 | Supabase | 운영 PostgreSQL 후보 | Prisma가 연결하는 canonical DB로 사용 가능합니다. Auth/Storage는 현재 자체 JWT/S3 흐름과 역할이 겹치므로 선택적으로만 사용합니다. |
 | Cloudflare R2 | 운영 Object Storage 후보 | S3-compatible API로 presigned URL 업로드/다운로드를 처리합니다. |
-| AI provider APIs | 사진 분석과 리포트 생성 AI | 사진 분석 worker는 `GEMINI_API_KEY`가 설정되면 R2 원본 사진을 읽어 분석합니다. 보고서 생성은 화면에서 선택한 Gemini/OpenAI/Claude provider를 사용하며 각각 `GEMINI_API_KEY`, `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`를 참조합니다. |
+| AI provider APIs | 사진 분석과 리포트 생성 AI | 사진 분석 worker는 `OPENAI_API_KEY`가 설정되면 R2 원본 사진을 읽어 OpenAI vision으로 분석하고 작업자 입력 내용은 참고 정보로만 사용합니다. 보고서 생성은 화면에서 선택한 Gemini/OpenAI/Claude provider를 사용하며 각각 `GEMINI_API_KEY`, `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`를 참조합니다. |
 | Redis | 비동기 작업 큐 | BullMQ가 사진 AI 분석 job을 저장하고 worker가 처리합니다. |
 | Autodesk Revit | BIM authoring 및 Room 기준 인터페이스 | Add-in이 Room ID를 쓰고 선택된 Room의 사진을 조회합니다. |
 | Autodesk Dynamo | 자동화 보조 후보 | 현재 구현에는 포함되지 않습니다. |
@@ -225,7 +225,7 @@ flowchart TB
 - DB는 모바일 프로젝트 사진 목록과 웹 사진 필터 조회를 빠르게 하기 위해 `photos(project_id, status, work_date desc, uploaded_at desc)` 인덱스를 사용합니다. 업로드 presign 정리와 중복 commit 확인을 위해 `photo_uploads(project_id, committed_at, expires_at)` 인덱스도 유지합니다.
 - CI는 `.github/workflows/ci.yml`에서 `npm ci`, `npm run typecheck`, `npm run build`를 실행합니다.
 
-Railway 새 프로젝트 생성 후 `DATABASE_URL`, `REDIS_URL`, `S3_ENDPOINT`, `S3_BUCKET`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`, `JWT_SECRET`, `CORS_ORIGINS`, `API_PUBLIC_URL`를 Dashboard에서 입력합니다. `DIRECT_URL`이 있으면 Prisma migration에 사용하고, 없으면 API 컨테이너가 `DATABASE_URL`을 fallback으로 사용합니다. 사진 업로드 후 AI 요약은 API 서비스 안의 inline worker가 `RUN_INLINE_AI_WORKER=true`일 때 실행하며, `OPENAI_API_KEY`와 `OPENAI_PHOTO_ANALYSIS_MODEL` 또는 `OPENAI_REPORT_MODEL`을 사용해 실제 사진 이미지를 분석하고 작업자 입력 내용은 참고 정보로만 반영합니다. OpenAI 설정이 없거나 분석 호출이 실패하면 휴리스틱 요약으로 fallback합니다. 보고서 생성 화면에서는 Gemini, OpenAI, Claude 중 사용할 AI를 선택할 수 있으며, API 서비스에는 `GEMINI_API_KEY`, `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`와 `GEMINI_REPORT_MODEL`, `OPENAI_REPORT_MODEL`, `ANTHROPIC_REPORT_MODEL`, `REPORT_MODEL_PROVIDER`를 설정합니다. 현재 기본 보고서 provider는 `REPORT_MODEL_PROVIDER`가 없을 때 `GEMINI`이고 기본 모델은 Gemini `gemini-3.5-flash`, OpenAI `gpt-5.5-2026-04-23`, Anthropic `claude-opus-4-8`입니다. Render를 대체 배포로 쓸 경우에는 `render.yaml` Blueprint를 사용할 수 있으며, 무료 플랜에서는 별도 Background Worker가 없으므로 API 서비스 안에서 `RUN_INLINE_AI_WORKER=true`로 inline 분석을 함께 실행하는 구성이 현실적입니다.
+Railway 새 프로젝트 생성 후 `DATABASE_URL`, `REDIS_URL`, `S3_ENDPOINT`, `S3_BUCKET`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`, `JWT_SECRET`, `CORS_ORIGINS`, `API_PUBLIC_URL`를 Dashboard에서 입력합니다. `DIRECT_URL`이 있으면 Prisma migration에 사용하고, 없으면 API 컨테이너가 `DATABASE_URL`을 fallback으로 사용합니다. 사진 업로드 후 AI 요약은 별도 AI worker 또는 API 서비스 안의 inline worker가 `photo-ai` 큐를 처리할 때 실행하며, `OPENAI_API_KEY`와 `OPENAI_PHOTO_ANALYSIS_MODEL` 또는 `OPENAI_REPORT_MODEL`을 사용해 실제 사진 이미지를 분석하고 작업자 입력 내용은 참고 정보로만 반영합니다. OpenAI 설정이 없거나 분석 호출이 실패하면 휴리스틱 요약으로 fallback합니다. 보고서 생성 화면에서는 Gemini, OpenAI, Claude 중 사용할 AI를 선택할 수 있으며, API 서비스에는 `GEMINI_API_KEY`, `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`와 `GEMINI_REPORT_MODEL`, `OPENAI_REPORT_MODEL`, `ANTHROPIC_REPORT_MODEL`, `REPORT_MODEL_PROVIDER`를 설정합니다. 현재 기본 보고서 provider는 `REPORT_MODEL_PROVIDER`가 없을 때 `GEMINI`이고 기본 모델은 Gemini `gemini-3.5-flash`, OpenAI `gpt-5.5-2026-04-23`, Anthropic `claude-opus-4-8`입니다. Render를 대체 배포로 쓸 경우에는 `render.yaml` Blueprint를 사용할 수 있으며, 무료 플랜에서는 별도 Background Worker가 없으므로 API 서비스 안에서 `RUN_INLINE_AI_WORKER=true`로 inline 분석을 함께 실행하는 구성이 현실적입니다.
 
 ## Local Development
 
