@@ -49,6 +49,7 @@ export default function PhotosPage() {
     work_surface: "FLOOR",
     trade: "WATERPROOF",
     trade_category_id: "",
+    work_date: todayValue(),
     description: ""
   });
   const [status, setStatus] = useState("로그인 후 프로젝트와 방을 선택하세요.");
@@ -214,6 +215,7 @@ export default function PhotosPage() {
     setStatus(`${files.length}개 사진을 업로드하는 중입니다.`);
     try {
       let lastCommitted: Photo | null = null;
+      const workDate = uploadMeta.work_date || todayValue();
       for (const uploadFile of files) {
         const mime = uploadFile.type || "image/jpeg";
         const presign = await apiJson<PresignResult>("/uploads/photos/presign", {
@@ -234,7 +236,7 @@ export default function PhotosPage() {
             ...uploadMeta,
             trade: legacyTradeValue(uploadMeta.trade),
             trade_category_id: uploadMeta.trade_category_id || undefined,
-            work_date: uploadedAt.toISOString().slice(0, 10),
+            work_date: workDate,
             worker_name: user?.name || undefined,
             taken_at: uploadedAt.toISOString()
           })
@@ -400,6 +402,8 @@ export default function PhotosPage() {
                   <div className="detail-photo">{selectedPhoto.preview_url ? <img src={selectedPhoto.preview_url} alt={selectedPhoto.description ?? "선택 사진"} /> : <div className="photo-fallback" />}</div>
                   <dl className="meta-list">
                     <dt>작업일자</dt><dd>{selectedPhoto.work_date}</dd>
+                    <dt>업로드 일시</dt><dd>{formatDateTime(selectedPhoto.uploaded_at)}</dd>
+                    <dt>촬영 일시</dt><dd>{formatDateTime(selectedPhoto.taken_at)}</dd>
                     <dt>공종</dt><dd>{selectedPhoto.trade_category?.label ?? labelForOption(defaultTradeOptions, selectedPhoto.trade)}</dd>
                     <dt>공사면</dt><dd>{labelForOption(defaultSurfaceOptions, selectedPhoto.work_surface)}</dd>
                     <dt>작업자</dt><dd>{selectedPhoto.worker_name ?? "-"}</dd>
@@ -443,7 +447,7 @@ export default function PhotosPage() {
 
       {activeTab === "upload" ? (
         <section className="panel">
-          <div className="panel-header"><div><h2 className="panel-title">사진 업로드</h2><p className="muted">작업일자와 작성자는 업로드 시점과 로그인 사용자로 자동 저장됩니다.</p></div><UploadCloud size={18} color="#2563eb" /></div>
+          <div className="panel-header"><div><h2 className="panel-title">사진 업로드</h2><p className="muted">작업일자는 과거 사진 등록을 위해 직접 선택하고, 작성자는 로그인 사용자로 저장됩니다.</p></div><UploadCloud size={18} color="#2563eb" /></div>
           <div className="upload-grid">
             <Field label="프로젝트명">
               <select className="input" value={projectId} onChange={(event) => changeProject(event.target.value)}>
@@ -475,13 +479,16 @@ export default function PhotosPage() {
                 {uploadTradeOptions.map((trade) => <option key={trade.value} value={trade.value}>{trade.label}</option>)}
               </select>
             </Field>
+            <Field label="작업일자">
+              <input className="input" type="date" value={uploadMeta.work_date} onChange={(event) => setUploadMeta({ ...uploadMeta, work_date: event.target.value })} />
+            </Field>
             <label className="field upload-note"><span className="label">내용</span><textarea className="input textarea" value={uploadMeta.description} onChange={(event) => setUploadMeta({ ...uploadMeta, description: event.target.value })} /></label>
             <Field label="사진">
               <input className="input file-input" type="file" accept="image/*" multiple onChange={(event) => setFiles(Array.from(event.target.files ?? []))} />
             </Field>
             <div className="fixed-upload-meta">
-              <span className="label">작업일자 / 작성자</span>
-              <strong>업로드 시점 자동 저장</strong>
+              <span className="label">작성자</span>
+              <strong>로그인 사용자로 저장</strong>
               <small>{user?.name ?? "로그인 사용자"}</small>
             </div>
             <button className="button upload-button" disabled={uploading} onClick={() => uploadPhoto().catch((err: Error) => setStatus(err.message))} type="button">
@@ -550,6 +557,24 @@ function photoDownloadName(photo: Photo, rooms: Room[]) {
   const location = photoLocationLabel(photo, rooms).replace(/[\\/:*?"<>|\s]+/g, "_");
   const extension = photo.photo_url.toLowerCase().includes(".png") ? "png" : "jpg";
   return `${location || "photo"}_${photo.work_date}_${photo.id.slice(0, 8)}.${extension}`;
+}
+
+function formatDateTime(value?: string | null) {
+  if (!value) return "-";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return new Intl.DateTimeFormat("ko-KR", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit"
+  }).format(date);
+}
+
+function todayValue() {
+  return new Date().toISOString().slice(0, 10);
 }
 
 function isNonEmptyString(value: unknown): value is string {

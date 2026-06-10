@@ -266,18 +266,18 @@ export class PhotosService {
 }
 
 function inferInitialProgressStatus(description: string | undefined) {
-  return includesCompletionKeyword(description) ? ProgressStatus.COMPLETED : ProgressStatus.PENDING_REVIEW;
-}
-
-function includesCompletionKeyword(text: string | null | undefined) {
-  const normalized = text?.trim().toLowerCase() ?? "";
-  return normalized.includes("완료") || normalized.includes("completed") || normalized.includes("done");
+  return includesCompletionKeywordSafe(description) ? ProgressStatus.COMPLETED : ProgressStatus.PENDING_REVIEW;
 }
 
 function displayProgressStatus(photo: Pick<Photo, "progressStatus" | "description" | "aiDescription">) {
   if (photo.progressStatus === ProgressStatus.COMPLETED) return ProgressStatus.COMPLETED;
   const note = `${photo.description ?? ""} ${photo.aiDescription ?? ""}`;
-  return includesCompletionKeyword(note) ? ProgressStatus.COMPLETED : photo.progressStatus;
+  return includesCompletionKeywordSafe(note) ? ProgressStatus.COMPLETED : photo.progressStatus;
+}
+
+function includesCompletionKeywordSafe(text: string | null | undefined) {
+  const normalized = text?.trim().toLowerCase() ?? "";
+  return normalized.includes("\uC644\uB8CC") || normalized.includes("completed") || normalized.includes("done");
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -307,6 +307,7 @@ export function toPhotoResponse(photo: Photo & { room?: unknown; tradeCategory?:
     object_key: photo.objectKey,
     photo_url: `${publicBase}/api/v1/photos/${photo.id}/object`,
     uploaded_at: photo.uploadedAt,
+    taken_at: photo.takenAt,
     room: photo.room,
     latest_analysis: photo.analyses?.[0] ?? null
   };

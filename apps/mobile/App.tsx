@@ -80,6 +80,7 @@ export default function App() {
   const [meta, setMeta] = useState<UploadMeta>({
     work_surface: "FLOOR",
     trade: "OTHER",
+    work_date: todayValue(),
     description: ""
   });
 
@@ -394,6 +395,11 @@ export default function App() {
       return;
     }
 
+    if (!isDateInput(meta.work_date)) {
+      Alert.alert("작업일자 확인", "작업일자를 YYYY-MM-DD 형식으로 입력하세요.");
+      return;
+    }
+
     setUploading(true);
     try {
       for (const image of images) {
@@ -417,9 +423,10 @@ export default function App() {
             upload_id: presign.data.upload_id,
             work_surface: meta.work_surface,
             trade: meta.trade,
-            work_date: todayValue(),
+            work_date: meta.work_date,
             worker_name: user?.name ?? "",
-            description: meta.description
+            description: meta.description,
+            taken_at: new Date().toISOString()
           })
         });
       }
@@ -459,7 +466,7 @@ export default function App() {
     setPassword("");
     setTab("home");
     setStatus("로그아웃했습니다.");
-    setMeta({ work_surface: "FLOOR", trade: "OTHER", description: "" });
+    setMeta({ work_surface: "FLOOR", trade: "OTHER", work_date: todayValue(), description: "" });
   }
 
   function openRoomPicker() {
@@ -862,6 +869,7 @@ function PhotoDetailScreen({
       <View style={styles.card}>
         <InfoRow label="올린 사람" value={photo.worker_name?.trim() || "기록 없음"} />
         <InfoRow label="올린 시간" value={formatDateTime(photo.uploaded_at)} />
+        <InfoRow label="촬영 시간" value={formatDateTime(photo.taken_at)} />
         <InfoRow label="작업일" value={photo.work_date || "기록 없음"} />
         <InfoRow label="공사면" value={labelFor(surfaces, photo.work_surface)} />
         <InfoRow label="공종" value={labelFor(trades, photo.trade)} />
@@ -1049,6 +1057,14 @@ function UploadScreen(props: {
         </Pressable>
         <Selector label="공사면" value={props.meta.work_surface} values={surfaces} onChange={(work_surface) => props.setMeta((current) => ({ ...current, work_surface: work_surface as SurfaceCode }))} />
         <Selector label="공종" value={props.meta.trade} values={trades} onChange={(trade) => props.setMeta((current) => ({ ...current, trade: trade as TradeCode }))} />
+        <Input
+          label="작업일자"
+          value={props.meta.work_date}
+          onChangeText={(work_date) => props.setMeta((current) => ({ ...current, work_date }))}
+          placeholder="YYYY-MM-DD"
+          autoCapitalize="none"
+          autoCorrect={false}
+        />
         <Input
           label="내용"
           value={props.meta.description}
@@ -1449,8 +1465,15 @@ function formatDateTime(value?: string | null) {
     month: "2-digit",
     day: "2-digit",
     hour: "2-digit",
-    minute: "2-digit"
+    minute: "2-digit",
+    second: "2-digit"
   }).format(date);
+}
+
+function isDateInput(value: string) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const date = new Date(`${value}T00:00:00Z`);
+  return !Number.isNaN(date.getTime()) && date.toISOString().slice(0, 10) === value;
 }
 
 function photoDownloadFilename(photo: Photo, rooms: Room[]) {

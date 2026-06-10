@@ -229,6 +229,7 @@ export type Photo = {
   progress_status: string;
   photo_url: string;
   uploaded_at: string;
+  taken_at?: string | null;
   room?: Room;
   preview_url?: string;
   latest_analysis?: {
