@@ -340,7 +340,7 @@ export class ReportsService {
     return this.prisma.photo.findMany({
       where,
       include: { room: true, tradeCategory: true, analyses: { orderBy: { createdAt: "desc" }, take: 1 } },
-      orderBy: [{ workDate: "asc" }, { takenAt: "asc" }, { uploadedAt: "asc" }],
+      orderBy: [{ workDate: "asc" }, { takenAt: "asc" }, { uploadedAt: "asc" }, { id: "asc" }],
       take: 120
     });
   }
@@ -758,13 +758,17 @@ function buildHeuristicChatAnswer(message: string, dto: ReportChatDto, photos: P
 
 function sortPhotosForReport(photos: PhotoForReport[]) {
   return [...photos].sort((a, b) => {
+    const firstTakenTime = a.takenAt?.getTime() ?? a.uploadedAt.getTime();
+    const secondTakenTime = b.takenAt?.getTime() ?? b.uploadedAt.getTime();
     return (
+      a.workDate.getTime() - b.workDate.getTime() ||
+      firstTakenTime - secondTakenTime ||
+      a.uploadedAt.getTime() - b.uploadedAt.getTime() ||
+      a.id.localeCompare(b.id) ||
       roomLabel(a).localeCompare(roomLabel(b), "ko-KR") ||
       a.workSurface.localeCompare(b.workSurface) ||
-      a.workDate.getTime() - b.workDate.getTime() ||
       a.trade.localeCompare(b.trade) ||
-      (a.workerName ?? "").localeCompare(b.workerName ?? "", "ko-KR") ||
-      a.uploadedAt.getTime() - b.uploadedAt.getTime()
+      (a.workerName ?? "").localeCompare(b.workerName ?? "", "ko-KR")
     );
   });
 }
@@ -1048,6 +1052,8 @@ function renderDocx(content: ReportContent, images: ReportImage[] = []) {
     ...mediaEntries
   ]).map((entry) => entry.path === "[Content_Types].xml"
     ? { ...entry, content: textBuffer(ensureWordImageContentTypes(entry.content.toString("utf8"), images)) }
+    : entry.path === "word/styles.xml"
+      ? { ...entry, content: textBuffer(ensureWordStylesFont(entry.content.toString("utf8"))) }
     : entry);
 
   return zipStore(entries);
@@ -1057,7 +1063,7 @@ function patchWordTemplateDocument(xml: string, content: ReportContent, images: 
   const withText = replaceWordTextNodes(xml, wordTemplateTextReplacements(content));
   const withWorkLog = replaceTemplateWorkLogTable(withText, content);
   const withDynamicPhotoSection = replaceTemplatePhotoSection(withWorkLog, content, images);
-  return ensureWordDrawingNamespaces(withDynamicPhotoSection);
+  return ensureWordDocumentFonts(ensureWordDrawingNamespaces(withDynamicPhotoSection));
 }
 
 function replaceWordTextNodes(xml: string, replacements: Map<number, string>) {
@@ -1457,6 +1463,7 @@ type WordTextOptions = {
 };
 
 function buildWorkLogRows(content: ReportContent) {
+  const photoOrder = new Map(content.comparison_photos.map((photo, index) => [photo.photo_id, index]));
   const rows = content.work_log?.length
     ? content.work_log
     : content.comparison_photos.map((photo) => ({
@@ -1477,7 +1484,11 @@ function buildWorkLogRows(content: ReportContent) {
 
   return rows
     .filter((row) => row.date || row.work_item || row.work_detail || row.note)
-    .sort((a, b) => a.date.localeCompare(b.date) || a.photo_id.localeCompare(b.photo_id))
+    .sort((a, b) => {
+      const firstOrder = photoOrder.get(a.photo_id) ?? Number.MAX_SAFE_INTEGER;
+      const secondOrder = photoOrder.get(b.photo_id) ?? Number.MAX_SAFE_INTEGER;
+      return firstOrder - secondOrder || a.date.localeCompare(b.date) || a.photo_id.localeCompare(b.photo_id);
+    })
     .map((row) => ({
       date: formatKoreanDateWithWeekday(row.date),
       item: row.work_item || "현장 사진 기록",
@@ -1597,7 +1608,25 @@ function wordParagraph(text: string, options: WordTextOptions = {}) {
   const bold = options.bold ? "<w:b/>" : "";
   const color = options.color ? `<w:color w:val="${options.color}"/>` : "";
   const size = `<w:sz w:val="${options.size ?? 20}"/>`;
-  return `<w:p><w:pPr>${align}${spacing}</w:pPr><w:r><w:rPr>${bold}${color}${size}</w:rPr><w:t xml:space="preserve">${xmlEscape(text)}</w:t></w:r></w:p>`;
+  return `<w:p><w:pPr>${align}${spacing}</w:pPr><w:r><w:rPr>${wordRunFonts()}${bold}${color}${size}</w:rPr><w:t xml:space="preserve">${xmlEscape(text)}</w:t></w:r></w:p>`;
+}
+
+function ensureWordDocumentFonts(xml: string) {
+  return xml.replace(/<w:rPr\b([^>]*)>([\s\S]*?)<\/w:rPr>/g, (match, attributes: string, body: string) => {
+    if (body.includes("<w:rFonts")) return match;
+    return `<w:rPr${attributes}>${wordRunFonts()}${body}</w:rPr>`;
+  });
+}
+
+function ensureWordStylesFont(xml: string) {
+  let current = ensureWordDocumentFonts(xml);
+  if (!current.includes("<w:docDefaults>")) {
+    current = current.replace("<w:styles", `<w:styles`).replace(
+      /(<w:styles\b[^>]*>)/,
+      `$1<w:docDefaults><w:rPrDefault><w:rPr>${wordRunFonts()}<w:sz w:val="20"/></w:rPr></w:rPrDefault></w:docDefaults>`
+    );
+  }
+  return current;
 }
 
 function wordImageParagraph(relId: string, name: string, cx: number, cy: number) {
@@ -2302,11 +2331,11 @@ function columnName(index: number) {
 
 function paragraph(text: string, style?: "Title" | "Heading1") {
   const styleXml = style ? `<w:pPr><w:pStyle w:val="${style}"/></w:pPr>` : "";
-  return `<w:p>${styleXml}<w:r><w:t xml:space="preserve">${xmlEscape(text)}</w:t></w:r></w:p>`;
+  return `<w:p>${styleXml}<w:r><w:rPr>${wordRunFonts()}</w:rPr><w:t xml:space="preserve">${xmlEscape(text)}</w:t></w:r></w:p>`;
 }
 
 function tableXml(rows: string[][]) {
-  return `<w:tbl><w:tblPr><w:tblW w:w="0" w:type="auto"/></w:tblPr>${rows.map((row) => `<w:tr>${row.map((cell) => `<w:tc><w:p><w:r><w:t xml:space="preserve">${xmlEscape(cell)}</w:t></w:r></w:p></w:tc>`).join("")}</w:tr>`).join("")}</w:tbl>`;
+  return `<w:tbl><w:tblPr><w:tblW w:w="0" w:type="auto"/></w:tblPr>${rows.map((row) => `<w:tr>${row.map((cell) => `<w:tc><w:p><w:r><w:rPr>${wordRunFonts()}</w:rPr><w:t xml:space="preserve">${xmlEscape(cell)}</w:t></w:r></w:p></w:tc>`).join("")}</w:tr>`).join("")}</w:tbl>`;
 }
 
 function contentTypesDocx() {
@@ -2325,7 +2354,11 @@ function rootRels(kind: string, target: string) {
 }
 
 function wordStyles() {
-  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:style w:type="paragraph" w:styleId="Title"><w:name w:val="Title"/><w:rPr><w:b/><w:sz w:val="36"/></w:rPr></w:style><w:style w:type="paragraph" w:styleId="Heading1"><w:name w:val="heading 1"/><w:rPr><w:b/><w:sz w:val="28"/></w:rPr></w:style></w:styles>`;
+  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:docDefaults><w:rPrDefault><w:rPr>${wordRunFonts()}<w:sz w:val="20"/></w:rPr></w:rPrDefault></w:docDefaults><w:style w:type="paragraph" w:styleId="Title"><w:name w:val="Title"/><w:rPr>${wordRunFonts()}<w:b/><w:sz w:val="36"/></w:rPr></w:style><w:style w:type="paragraph" w:styleId="Heading1"><w:name w:val="heading 1"/><w:rPr>${wordRunFonts()}<w:b/><w:sz w:val="28"/></w:rPr></w:style></w:styles>`;
+}
+
+function wordRunFonts() {
+  return '<w:rFonts w:ascii="Malgun Gothic" w:hAnsi="Malgun Gothic" w:eastAsia="Malgun Gothic" w:cs="Malgun Gothic"/>';
 }
 
 function zipStore(entries: ZipEntry[]) {

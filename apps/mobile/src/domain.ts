@@ -61,6 +61,7 @@ export type Photo = {
   progress_status: string;
   photo_url: string;
   uploaded_at: string;
+  taken_at?: string | null;
   room?: Room;
 };
 
@@ -81,6 +82,7 @@ export type AuthResponse = {
 export type UploadMeta = {
   work_surface: SurfaceCode;
   trade: TradeCode;
+  work_date: string;
   description: string;
 };
 
